@@ -1,0 +1,92 @@
+{
+  "name": "@juspay/yama",
+  "version": "1.0.0",
+  "description": "Enterprise-grade Pull Request automation toolkit with AI-powered code review and description enhancement",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "yama": "dist/cli/index.js",
+    "pr-guardian": "dist/cli/index.js",
+    "pr-police": "dist/cli/index.js",
+    "pr-scribe": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc && tsc-alias",
+    "dev": "ts-node-dev --respawn --transpile-only src/cli/index.ts",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "type-check": "tsc --noEmit",
+    "docs": "typedoc src",
+    "clean": "rimraf dist",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@juspay/neurolink": "^5.1.0",
+    "@nexus2520/bitbucket-mcp-server": "^0.10.0",
+    "chalk": "^4.1.2",
+    "commander": "^11.0.0",
+    "debug": "^4.3.4",
+    "dotenv": "^16.3.0",
+    "fast-glob": "^3.3.1",
+    "inquirer": "^8.2.6",
+    "lodash": "^4.17.21",
+    "node-cache": "^5.1.2",
+    "ora": "^5.4.1",
+    "yaml": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/commander": "^2.12.5",
+    "@types/inquirer": "^9.0.8",
+    "@types/jest": "^29.0.0",
+    "@types/lodash": "^4.14.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.0.0",
+    "ts-node": "^10.0.0",
+    "ts-node-dev": "^2.0.0",
+    "tsc-alias": "^1.8.0",
+    "typedoc": "^0.25.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pr",
+    "pull-request",
+    "code-review",
+    "ai",
+    "automation",
+    "bitbucket",
+    "github",
+    "gitlab",
+    "security",
+    "quality"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:juspay/yama.git"
+  },
+  "bugs": {
+    "url": "https://github.com/juspay/yama/issues"
+  },
+  "homepage": "https://github.com/juspay/yama#readme",
+  "license": "MIT",
+  "author": {
+    "name": "Juspay",
+    "email": "opensource@juspay.in"
+  }
+}
