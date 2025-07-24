@@ -1,0 +1,104 @@
+architecture_overview:
+  high_level_architecture: "Modular architecture with clear separation of concerns"
+  component_relationships: |
+    Guardian (Orchestrator) -> ContextGatherer -> BitbucketProvider
+                           -> CodeReviewer    -> AI Analysis
+                           -> DescriptionEnhancer -> AI Generation
+  
+design_patterns:
+  - name: "Unified Context Pattern"
+    category: "performance"
+    description: "Gather all PR context once and reuse across operations"
+    usage: "Prevents redundant API calls and improves performance"
+    implementation:
+      - "ContextGatherer collects all data upfront"
+      - "Operations receive pre-gathered context"
+      - "Context includes PR info, diffs, and project context"
+    example_files:
+      - "src/core/ContextGatherer.ts"
+      - "src/core/Guardian.ts"
+  
+  - name: "Provider Abstraction"
+    category: "extensibility"
+    description: "Abstract git platform operations for future extensibility"
+    usage: "Allows easy addition of GitHub, GitLab support"
+    implementation:
+      - "BitbucketProvider implements platform-specific logic"
+      - "Core features work with abstract interfaces"
+    example_files:
+      - "src/core/providers/BitbucketProvider.ts"
+  
+  - name: "Smart Diff Strategy"
+    category: "performance"
+    description: "Adaptive diff fetching based on PR size"
+    usage: "Optimizes API usage and AI processing"
+    implementation:
+      - "Whole diff for small PRs (≤2 files by default)"
+      - "File-by-file for larger PRs (≥3 files)"
+      - "Configurable thresholds via YAML"
+    example_files:
+      - "src/core/ContextGatherer.ts"
+    related_patterns:
+      - "Unified Context Pattern"
+
+  - name: "Lazy Loading Pattern"
+    category: "performance"
+    description: "Dynamic imports for ESM modules to avoid build issues"
+    usage: "Load NeuroLink and MCP modules at runtime"
+    implementation:
+      - "Use eval-based dynamic import"
+      - "Initialize only when needed"
+    example_files:
+      - "src/core/Guardian.ts"
+      - "src/features/CodeReviewer.ts"
+
+caching_strategies:
+  - name: "Hierarchical Cache Keys"
+    description: "Structured cache keys for easy invalidation"
+    format: "{operation}:{workspace}:{repository}:{identifier}:{params}"
+    ttl_strategy:
+      branch_info: "1 hour"
+      pr_details: "30 minutes"
+      pr_diff: "30 minutes"
+      file_content: "2 hours"
+      project_context: "2 hours"
+  
+  - name: "Context Caching"
+    description: "Cache entire unified context for reuse"
+    benefits:
+      - "90% reduction in API calls"
+      - "Faster subsequent operations"
+      - "Consistent data across features"
+
+error_handling_patterns:
+  - name: "Graceful Degradation"
+    description: "Continue processing even if some operations fail"
+    implementation:
+      - "Catch errors per operation"
+      - "Report failures without stopping"
+      - "Provide partial results"
+  
+  - name: "Detailed Error Context"
+    description: "Include context in all error messages"
+    implementation:
+      - "Custom error classes with context"
+      - "Operation-specific error handling"
+      - "User-friendly error messages"
+
+code_organization:
+  directory_structure:
+    src:
+      - "index.ts - Main entry point"
+      - "cli/ - Command-line interface"
+      - "core/ - Core business logic"
+      - "features/ - Feature implementations"
+      - "types/ - TypeScript definitions"
+      - "utils/ - Utility functions"
+    tests:
+      - "unit/ - Unit tests for all components"
+      - "__mocks__/ - Mock implementations"
+  
+  naming_conventions:
+    files: "camelCase for files, PascalCase for classes"
+    interfaces: "Prefix with 'I' only for pure interfaces"
+    types: "Descriptive names ending with Type suffix"

@@ -21,11 +21,11 @@ export class ConfigManager {
       ai: {
         provider: 'auto',
         enableFallback: true,
-        enableAnalytics: true,
-        enableEvaluation: true,
-        timeout: '5m',
+        enableAnalytics: false,
+        enableEvaluation: false,
+        timeout: '10m',
         retryAttempts: 3,
-        temperature: 0.7,
+        temperature: 0.3,
         maxTokens: 1000000
       },
       git: {
@@ -43,7 +43,9 @@ export class ConfigManager {
         severityLevels: ['CRITICAL', 'MAJOR', 'MINOR', 'SUGGESTION'],
         categories: ['security', 'performance', 'maintainability', 'functionality', 'error_handling', 'testing'],
         excludePatterns: ['*.lock', '*.svg', '*.min.js', '*.map'],
-        contextLines: 3
+        contextLines: 3,
+        systemPrompt: 'You are an Expert Security Code Reviewer for enterprise applications. Your role is to:\n\n🔒 SECURITY FIRST: Prioritize security vulnerabilities and data protection\n⚡ PERFORMANCE AWARE: Identify performance bottlenecks and optimization opportunities\n🏗️ QUALITY FOCUSED: Ensure maintainable, readable, and robust code\n🛡️ ERROR RESILIENT: Verify comprehensive error handling and edge cases\n\nYou provide actionable, educational feedback with specific examples and solutions.\nFocus on critical issues that could impact production systems.',
+        focusAreas: ['🔒 Security Analysis (CRITICAL PRIORITY)', '⚡ Performance Review', '🏗️ Code Quality', '🧪 Testing & Error Handling']
       },
       descriptionEnhancement: {
         enabled: true,
@@ -53,7 +55,10 @@ export class ConfigManager {
           { key: 'testcases', name: 'Test Cases (What to be tested)', required: true },
           { key: 'config_changes', name: 'CAC Config Or Service Config Changes', required: true }
         ],
-        autoFormat: true
+        autoFormat: true,
+        systemPrompt: 'You are an Expert Technical Writer specializing in pull request documentation. Your role is to:\n\n📝 CLARITY FIRST: Create clear, comprehensive PR descriptions that help reviewers understand the changes\n🎥 STORY TELLING: Explain the \'why\' behind changes, not just the \'what\'\n📈 STRUCTURED: Follow consistent formatting with required sections\n🔗 CONTEXTUAL: Link changes to business value and technical rationale\n\nCRITICAL INSTRUCTION: Return ONLY the enhanced PR description content as clean markdown. Do NOT include any meta-commentary, explanations about what you\'re doing, or introductory text like "I will enhance..." or "Here is the enhanced description:". \n\nOutput the enhanced description directly without any wrapper text or explanations.',
+        outputTemplate: '# PR Title Enhancement (if needed)\n\n## Summary\n[Clear overview of what this PR accomplishes]\n\n## Changes Made\n[Specific technical changes - be precise]\n\n## Testing\n[How the changes were tested]\n\n## Impact\n[Business/technical impact and considerations]\n\n## Additional Notes\n[Any deployment notes, follow-ups, or special considerations]',
+        enhancementInstructions: 'Return ONLY the enhanced PR description as clean markdown. Do NOT include any explanatory text, meta-commentary, or phrases like "Here is the enhanced description:" or "I will enhance...".\n\nStart directly with the enhanced description content using this structure:'
       },
       securityScan: {
         enabled: true,
@@ -108,6 +113,12 @@ export class ConfigManager {
       formats: ['markdown', 'json'],
       includeAnalytics: true,
       includeMetrics: true
+    },
+    monitoring: {
+      enabled: true,
+      metrics: ['performance', 'cache', 'api_calls'],
+      exportFormat: 'json',
+      interval: '5m'
     }
   };
 
@@ -123,7 +134,6 @@ export class ConfigManager {
     const homeDir = require('os').homedir();
 
     this.configPaths = [
-      // Current directory
       path.join(cwd, 'yama.config.yaml'),
       path.join(cwd, 'yama.config.yml'),
       path.join(cwd, 'yama.config.json'),
@@ -131,12 +141,10 @@ export class ConfigManager {
       path.join(cwd, '.yama.yml'),
       path.join(cwd, '.yama.json'),
       
-      // Home directory
       path.join(homeDir, '.yama', 'config.yaml'),
       path.join(homeDir, '.yama', 'config.yml'),
       path.join(homeDir, '.yama', 'config.json'),
       
-      // XDG config directory
       path.join(homeDir, '.config', 'yama', 'config.yaml'),
       path.join(homeDir, '.config', 'yama', 'config.yml'),
       path.join(homeDir, '.config', 'yama', 'config.json')
@@ -532,6 +540,62 @@ export class ConfigManager {
         }
       }
     };
+  }
+
+  /**
+   * Find the first available configuration file
+   */
+  private findConfigFile(): string | null {
+    for (const configPath of this.configPaths) {
+      if (fs.existsSync(configPath)) {
+        return configPath;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Watch configuration file for changes and reload automatically
+   */
+  watchConfig(callback?: (config: GuardianConfig) => void): () => void {
+    if (!this.configPaths.length) {
+      logger.warn('No configuration file found to watch');
+      return () => {};
+    }
+
+    const configPath = this.findConfigFile();
+    if (!configPath) {
+      logger.warn('No configuration file found to watch');
+      return () => {};
+    }
+
+    logger.debug(`Watching configuration file: ${configPath}`);
+    
+    fs.watchFile(configPath, { interval: 1000 }, async () => {
+      try {
+        logger.info('Configuration file changed, reloading...');
+        const newConfig = await this.loadConfig();
+        if (callback) {
+          callback(newConfig);
+        }
+        logger.success('Configuration reloaded successfully');
+      } catch (error) {
+        logger.error(`Failed to reload configuration: ${(error as Error).message}`);
+      }
+    });
+
+    // Return cleanup function
+    return () => {
+      fs.unwatchFile(configPath);
+      logger.debug('Stopped watching configuration file');
+    };
+  }
+
+  /**
+   * Enable hot-reload for configuration
+   */
+  enableHotReload(callback?: (config: GuardianConfig) => void): () => void {
+    return this.watchConfig(callback);
   }
 }
 

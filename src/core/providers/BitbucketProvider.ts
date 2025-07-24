@@ -39,7 +39,8 @@ export class BitbucketProvider {
     try {
       logger.debug('Initializing Bitbucket MCP handlers...');
 
-      // Import handlers dynamically for better performance
+      const dynamicImport = eval('(specifier) => import(specifier)');
+      
       const [
         { BitbucketApiClient },
         { BranchHandlers },
@@ -47,22 +48,20 @@ export class BitbucketProvider {
         { ReviewHandlers },
         { FileHandlers }
       ] = await Promise.all([
-        import('@nexus2520/bitbucket-mcp-server/build/utils/api-client.js'),
-        import('@nexus2520/bitbucket-mcp-server/build/handlers/branch-handlers.js'),
-        import('@nexus2520/bitbucket-mcp-server/build/handlers/pull-request-handlers.js'),
-        import('@nexus2520/bitbucket-mcp-server/build/handlers/review-handlers.js'),
-        import('@nexus2520/bitbucket-mcp-server/build/handlers/file-handlers.js')
+        dynamicImport('@nexus2520/bitbucket-mcp-server/build/utils/api-client.js'),
+        dynamicImport('@nexus2520/bitbucket-mcp-server/build/handlers/branch-handlers.js'),
+        dynamicImport('@nexus2520/bitbucket-mcp-server/build/handlers/pull-request-handlers.js'),
+        dynamicImport('@nexus2520/bitbucket-mcp-server/build/handlers/review-handlers.js'),
+        dynamicImport('@nexus2520/bitbucket-mcp-server/build/handlers/file-handlers.js')
       ]);
 
-      // Initialize API client with connection reuse
       this.apiClient = new BitbucketApiClient(
         this.baseUrl,
         this.credentials.username,
-        undefined, // No app password needed for Server
+        undefined,
         this.credentials.token
       );
 
-      // Initialize all handlers
       this.branchHandlers = new BranchHandlers(this.apiClient, this.baseUrl);
       this.pullRequestHandlers = new PullRequestHandlers(
         this.apiClient,
@@ -81,49 +80,32 @@ export class BitbucketProvider {
   }
 
   /**
-   * Parse MCP response with error handling
+   * Parse MCP response - exactly matching the working pr-police.js implementation
    */
-  private parseMCPResponse<T>(result: BitbucketMCPResponse): T {
-    try {
-      // Handle error responses
-      if (result.error) {
-        throw new Error(result.error);
+  private parseMCPResponse<T>(result: any): T {
+    // Handle error responses
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    // Check if result has MCP format (content array) or direct data - EXACTLY like pr-police.js
+    if (result.content && result.content[0] && result.content[0].text) {
+      const text = result.content[0].text;
+      
+      // Check if it's an error message
+      if (typeof text === 'string' && text.startsWith('Error:')) {
+        throw new Error(text);
       }
-
-      // Handle direct JSON response (success case)
-      if (result.message && (result as any).pull_request) {
-        return result as any;
+      
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        // If parsing fails, return the text as-is for simple responses
+        return text as T;
       }
-
-      // Handle MCP format response
-      if (result.content && result.content[0]) {
-        const responseContent = result.content[0].text || result.content[0];
-
-        if (typeof responseContent === 'string') {
-          // Check for error messages
-          if (responseContent.includes('Not found') || responseContent.includes('Error')) {
-            throw new Error(responseContent);
-          }
-
-          // Try to parse as JSON
-          try {
-            return JSON.parse(responseContent);
-          } catch (parseError) {
-            // If not JSON, it's likely an error message
-            throw new Error(responseContent);
-          }
-        }
-
-        // If it's already an object, return it
-        return responseContent as T;
-      }
-
-      // Return result as-is if it doesn't match expected formats
-      return result as any;
-
-    } catch (error) {
-      logger.error(`Failed to parse MCP response: ${(error as Error).message}`);
-      throw new ProviderError(`Response parsing failed: ${(error as Error).message}`);
+    } else {
+      // Direct data format - return as-is
+      return result as T;
     }
   }
 
@@ -157,11 +139,15 @@ export class BitbucketProvider {
         // Direct data extraction
         if ((branchData as any).open_pull_requests && (branchData as any).open_pull_requests.length > 0) {
           const firstPR = (branchData as any).open_pull_requests[0];
+          // Debug author data structure
+          logger.debug(`Author data structure: ${JSON.stringify(firstPR.author, null, 2)}`);
+          logger.debug(`Raw firstPR keys: ${Object.keys(firstPR).join(', ')}`);
+          
           return {
             id: firstPR.id,
             title: firstPR.title,
             description: firstPR.description || '',
-            author: firstPR.author?.displayName || firstPR.author?.name || 'Unknown',
+            author: firstPR.author?.displayName || firstPR.author?.name || firstPR.author || 'Unknown',
             state: 'OPEN',
             sourceRef: branch,
             targetRef: firstPR.destination?.branch?.name || 'main',
@@ -204,11 +190,15 @@ export class BitbucketProvider {
 
         const prData = this.parseMCPResponse(rawPRDetails);
 
+        // Debug author data structure
+        logger.debug(`PR Details author data structure: ${JSON.stringify((prData as any).author, null, 2)}`);
+        logger.debug(`PR Details raw keys: ${Object.keys(prData as any).join(', ')}`);
+
         return {
           id: (prData as any).id,
           title: (prData as any).title,
           description: (prData as any).description || '',
-          author: (prData as any).author?.displayName || (prData as any).author?.name || 'Unknown',
+          author: (prData as any).author?.displayName || (prData as any).author?.name || (prData as any).author || 'Unknown',
           state: (prData as any).state || 'OPEN',
           sourceRef: (prData as any).source?.branch?.name || '',
           targetRef: (prData as any).destination?.branch?.name || '',
@@ -229,7 +219,8 @@ export class BitbucketProvider {
   async getPRDiff(
     identifier: PRIdentifier,
     contextLines = 3,
-    excludePatterns: string[] = ['*.lock', '*.svg']
+    excludePatterns: string[] = ['*.lock', '*.svg'],
+    includePatterns?: string[]
   ): Promise<PRDiff> {
     await this.initialize();
 
@@ -238,20 +229,33 @@ export class BitbucketProvider {
       throw new ProviderError('Pull request ID is required');
     }
 
-    const cacheKey = Cache.keys.prDiff(workspace, repository, pullRequestId);
+    // Create a cache key that includes include patterns if specified
+    const cacheKey = includePatterns && includePatterns.length === 1
+      ? `file-diff:${workspace}:${repository}:${pullRequestId}:${includePatterns[0]}`
+      : Cache.keys.prDiff(workspace, repository, pullRequestId);
 
     return cache.getOrSet(
       cacheKey,
       async () => {
         logger.debug(`Getting PR diff: ${workspace}/${repository}#${pullRequestId}`);
+        if (includePatterns) {
+          logger.debug(`Include patterns: ${includePatterns.join(', ')}`);
+        }
 
-        const rawDiff = await this.reviewHandlers.handleGetPullRequestDiff({
+        const args: any = {
           workspace,
           repository,
           pull_request_id: pullRequestId,
           context_lines: contextLines,
           exclude_patterns: excludePatterns,
-        });
+        };
+
+        // Add include_patterns if specified
+        if (includePatterns) {
+          args.include_patterns = includePatterns;
+        }
+
+        const rawDiff = await this.reviewHandlers.handleGetPullRequestDiff(args);
 
         const diffData = this.parseMCPResponse(rawDiff);
 
@@ -291,8 +295,14 @@ export class BitbucketProvider {
           branch,
         });
 
-        const fileData = this.parseMCPResponse(result);
-        return (fileData as any).content || '';
+        // Handle file content response directly (don't JSON parse)
+        if (result.content && result.content[0] && result.content[0].text) {
+          const fileResponse = JSON.parse(result.content[0].text);
+          return fileResponse.content || '';
+        }
+        
+        // Handle direct response format
+        return (result as any).content || '';
       },
       7200 // Cache for 2 hours (files change less frequently)
     );
@@ -346,6 +356,7 @@ export class BitbucketProvider {
 
     try {
       logger.debug(`Updating PR description: ${workspace}/${repository}#${pullRequestId}`);
+      logger.debug(`Description length: ${description.length} characters`);
 
       const result = await this.pullRequestHandlers.handleUpdatePullRequest({
         workspace,
@@ -354,10 +365,25 @@ export class BitbucketProvider {
         description: description
       });
 
+      // Log the raw MCP response
+      logger.debug(`Raw MCP update response: ${JSON.stringify(result, null, 2)}`);
+
       const updateData = this.parseMCPResponse(result);
+      
+      // Log the parsed response
+      logger.debug(`Parsed update response: ${JSON.stringify(updateData, null, 2)}`);
 
       // Invalidate related cache entries
       cache.del(Cache.keys.prInfo(workspace, repository, pullRequestId));
+
+      // Check if the response indicates actual success
+      if (typeof updateData === 'string' && updateData.includes('Error')) {
+        logger.error(`Update response contains error: ${updateData}`);
+        return {
+          success: false,
+          message: updateData
+        };
+      }
 
       return {
         success: true,
@@ -413,19 +439,42 @@ export class BitbucketProvider {
         if (options.searchContext) args.search_context = options.searchContext;
         if (options.matchStrategy) args.match_strategy = options.matchStrategy;
         if (options.suggestion) args.suggestion = options.suggestion;
+        
+        logger.debug(`🔍 Inline comment details:`);
+        logger.debug(`   File: ${options.filePath}`);
+        logger.debug(`   Code snippet: "${options.codeSnippet}"`);
+        logger.debug(`   Match strategy: ${options.matchStrategy}`);
+        if (options.searchContext) {
+          logger.debug(`   Search context before: ${JSON.stringify(options.searchContext.before)}`);
+          logger.debug(`   Search context after: ${JSON.stringify(options.searchContext.after)}`);
+        }
       } else if (options.filePath && options.lineNumber) {
         // Fallback to line number if no code snippet
         args.file_path = options.filePath;
         args.line_number = options.lineNumber;
         args.line_type = options.lineType || 'CONTEXT';
+        
+        logger.debug(`🔍 Line-based comment details:`);
+        logger.debug(`   File: ${options.filePath}`);
+        logger.debug(`   Line: ${options.lineNumber}`);
+        logger.debug(`   Type: ${options.lineType || 'CONTEXT'}`);
       }
+      
+      logger.debug(`🔍 MCP addComment args: ${JSON.stringify(args, null, 2)}`);
 
       const result = await this.pullRequestHandlers.handleAddComment(args);
-      const commentData = this.parseMCPResponse(result);
+      
+      // Parse response exactly like pr-police.js
+      let commentData;
+      if (result.content && result.content[0] && result.content[0].text) {
+        commentData = JSON.parse(result.content[0].text);
+      } else {
+        commentData = result;
+      }
 
       return {
         success: true,
-        commentId: (commentData as any).id
+        commentId: commentData.id || commentData.comment_id
       };
 
     } catch (error) {

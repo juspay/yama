@@ -6,16 +6,16 @@
 import chalk from 'chalk';
 import { Logger as ILogger, LogLevel, LoggerOptions } from '../types';
 
-const GUARDIAN_BADGE = `
-🛡️ ═══════════════════════════════════════ 🛡️
-   ██████╗ ██████╗      ██████╗ ██╗   ██╗ █████╗ ██████╗ ██████╗ ██╗ █████╗ ███╗   ██╗
-   ██╔══██╗██╔══██╗    ██╔════╝ ██║   ██║██╔══██╗██╔══██╗██╔══██╗██║██╔══██╗████╗  ██║
-   ██████╔╝██████╔╝    ██║  ███╗██║   ██║███████║██████╔╝██║  ██║██║███████║██╔██╗ ██║
-   ██╔═══╝ ██╔══██╗    ██║   ██║██║   ██║██╔══██║██╔══██╗██║  ██║██║██╔══██║██║╚██╗██║
-   ██║     ██║  ██║    ╚██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝██║██║  ██║██║ ╚████║
-   ╚═╝     ╚═╝  ╚═╝     ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝
-🛡️ ═══════════════════════════════════════ 🛡️
-   AI-Powered PR Automation • Enterprise Security • Code Quality Guardian
+const YAMA_BADGE = `
+⚔️ ═══════════════════════════════════════════════════════════ ⚔️
+   ██╗   ██╗ █████╗ ███╗   ███╗ █████╗ 
+   ╚██╗ ██╔╝██╔══██╗████╗ ████║██╔══██╗
+    ╚████╔╝ ███████║██╔████╔██║███████║
+     ╚██╔╝  ██╔══██║██║╚██╔╝██║██╔══██║
+      ██║   ██║  ██║██║ ╚═╝ ██║██║  ██║
+      ╚═╝   ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
+⚔️ ═══════════════════════════════════════════════════════════ ⚔️
+        AI-Powered PR Automation • Enterprise Security • Code Quality Yama
 `;
 
 export class Logger implements ILogger {
@@ -105,9 +105,8 @@ export class Logger implements ILogger {
     console.error(this.colorize('error', formatted));
   }
 
-  // Special methods for Guardian operations
   badge(): void {
-    console.log(chalk.cyan(GUARDIAN_BADGE));
+    console.log(chalk.cyan(YAMA_BADGE));
   }
 
   phase(message: string): void {
@@ -120,7 +119,6 @@ export class Logger implements ILogger {
     console.log(this.options.colors ? chalk.green(formatted) : formatted);
   }
 
-  // Utility methods for specific Guardian operations
   operation(operation: string, status: 'started' | 'completed' | 'failed'): void {
     const emoji = status === 'started' ? '🚀' : status === 'completed' ? '✅' : '❌';
     const color = status === 'started' ? 'blue' : status === 'completed' ? 'green' : 'red';
@@ -219,8 +217,16 @@ export class Logger implements ILogger {
   }
 }
 
-// Export singleton instance for convenience
-export const logger = new Logger();
+// Export singleton instance for convenience with environment-aware defaults
+const loggerOptions: Partial<LoggerOptions> = {};
+
+// Check environment variables for debug mode
+if (process.env.YAMA_DEBUG === 'true') {
+  loggerOptions.level = 'debug';
+  loggerOptions.verbose = true;
+}
+
+export const logger = new Logger(loggerOptions);
 
 // Export factory function
 export function createLogger(options?: Partial<LoggerOptions>): Logger {

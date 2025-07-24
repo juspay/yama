@@ -1,0 +1,194 @@
+# Cline Rules for Yama (PR Guardian)
+# Project-specific patterns and intelligence
+
+## Code Review Comment Posting
+
+### MCP Integration Requirements
+- When posting inline comments via Bitbucket MCP:
+  - Code snippets MUST include the exact diff prefix (+, -, or space)
+  - Always validate that snippets exist in the actual diff before posting
+  - Use 'best' match strategy instead of 'strict' for flexibility
+  - Include search_context with before/after lines when available
+  - Line numbers from diff hunks need careful calculation
+
+### Line Number Extraction from Diffs
+- Hunk headers format: @@ -oldStart,oldCount +newStart,newCount @@
+- The numbers in hunk headers are 1-based starting line numbers
+- Must track current position carefully as we iterate
+- Added lines (+) only increment new line counter
+- Removed lines (-) only increment old line counter
+- Context lines (space) increment both counters
+- Line number calculation is complex and may have edge cases
+
+### Path Handling
+- Files can have complex nested paths
+- Need to generate all possible path variations for matching
+- Common variations include:
+  - With/without a/ and b/ prefixes
+  - With/without app/ prefix
+  - Partial path matching as fallback
+
+### AI Prompt Engineering
+- When generating prompts for code review:
+  - Always include explicit examples of correct/incorrect snippet formats
+  - Emphasize that snippets must be copied EXACTLY from the diff
+  - Include the full diff content without truncation
+  - Provide clear instructions about preserving diff symbols
+  - Use structured JSON output format
+
+### Error Handling Patterns
+- For comment posting failures:
+  - Continue processing other comments instead of failing entirely
+  - Track failed comments and include them in the summary
+  - Log detailed error information for debugging
+  - Use try-catch blocks around individual comment posts
+  - Prioritize line numbers over snippet matching (more reliable)
+
+### Known Limitations
+- Bitbucket API may have its own behavior for line positioning
+- Complex diff structures can make line number extraction challenging
+- Some comments may still appear at incorrect lines despite best efforts
+- Need to monitor and adjust based on real-world usage patterns
+
+## Project Structure
+
+### Import Patterns
+- Use dynamic imports for MCP modules: `const dynamicImport = eval('(specifier) => import(specifier)');`
+- This bypasses TypeScript compilation issues with ESM modules
+
+### File Organization
+- Core logic in `src/core/`
+- Feature modules in `src/features/`
+- Utility functions in `src/utils/`
+- Type definitions in `src/types/`
+
+### Caching Strategy
+- Cache keys format: `{operation}:{workspace}:{repository}:{identifier}:{optional_params}`
+- Different TTLs:
+  - Branch info: 1 hour
+  - PR details: 30 minutes
+  - PR diff: 30 minutes
+  - File content: 2 hours
+  - Directory listings: 1 hour
+
+## Testing Patterns
+
+### Testing PR Comment Posting
+- Test with PRs containing:
+  - Added lines (+ prefix)
+  - Removed lines (- prefix)
+  - Context lines (space prefix)
+  - Mixed changes in same file
+  - Large diffs (50+ files)
+  - Complex nested file paths
+
+### Common Test Cases
+- PR #24488 (JP-6994-ProviderEndpointCRUD) - Good for testing ReScript code
+- Test with both small and large PRs
+- Verify cache hit ratios
+- Check error handling with invalid snippets
+- Monitor actual line number placement in Bitbucket UI
+
+## Performance Optimization
+
+### Unified Context Pattern
+- Always gather all context in one phase
+- Share context between features
+- Use smart diff strategies based on PR size:
+  - < 20 files: whole diff
+  - >= 20 files: file-by-file
+  - Large files: consider chunking
+
+### API Call Reduction
+- Target: 90% reduction vs separate scripts
+- Use caching aggressively
+- Batch operations where possible
+- Reuse context across features
+
+## Security Considerations
+
+### Credential Handling
+- Never log tokens or credentials
+- Use environment variables only
+- Validate credentials on startup
+- Sanitize error messages
+
+### Input Validation
+- Always validate PR identifiers
+- Sanitize file paths
+- Check response structures
+- Handle malformed API responses
+
+## Known Issues and Workarounds
+
+### MCP Snippet Matching
+- Issue: MCP requires exact string matches
+- Workaround: Validate snippets before posting, use 'best' match strategy
+
+### Line Number Accuracy
+- Issue: Comments may appear at incorrect lines
+- Root cause: Complex diff parsing and line number calculation
+- Workaround: Prioritize line numbers when available, fall back to snippets
+
+### Large PR Performance
+- Issue: Slowdown with 100+ files
+- Workaround: Use file-by-file diff strategy
+
+### Binary Files
+- Issue: Cannot analyze binary files
+- Workaround: Skip them in analysis
+
+## Development Workflow
+
+### Building
+```bash
+npm run build  # Compile TypeScript
+npm test       # Run tests
+npm run lint   # Check code quality
+```
+
+### Running
+```bash
+# Via CLI
+node dist/index.js guardian --branch <branch-name>
+
+# With all features
+node dist/index.js guardian --branch <branch-name> --review --enhance
+```
+
+### Debugging
+- Set LOG_LEVEL=debug for verbose output
+- Check cache stats with --verbose flag
+- Monitor API call counts
+- Review failed comment details in summary
+- Check actual line placement in Bitbucket UI
+
+## Git Workflow
+
+### Branch Naming
+- Feature: `feature/<ticket>-<description>`
+- Fix: `fix/<ticket>-<description>`
+- Release: `release/<version>`
+
+### Commit Messages
+- Format: `<type>: <subject>`
+- Types: feat, fix, docs, style, refactor, test, chore
+- Include ticket number when applicable
+
+## Future Considerations
+
+### Planned Enhancements
+- Improve line number extraction accuracy
+- Add metrics for comment placement success
+- GitHub and GitLab provider support
+- Webhook-based triggers
+- Persistent caching with Redis
+- Custom rule configuration
+- Performance monitoring dashboard
+
+### Technical Debt
+- Line number extraction needs more robust implementation
+- Consider splitting large files
+- Add more comprehensive error types
+- Implement retry logic for transient failures
+- Add telemetry for usage analytics

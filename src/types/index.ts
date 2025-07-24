@@ -279,6 +279,7 @@ export interface GuardianConfig {
   features: {
     codeReview: CodeReviewConfig;
     descriptionEnhancement: DescriptionEnhancementConfig;
+    diffStrategy?: DiffStrategyConfig;
     securityScan?: SecurityScanConfig;
     analytics?: AnalyticsConfig;
   };
@@ -286,6 +287,7 @@ export interface GuardianConfig {
   performance?: PerformanceConfig;
   rules?: CustomRulesConfig;
   reporting?: ReportingConfig;
+  monitoring?: MonitoringConfig;
 }
 
 export interface CodeReviewConfig {
@@ -295,6 +297,9 @@ export interface CodeReviewConfig {
   excludePatterns: string[];
   contextLines: number;
   customRules?: string;
+  systemPrompt?: string;
+  analysisTemplate?: string;
+  focusAreas?: string[];
 }
 
 export interface DescriptionEnhancementConfig {
@@ -302,6 +307,18 @@ export interface DescriptionEnhancementConfig {
   preserveContent: boolean;
   requiredSections: RequiredSection[];
   autoFormat: boolean;
+  systemPrompt?: string;
+  outputTemplate?: string;
+  enhancementInstructions?: string;
+}
+
+export interface DiffStrategyConfig {
+  enabled: boolean;
+  thresholds: {
+    wholeDiffMaxFiles: number;        // Default: 2
+    fileByFileMinFiles: number;       // Default: 3
+  };
+  forceStrategy?: 'whole' | 'file-by-file' | 'auto';  // Override to force a specific strategy
 }
 
 export interface SecurityScanConfig {
@@ -353,6 +370,14 @@ export interface ReportingConfig {
   includeAnalytics: boolean;
   includeMetrics: boolean;
   customTemplates?: string;
+}
+
+export interface MonitoringConfig {
+  enabled: boolean;
+  metrics: string[];
+  exportFormat?: 'json' | 'prometheus' | 'csv';
+  endpoint?: string;
+  interval?: string;
 }
 
 // ============================================================================
@@ -504,7 +529,5 @@ export class ValidationError extends GuardianError {
 }
 
 // ============================================================================
-// Export all types
+// Export all types - Main file, no re-exports needed
 // ============================================================================
-
-export * from './index';

@@ -3,7 +3,6 @@
  * The main class that coordinates all operations using shared context
  */
 
-import { NeuroLink } from '@juspay/neurolink';
 import {
   GuardianConfig,
   PRIdentifier,
@@ -33,14 +32,12 @@ export class Guardian {
   private contextGatherer!: ContextGatherer;
   private codeReviewer!: CodeReviewer;
   private descriptionEnhancer!: DescriptionEnhancer;
-  private neurolink!: NeuroLink;
+  private neurolink!: any;
   private initialized = false;
 
   constructor(config?: Partial<GuardianConfig>) {
-    // Config will be loaded during initialization
     this.config = {} as GuardianConfig;
     if (config) {
-      // Merge provided config with defaults
       this.config = { ...this.config, ...config };
     }
   }
@@ -64,7 +61,9 @@ export class Guardian {
       this.bitbucketProvider = new BitbucketProvider(this.config.providers.git.credentials);
       await this.bitbucketProvider.initialize();
 
-      // Initialize NeuroLink
+      // Initialize NeuroLink with eval-based dynamic import to bypass TypeScript compilation
+      const dynamicImport = eval('(specifier) => import(specifier)');
+      const { NeuroLink } = await dynamicImport('@juspay/neurolink');
       this.neurolink = new NeuroLink();
 
       // Initialize core components
@@ -75,7 +74,8 @@ export class Guardian {
 
       this.codeReviewer = new CodeReviewer(
         this.bitbucketProvider,
-        this.config.providers.ai
+        this.config.providers.ai,
+        this.config.features.codeReview
       );
 
       this.descriptionEnhancer = new DescriptionEnhancer(
@@ -118,8 +118,8 @@ export class Guardian {
       for (const operation of options.operations) {
         if (operation === 'all') {
           // Execute all available operations
-          operations.push(await this.executeCodeReview(context, options));
-          operations.push(await this.executeDescriptionEnhancement(context, options));
+          operations.push(await this.executeOperation('review', context, options));
+          operations.push(await this.executeOperation('enhance-description', context, options));
         } else {
           operations.push(await this.executeOperation(operation, context, options));
         }
@@ -162,7 +162,7 @@ export class Guardian {
    */
   async *processPRStream(
     options: OperationOptions,
-    streamOptions?: StreamOptions
+    _streamOptions?: StreamOptions
   ): AsyncIterableIterator<StreamUpdate> {
     await this.ensureInitialized();
 
@@ -211,18 +211,28 @@ export class Guardian {
 
         try {
           const result = await this.executeOperation(operation, context, options);
-          completedOps++;
-
-          yield {
-            operation,
-            status: 'completed',
-            progress: 30 + Math.round((completedOps / totalOps) * 60),
-            message: `${operation} completed`,
-            data: result,
-            timestamp: new Date().toISOString()
-          };
+          
+          if (result.status === 'error') {
+            yield {
+              operation,
+              status: 'error',
+              message: `${operation} failed: ${result.error}`,
+              timestamp: new Date().toISOString()
+            };
+          } else {
+            completedOps++;
+            yield {
+              operation,
+              status: 'completed',
+              progress: 30 + Math.round((completedOps / totalOps) * 60),
+              message: `${operation} completed`,
+              data: result,
+              timestamp: new Date().toISOString()
+            };
+          }
 
         } catch (error) {
+          // This catch is for unexpected errors that bypass executeOperation's own error handling
           yield {
             operation,
             status: 'error',
@@ -265,7 +275,7 @@ export class Guardian {
 
     // Check if we have cached context first
     const cachedContext = await this.contextGatherer.getCachedContext(identifier);
-    if (cachedContext && !options.config?.cache?.enabled === false) {
+    if (cachedContext && options.config?.cache?.enabled !== false) {
       logger.debug('✓ Using cached context');
       return cachedContext;
     }
@@ -279,7 +289,8 @@ export class Guardian {
       excludePatterns: this.config.features.codeReview.excludePatterns,
       contextLines: this.config.features.codeReview.contextLines,
       forceRefresh: false,
-      includeDiff: needsDiff
+      includeDiff: needsDiff,
+      diffStrategyConfig: this.config.features.diffStrategy
     };
 
     return await this.contextGatherer.gatherContext(identifier, contextOptions);

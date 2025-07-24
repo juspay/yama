@@ -1,0 +1,111 @@
+problem_statement:
+  description: "Manual PR reviews are time-consuming and inconsistent"
+  pain_points:
+    - "Security vulnerabilities missed in reviews"
+    - "Incomplete PR descriptions"
+    - "Inconsistent review standards"
+    - "Time spent on repetitive review tasks"
+    - "Missing test documentation"
+
+solution_overview:
+  product_name: "Yama (PR Guardian)"
+  value_proposition: "AI-powered automated PR analysis that ensures consistent quality"
+  key_benefits:
+    - "80% reduction in manual review time"
+    - "100% coverage of security patterns"
+    - "Consistent PR documentation"
+    - "Actionable inline feedback"
+
+user_personas:
+  - name: "Senior Developer"
+    needs:
+      - "Fast security vulnerability detection"
+      - "Code quality insights"
+      - "Time savings on reviews"
+    how_yama_helps:
+      - "Automated security analysis"
+      - "Inline suggestions"
+      - "Focus on complex logic review"
+  
+  - name: "Team Lead"
+    needs:
+      - "Consistent review standards"
+      - "Complete PR documentation"
+      - "Team productivity metrics"
+    how_yama_helps:
+      - "Enforces coding standards"
+      - "Ensures required sections in PRs"
+      - "Analytics on code quality trends"
+  
+  - name: "DevOps Engineer"
+    needs:
+      - "CI/CD integration"
+      - "Automated quality gates"
+      - "Configuration management"
+    how_yama_helps:
+      - "CLI for pipeline integration"
+      - "Configurable quality thresholds"
+      - "YAML-based configuration"
+
+user_workflows:
+  manual_review:
+    description: "Developer runs Yama before requesting review"
+    steps:
+      - "Create PR in Bitbucket"
+      - "Run: yama guardian --review --enhance"
+      - "Review AI feedback"
+      - "Fix critical issues"
+      - "Request human review"
+  
+  automated_pipeline:
+    description: "CI/CD runs Yama on every PR"
+    steps:
+      - "PR created/updated triggers pipeline"
+      - "Pipeline runs Yama analysis"
+      - "Comments posted to PR"
+      - "Quality gates enforced"
+
+feature_highlights:
+  code_review:
+    description: "AI-powered security and quality analysis"
+    capabilities:
+      - "Security vulnerability detection"
+      - "Performance issue identification"
+      - "Code quality assessment"
+      - "Inline comment posting"
+    severities: ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"]
+  
+  description_enhancement:
+    description: "Automatic PR description improvement"
+    capabilities:
+      - "Adds missing required sections"
+      - "Preserves existing content"
+      - "Generates test documentation"
+      - "Creates comprehensive changelogs"
+    required_sections:
+      - "Changelog (Modules Modified)"
+      - "Test Cases (What to be tested)"
+      - "Config Changes"
+
+success_metrics:
+  efficiency:
+    - "90% reduction in API calls via caching"
+    - "80% reduction in review time"
+    - "100% PR documentation compliance"
+  
+  quality:
+    - "Zero missed security patterns"
+    - "Consistent review standards"
+    - "Improved code quality scores"
+  
+  adoption:
+    - "Easy CLI integration"
+    - "Minimal configuration required"
+    - "Works with existing workflows"
+
+competitive_advantages:
+  - "Unified context gathering (vs separate API calls)"
+  - "Smart diff strategies for large PRs"
+  - "Content preservation in enhancements"
+  - "Configurable quality standards"
+  - "Enterprise Bitbucket support"

@@ -1,0 +1,52 @@
+project_overview:
+  name: "Yama (PR Guardian)"
+  description: "AI-powered pull request analysis tool for automated code review and description enhancement"
+  version: "1.0.0"
+  repository: "https://github.com/juspay/yama"
+  
+goals:
+  primary:
+    - "Automate code review process with AI-powered security and quality analysis"
+    - "Enhance PR descriptions automatically with required sections"
+    - "Provide unified context gathering for efficient PR processing"
+  secondary:
+    - "Reduce manual review effort by 80%"
+    - "Ensure consistent code quality standards"
+    - "Improve PR documentation quality"
+
+scope:
+  included:
+    - "Bitbucket integration (primary)"
+    - "AI-powered code review with violation detection"
+    - "PR description enhancement with preservation"
+    - "Unified context gathering and caching"
+    - "Configurable diff strategies"
+    - "CLI interface for automation"
+  future:
+    - "GitHub and GitLab support"
+    - "Security vulnerability scanning"
+    - "Analytics and reporting"
+    - "Web UI dashboard"
+    - "Webhook-based automation"
+
+constraints:
+  technical:
+    - "Must work with Bitbucket Server API"
+    - "Requires NeuroLink for AI integration"
+    - "Node.js 18+ runtime"
+    - "TypeScript for type safety"
+  operational:
+    - "API rate limits consideration"
+    - "Large PR handling (100+ files)"
+    - "AI token limits management"
+  
+key_features:
+  - name: "Smart Diff Strategy"
+    description: "Automatically chooses between whole diff or file-by-file based on PR size"
+    configurable: true
+  - name: "Context Caching"
+    description: "Intelligent caching to reduce API calls by 90%"
+  - name: "Inline Code Comments"
+    description: "Posts review comments directly on code lines"
+  - name: "Description Preservation"
+    description: "Never loses existing content when enhancing descriptions"

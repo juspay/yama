@@ -3,13 +3,13 @@
  * Preserves all original functionality from pr-police.js but optimized
  */
 
-import { NeuroLink } from '@juspay/neurolink';
+// NeuroLink will be dynamically imported
 import {
-  PRIdentifier,
   Violation,
   ReviewResult,
   ReviewOptions,
   AIProviderConfig,
+  CodeReviewConfig,
   ProviderError
 } from '../types';
 import { UnifiedContext } from '../core/ContextGatherer';
@@ -17,17 +17,19 @@ import { BitbucketProvider } from '../core/providers/BitbucketProvider';
 import { logger } from '../utils/Logger';
 
 export class CodeReviewer {
-  private neurolink: NeuroLink;
+  private neurolink: any;
   private bitbucketProvider: BitbucketProvider;
   private aiConfig: AIProviderConfig;
+  private reviewConfig: CodeReviewConfig;
 
   constructor(
     bitbucketProvider: BitbucketProvider,
-    aiConfig: AIProviderConfig
+    aiConfig: AIProviderConfig,
+    reviewConfig: CodeReviewConfig
   ) {
     this.bitbucketProvider = bitbucketProvider;
     this.aiConfig = aiConfig;
-    this.neurolink = new NeuroLink();
+    this.reviewConfig = reviewConfig;
   }
 
   /**
@@ -43,22 +45,19 @@ export class CodeReviewer {
       logger.phase('🧪 Conducting AI-powered code analysis...');
       logger.info(`Analyzing ${context.diffStrategy.fileCount} files using ${context.diffStrategy.strategy} strategy`);
 
-      // Build analysis prompt using unified context
       const analysisPrompt = this.buildAnalysisPrompt(context, options);
+      const violations = await this.analyzeWithAI(analysisPrompt, context);
+      const validatedViolations = this.validateViolations(violations, context);
 
-      // Conduct AI analysis
-      const violations = await this.analyzeWithAI(analysisPrompt);
-
-      // Post comments if not dry run
-      if (!options.dryRun && violations.length > 0) {
-        await this.postComments(context, violations, options);
+      if (!options.dryRun && validatedViolations.length > 0) {
+        await this.postComments(context, validatedViolations, options);
       }
 
       const duration = Math.round((Date.now() - startTime) / 1000);
-      const result = this.generateReviewResult(violations, duration, context);
+      const result = this.generateReviewResult(validatedViolations, duration, context);
 
       logger.success(
-        `Code review completed in ${duration}s: ${violations.length} violations found`
+        `Code review completed in ${duration}s: ${validatedViolations.length} violations found`
       );
 
       return result;
@@ -70,129 +69,287 @@ export class CodeReviewer {
   }
 
   /**
-   * Build comprehensive analysis prompt using unified context
+   * Validate violations to ensure code snippets exist in diff
    */
-  private buildAnalysisPrompt(context: UnifiedContext, options: ReviewOptions): string {
-    // Prepare diff data based on strategy
-    let diffContent = '';
-    if (context.diffStrategy.strategy === 'whole' && context.prDiff) {
-      diffContent = JSON.stringify(context.prDiff, null, 2);
-    } else if (context.diffStrategy.strategy === 'file-by-file' && context.fileDiffs) {
-      const fileDiffArray = Array.from(context.fileDiffs.entries()).map(([file, diff]) => ({
-        file,
-        diff
-      }));
-      diffContent = JSON.stringify(fileDiffArray, null, 2);
+  private validateViolations(violations: Violation[], context: UnifiedContext): Violation[] {
+    const validatedViolations: Violation[] = [];
+    const diffContent = this.extractDiffContent(context);
+
+    for (const violation of violations) {
+      if (violation.type === 'inline' && violation.code_snippet && violation.file) {
+        // Check if the code snippet exists in the diff
+        if (diffContent.includes(violation.code_snippet)) {
+          validatedViolations.push(violation);
+        } else {
+          // Try to find a close match and fix the snippet
+          const fixedViolation = this.tryFixCodeSnippet(violation, context);
+          if (fixedViolation) {
+            validatedViolations.push(fixedViolation);
+          } else {
+            logger.debug(`⚠️ Skipping violation - snippet not found in diff: ${violation.file}`);
+            logger.debug(`   Original snippet: "${violation.code_snippet}"`);
+          }
+        }
+      } else {
+        // Non-inline violations are always valid
+        validatedViolations.push(violation);
+      }
     }
 
-    return `You are an Expert Code Reviewer conducting a comprehensive security and quality analysis.
+    logger.debug(`Validated ${validatedViolations.length} out of ${violations.length} violations`);
+    return validatedViolations;
+  }
 
-## IMPORTANT CONTEXT:
-**✅ All code changes have been successfully compiled and type-checked.**
-Focus on: logic, security, performance, maintainability, and best practices.
+  /**
+   * Try to fix code snippet by finding it in the actual diff
+   */
+  private tryFixCodeSnippet(violation: Violation, context: UnifiedContext): Violation | null {
+    if (!violation.file || !violation.code_snippet) return null;
 
-## PR DETAILS:
+    try {
+      // Get the diff for this specific file
+      let fileDiff: string | undefined;
+      
+      if (context.diffStrategy.strategy === 'whole' && context.prDiff) {
+        // Extract file diff from whole diff - handle different path formats
+        const diffLines = context.prDiff.diff.split('\n');
+        let fileStartIndex = -1;
+        
+        // Generate all possible path variations
+        const pathVariations = this.generatePathVariations(violation.file);
+        
+        // Try to find the file in the diff with various path formats
+        for (let i = 0; i < diffLines.length; i++) {
+          const line = diffLines[i];
+          if (line.startsWith('diff --git') || line.startsWith('Index:')) {
+            for (const pathVariation of pathVariations) {
+              if (line.includes(pathVariation)) {
+                fileStartIndex = i;
+                break;
+              }
+            }
+            if (fileStartIndex >= 0) break;
+          }
+        }
+        
+        if (fileStartIndex >= 0) {
+          const nextFileIndex = diffLines.findIndex((line, idx) => 
+            idx > fileStartIndex && (line.startsWith('diff --git') || line.startsWith('Index:'))
+          );
+          
+          fileDiff = diffLines.slice(
+            fileStartIndex, 
+            nextFileIndex > 0 ? nextFileIndex : diffLines.length
+          ).join('\n');
+        }
+      } else if (context.diffStrategy.strategy === 'file-by-file' && context.fileDiffs) {
+        // Try all path variations
+        const pathVariations = this.generatePathVariations(violation.file);
+        
+        for (const path of pathVariations) {
+          fileDiff = context.fileDiffs.get(path);
+          if (fileDiff) {
+            logger.debug(`Found diff for ${violation.file} using variation: ${path}`);
+            break;
+          }
+        }
+
+        // If still not found, try partial matching
+        if (!fileDiff) {
+          for (const [key, value] of context.fileDiffs.entries()) {
+            if (key.endsWith(violation.file) || violation.file.endsWith(key)) {
+              fileDiff = value;
+              logger.debug(`Found diff for ${violation.file} using partial match: ${key}`);
+              break;
+            }
+          }
+        }
+      }
+
+      if (!fileDiff) {
+        logger.debug(`❌ Could not find diff for file: ${violation.file}`);
+        return null;
+      }
+
+      // First, try to find the exact line with line number extraction
+      const lineInfo = this.extractLineNumberFromDiff(fileDiff, violation.code_snippet);
+      if (lineInfo) {
+        const fixedViolation = { ...violation };
+        fixedViolation.line_type = lineInfo.lineType;
+        
+        // Extract search context from the diff
+        const diffLines = fileDiff.split('\n');
+        const snippetIndex = diffLines.findIndex(line => line === violation.code_snippet);
+        if (snippetIndex > 0 && snippetIndex < diffLines.length - 1) {
+          fixedViolation.search_context = {
+            before: [diffLines[snippetIndex - 1]],
+            after: [diffLines[snippetIndex + 1]]
+          };
+        }
+        
+        logger.debug(`✅ Found exact match with line number for ${violation.file}`);
+        return fixedViolation;
+      }
+
+      // Fallback: Clean the snippet and try fuzzy matching
+      const cleanSnippet = violation.code_snippet
+        .trim()
+        .replace(/^[+\-\s]/, ''); // Remove diff prefix for searching
+
+      // Look for the clean snippet in the diff
+      const diffLines = fileDiff.split('\n');
+      for (let i = 0; i < diffLines.length; i++) {
+        const line = diffLines[i];
+        const cleanLine = line.replace(/^[+\-\s]/, '').trim();
+        
+        if (cleanLine.includes(cleanSnippet) || cleanSnippet.includes(cleanLine)) {
+          // Found a match! Update the violation with the correct snippet
+          const fixedViolation = { ...violation };
+          fixedViolation.code_snippet = line; // Use the full line with diff prefix
+          
+          // Update search context if needed
+          if (i > 0 && i < diffLines.length - 1) {
+            fixedViolation.search_context = {
+              before: [diffLines[i - 1]],
+              after: [diffLines[i + 1]]
+            };
+          }
+          
+          logger.debug(`✅ Fixed code snippet for ${violation.file} using fuzzy match`);
+          return fixedViolation;
+        }
+      }
+
+      logger.debug(`❌ Could not find snippet in diff for ${violation.file}`);
+      logger.debug(`   Looking for: "${violation.code_snippet}"`);
+    } catch (error) {
+      logger.debug(`Error fixing code snippet: ${(error as Error).message}`);
+    }
+
+    return null;
+  }
+
+  /**
+   * Get system prompt for security-focused code review
+   */
+  private getSecurityReviewSystemPrompt(): string {
+    return this.reviewConfig.systemPrompt || 
+      `You are an Expert Security Code Reviewer for enterprise applications. Your role is to:
+
+🔒 SECURITY FIRST: Prioritize security vulnerabilities and data protection
+⚡ PERFORMANCE AWARE: Identify performance bottlenecks and optimization opportunities  
+🏗️ QUALITY FOCUSED: Ensure maintainable, readable, and robust code
+🛡️ ERROR RESILIENT: Verify comprehensive error handling and edge cases
+
+You provide actionable, educational feedback with specific examples and solutions.
+Focus on critical issues that could impact production systems.
+
+CRITICAL INSTRUCTION: When identifying issues, you MUST copy the EXACT line from the diff, including the diff prefix (+, -, or space). Do not modify or clean the line in any way.`;
+  }
+
+  /**
+   * Get analysis requirements from config or defaults
+   */
+  private getAnalysisRequirements(): string {
+    if (this.reviewConfig.focusAreas && this.reviewConfig.focusAreas.length > 0) {
+      return this.reviewConfig.focusAreas.map(area => `### ${area}`).join('\n\n');
+    }
+    
+    // Default analysis requirements
+    return `### 🔒 Security Analysis (CRITICAL PRIORITY)
+- SQL/XSS/Command injection vulnerabilities
+- Authentication/authorization flaws
+- Input validation and sanitization
+- Hardcoded secrets or credentials
+- Data exposure and privacy concerns
+
+### ⚡ Performance Review
+- Algorithm efficiency and complexity
+- Database query optimization
+- Memory management and resource leaks
+- Caching opportunities
+
+### 🏗️ Code Quality
+- SOLID principles compliance
+- Error handling robustness
+- Code organization and readability
+- Test coverage considerations`;
+  }
+
+  /**
+   * Build focused analysis prompt separated from context
+   */
+  private buildCoreAnalysisPrompt(context: UnifiedContext): string {
+    const diffContent = this.extractDiffContent(context);
+    
+    return `Conduct a comprehensive security and quality analysis of this ${context.diffStrategy.strategy === 'whole' ? 'pull request' : 'code changeset'}.
+
+## COMPLETE PR CONTEXT:
 **Title**: ${context.pr.title}
-**Author**: ${context.pr.author}
+**Author**: ${context.pr.author}  
 **Description**: ${context.pr.description}
 **Files Changed**: ${context.pr.fileChanges?.length || 0}
-**Comments**: ${JSON.stringify(context.pr.comments || [], null, 2)}
+**Existing Comments**: ${JSON.stringify(context.pr.comments || [], null, 2)}
+**Branch**: ${context.identifier.branch}
+**Repository**: ${context.identifier.workspace}/${context.identifier.repository}
 
-## DIFF ANALYSIS (${context.diffStrategy.strategy.toUpperCase()} STRATEGY):
+## DIFF STRATEGY (${context.diffStrategy.strategy.toUpperCase()}):
 **Reason**: ${context.diffStrategy.reason}
 **File Count**: ${context.diffStrategy.fileCount}
 **Estimated Size**: ${context.diffStrategy.estimatedSize}
 
-### CODE CHANGES:
-${this.truncateForAI(diffContent)}
+## COMPLETE PROJECT CONTEXT:
+${context.projectContext.memoryBank.projectContext || context.projectContext.memoryBank.summary}
 
-## PROJECT CONTEXT:
-${context.projectContext.memoryBank.summary}
-
-## PROJECT RULES:
+## PROJECT RULES & STANDARDS:
 ${context.projectContext.clinerules || 'No specific rules defined'}
 
-## REVIEW FRAMEWORK:
+## COMPLETE CODE CHANGES (NO TRUNCATION):
+${diffContent}
 
-### 🔒 Security Analysis (Priority: CRITICAL)
-- Input validation and sanitization
-- SQL/XSS/Command injection prevention
-- Authentication/authorization flaws
-- Hardcoded secrets detection
-- Dependency vulnerabilities
+## CRITICAL INSTRUCTIONS FOR CODE SNIPPETS:
 
-### ⚡ Performance Review (Priority: MAJOR)
-- Algorithm efficiency (O(n) complexity issues)
-- Database query optimization (N+1 problems)
-- Memory leaks and resource management
-- Caching opportunities
-- Unnecessary computations
+When you identify an issue in the code, you MUST:
+1. Copy the EXACT line from the diff above, including the diff prefix (+, -, or space at the beginning)
+2. Do NOT modify, clean, or reformat the line
+3. Include the complete line as it appears in the diff
+4. If the issue spans multiple lines, choose the most relevant single line
 
-### 🏗️ Code Quality (Priority: MINOR/SUGGESTION)
-- SOLID principles adherence
-- DRY principle violations
-- Consistent naming conventions
-- Proper error handling
-- Code organization and readability
+Example of CORRECT snippet format:
+- For added lines: "+    const password = 'hardcoded123';"
+- For removed lines: "-    return userData;"  
+- For context lines: "     function processPayment() {"
 
-### 🛡️ Reliability & Error Handling
-- Comprehensive error handling
-- Edge case coverage
-- Graceful failure modes
-- Proper logging implementation
+Example of INCORRECT snippet format (DO NOT DO THIS):
+- "const password = 'hardcoded123';" (missing the + prefix)
+- "return userData" (missing the - prefix and semicolon)
 
-## SEVERITY GUIDELINES:
-- **CRITICAL** 🚨: Security vulnerabilities, data corruption risks, breaking changes
-- **MAJOR** ⚠️: Logic errors, performance issues, maintainability problems
-- **MINOR** 📝: Code style issues, minor optimizations, naming improvements
-- **SUGGESTION** 💡: Best practices, refactoring opportunities, additional features
+## ANALYSIS REQUIREMENTS:
 
-## CRITICAL REQUIREMENTS:
+${this.getAnalysisRequirements()}
 
-### Comment Awareness:
-- Review existing PR comments: ${JSON.stringify(context.pr.comments || [])}
-- DO NOT repeat issues already discussed
-- Acknowledge developer responses if present
-- Focus on NEW issues not yet addressed
-
-### Code Snippet Format:
-- **MANDATORY**: code_snippet must be EXACTLY ONE LINE from the diff
-- Include diff prefixes (+, -, or space) in code_snippet
-- Use search_context for additional context lines
-- Each context line must be a separate array element
-
-### Suggestion Format:
-- Must contain CLEAN, executable code
-- NO diff symbols (+, -, spaces) in suggestions
-- Complete, copy-pasteable code solutions
-
-## OUTPUT FORMAT:
-Return ONLY this JSON structure:
-
+### 📋 OUTPUT FORMAT
+Return ONLY valid JSON:
 {
   "violations": [
     {
       "type": "inline",
-      "file": "path/to/file.ext",
-      "code_snippet": "+const query = \`SELECT * FROM users WHERE id = \${id}\`;",
+      "file": "exact/file/path.ext",
+      "code_snippet": "EXACT line from diff INCLUDING the +/- prefix",
       "search_context": {
-        "before": ["function getUser(id) {", "  try {"],
-        "after": ["    return db.query(query);", "  } catch (error) {"]
+        "before": ["line before from diff with prefix"],
+        "after": ["line after from diff with prefix"]
       },
-      "severity": "CRITICAL",
-      "category": "security",
-      "issue": "SQL Injection Vulnerability",
-      "message": "Direct string interpolation in SQL query enables injection attacks",
-      "impact": "Attackers could execute arbitrary SQL commands, potentially accessing or modifying sensitive data",
-      "suggestion": "const query = 'SELECT * FROM users WHERE id = ?';\\nreturn db.query(query, [id]);"
+      "severity": "CRITICAL|MAJOR|MINOR|SUGGESTION",
+      "category": "security|performance|maintainability|functionality",
+      "issue": "Brief issue title",
+      "message": "Detailed explanation",
+      "impact": "Potential impact description",
+      "suggestion": "Clean, executable code fix (no diff symbols)"
     }
   ],
-  "summary": "Review identified X critical, Y major, Z minor issues requiring attention",
-  "positiveObservations": [
-    "Excellent error handling implementation",
-    "Good use of TypeScript for type safety",
-    "Well-structured component architecture"
-  ],
+  "summary": "Analysis summary",
+  "positiveObservations": ["Good practices found"],
   "statistics": {
     "filesReviewed": ${context.diffStrategy.fileCount},
     "totalIssues": 0,
@@ -201,36 +358,126 @@ Return ONLY this JSON structure:
     "minorCount": 0,
     "suggestionCount": 0
   }
-}
+}`;
+  }
 
-**FINAL REMINDERS:**
-1. Focus on actionable feedback with specific examples
-2. Provide educational explanations for violations
-3. Balance criticism with positive observations
-4. Ensure suggestions contain clean, runnable code
-5. Consider the project context and established patterns`;
+  /**
+   * Extract diff content based on strategy
+   */
+  private extractDiffContent(context: UnifiedContext): string {
+    if (context.diffStrategy.strategy === 'whole' && context.prDiff) {
+      return context.prDiff.diff || JSON.stringify(context.prDiff, null, 2);
+    } else if (context.diffStrategy.strategy === 'file-by-file' && context.fileDiffs) {
+      const fileDiffArray = Array.from(context.fileDiffs.entries()).map(([file, diff]) => ({
+        file,
+        diff
+      }));
+      return JSON.stringify(fileDiffArray, null, 2);
+    }
+    return 'No diff content available';
+  }
+
+  /**
+   * Detect project type for better context
+   */
+  private detectProjectType(context: UnifiedContext): string {
+    const fileExtensions = new Set<string>();
+    
+    // Extract file extensions from changes
+    if (context.pr.fileChanges) {
+      context.pr.fileChanges.forEach(file => {
+        const ext = file.split('.').pop()?.toLowerCase();
+        if (ext) fileExtensions.add(ext);
+      });
+    }
+
+    if (fileExtensions.has('rs') || fileExtensions.has('res')) return 'rescript';
+    if (fileExtensions.has('ts') || fileExtensions.has('tsx')) return 'typescript';
+    if (fileExtensions.has('js') || fileExtensions.has('jsx')) return 'javascript';
+    if (fileExtensions.has('py')) return 'python';
+    if (fileExtensions.has('go')) return 'golang';
+    if (fileExtensions.has('java')) return 'java';
+    if (fileExtensions.has('cpp') || fileExtensions.has('c')) return 'cpp';
+    
+    return 'mixed';
+  }
+
+  /**
+   * Assess complexity level for better AI context
+   */
+  private assessComplexity(context: UnifiedContext): 'low' | 'medium' | 'high' | 'very-high' {
+    const fileCount = context.diffStrategy.fileCount;
+    const hasLargeFiles = context.diffStrategy.estimatedSize.includes('Large');
+    const hasComments = (context.pr.comments?.length || 0) > 0;
+    
+    if (fileCount > 50) return 'very-high';
+    if (fileCount > 20 || hasLargeFiles) return 'high';
+    if (fileCount > 10 || hasComments) return 'medium';
+    return 'low';
+  }
+
+  /**
+   * Legacy method - kept for compatibility but simplified
+   */
+  private buildAnalysisPrompt(context: UnifiedContext, _options: ReviewOptions): string {
+    // Legacy method - now delegates to new structure
+    return this.buildCoreAnalysisPrompt(context);
   }
 
   /**
    * Analyze code with AI using the enhanced prompt
    */
-  private async analyzeWithAI(prompt: string): Promise<Violation[]> {
+  private async analyzeWithAI(prompt: string, context: UnifiedContext): Promise<Violation[]> {
     try {
       logger.debug('Starting AI analysis...');
 
+      // Initialize NeuroLink with eval-based dynamic import
+      if (!this.neurolink) {
+        const dynamicImport = eval('(specifier) => import(specifier)');
+        const { NeuroLink } = await dynamicImport('@juspay/neurolink');
+        this.neurolink = new NeuroLink();
+      }
+
+      // Extract context from unified context for better AI understanding
+      const aiContext = {
+        operation: 'code-review',
+        repository: `${context.identifier.workspace}/${context.identifier.repository}`,
+        branch: context.identifier.branch,
+        prId: context.identifier.pullRequestId,
+        prTitle: context.pr.title,
+        prAuthor: context.pr.author,
+        fileCount: context.diffStrategy.fileCount,
+        diffStrategy: context.diffStrategy.strategy,
+        analysisType: context.diffStrategy.strategy === 'whole' ? 'comprehensive' : 'file-by-file',
+        projectType: this.detectProjectType(context),
+        hasExistingComments: (context.pr.comments?.length || 0) > 0,
+        complexity: this.assessComplexity(context)
+      };
+
+      // Simplified, focused prompt without context pollution
+      const corePrompt = this.buildCoreAnalysisPrompt(context);
+
       const result = await this.neurolink.generate({
-        input: { text: prompt },
-        provider: this.aiConfig.provider,
-        model: this.aiConfig.model,
-        temperature: this.aiConfig.temperature || 0.7,
-        maxTokens: this.aiConfig.maxTokens || 1000000,
-        timeout: '6m',
-        enableAnalytics: this.aiConfig.enableAnalytics,
-        enableEvaluation: this.aiConfig.enableEvaluation
+        input: { text: corePrompt },
+        systemPrompt: this.getSecurityReviewSystemPrompt(),
+        provider: this.aiConfig.provider || 'auto', // Auto-select best provider
+        model: this.aiConfig.model || 'best', // Use most capable model
+        temperature: this.aiConfig.temperature || 0.3, // Lower for more focused analysis
+        maxTokens: Math.max(this.aiConfig.maxTokens || 0, 2000000), // Quality first - always use higher limit
+        timeout: '15m', // Allow plenty of time for thorough analysis
+        context: aiContext,
+        enableAnalytics: this.aiConfig.enableAnalytics || true,
+        enableEvaluation: false // Disabled to prevent evaluation warnings
       });
+
+      // Log analytics if available
+      if (result.analytics) {
+        logger.debug(`AI Analytics - Provider: ${result.provider}, Response Time: ${result.responseTime}ms, Quality Score: ${result.evaluation?.overallScore}`);
+      }
 
       logger.debug('AI analysis completed, parsing response...');
 
+      // Modern NeuroLink returns { content: string }
       const analysisData = this.parseAIResponse(result);
       
       // Display AI response for debugging
@@ -251,7 +498,7 @@ Return ONLY this JSON structure:
 
     } catch (error) {
       if ((error as Error).message?.includes('timeout')) {
-        logger.error('⏰ AI analysis timed out after 6 minutes');
+        logger.error('⏰ AI analysis timed out after 15 minutes');
         throw new Error('Analysis timeout - try reducing diff size or adjusting timeout');
       }
       logger.error(`AI analysis failed: ${(error as Error).message}`);
@@ -260,16 +507,18 @@ Return ONLY this JSON structure:
   }
 
   /**
-   * Post comments to PR using unified context
+   * Post comments to PR using unified context - matching pr-police.js exactly
    */
   private async postComments(
     context: UnifiedContext,
     violations: Violation[],
-    options: ReviewOptions
+    _options: ReviewOptions
   ): Promise<void> {
     logger.phase('📝 Posting review comments...');
 
     let commentsPosted = 0;
+    let commentsFailed = 0;
+    const failedComments: { file?: string; issue: string; error: string }[] = [];
     
     // Post inline comments
     const inlineViolations = violations.filter(v => 
@@ -278,38 +527,71 @@ Return ONLY this JSON structure:
 
     for (const violation of inlineViolations) {
       try {
+        // Clean file path - remove protocol prefixes ONLY (keep a/ and b/ prefixes)
+        let cleanFilePath = violation.file!;
+        if (cleanFilePath.startsWith("src://")) {
+          cleanFilePath = cleanFilePath.replace("src://", "");
+        }
+        if (cleanFilePath.startsWith("dst://")) {
+          cleanFilePath = cleanFilePath.replace("dst://", "");
+        }
+
+        // Clean code snippet and fix search context - EXACTLY like pr-police.js
         const processedViolation = this.cleanCodeSnippet(violation);
         if (!processedViolation) {
-          logger.debug(`⚠️ Skipping invalid violation for ${violation.file}`);
+          logger.debug(`⚠️ Skipping invalid violation for ${cleanFilePath}`);
           continue;
         }
 
         const formattedComment = this.formatInlineComment(processedViolation);
 
+        // Debug logging
+        logger.debug(`🔍 Posting inline comment:`);
+        logger.debug(`   File: ${cleanFilePath}`);
+        logger.debug(`   Issue: ${processedViolation.issue}`);
+        logger.debug(`   Original snippet: ${violation.code_snippet}`);
+        logger.debug(`   Processed snippet: ${processedViolation.code_snippet}`);
+        if (processedViolation.search_context) {
+          logger.debug(`   Search context before: ${JSON.stringify(processedViolation.search_context.before)}`);
+          logger.debug(`   Search context after: ${JSON.stringify(processedViolation.search_context.after)}`);
+        }
+
+        // Use new code snippet approach - EXACTLY like pr-police.js
         await this.bitbucketProvider.addComment(
           context.identifier,
           formattedComment,
           {
-            filePath: this.cleanFilePath(violation.file!),
+            filePath: cleanFilePath,
+            lineNumber: undefined, // No line number needed - use pure snippet matching
+            lineType: processedViolation.line_type || "ADDED", // Default to ADDED if not specified
             codeSnippet: processedViolation.code_snippet,
             searchContext: processedViolation.search_context,
-            matchStrategy: 'best',
-            suggestion: processedViolation.suggestion
+            matchStrategy: "best", // Use best match strategy instead of strict for flexibility
+            suggestion: processedViolation.suggestion // Pass the suggestion for inline code suggestions
           }
         );
-
-        commentsPosted++;
-        logger.debug(`✅ Posted comment: ${violation.file} (${violation.issue})`);
         
+        commentsPosted++;
+        logger.debug(`✅ Posted inline comment: ${cleanFilePath} (${processedViolation.issue})`);
       } catch (error) {
-        logger.debug(`❌ Failed to post comment: ${(error as Error).message}`);
+        commentsFailed++;
+        const errorMsg = (error as Error).message;
+        logger.debug(`❌ Failed to post inline comment: ${errorMsg}`);
+        logger.debug(`   File: ${violation.file}, Issue: ${violation.issue}`);
+        logger.debug(`   Code snippet: ${violation.code_snippet}`);
+        
+        failedComments.push({
+          file: violation.file,
+          issue: violation.issue,
+          error: errorMsg
+        });
       }
     }
 
-    // Post summary comment
+    // Post summary comment (include failed comments info if any)
     if (violations.length > 0) {
       try {
-        const summaryComment = this.generateSummaryComment(violations, context);
+        const summaryComment = this.generateSummaryComment(violations, context, failedComments);
         await this.bitbucketProvider.addComment(context.identifier, summaryComment);
         commentsPosted++;
         logger.debug('✅ Posted summary comment');
@@ -319,6 +601,9 @@ Return ONLY this JSON structure:
     }
 
     logger.success(`✅ Posted ${commentsPosted} comments successfully`);
+    if (commentsFailed > 0) {
+      logger.warn(`⚠️ Failed to post ${commentsFailed} inline comments`);
+    }
   }
 
   /**
@@ -361,7 +646,9 @@ Return ONLY this JSON structure:
       };
       const language = langMap[fileExt] || 'text';
 
-      comment += `\n\n**💡 Suggested Fix**:\n\`\`\`${language}\n${violation.suggestion}\n\`\`\``;
+      // Use the escape method for code blocks
+      const escapedCodeBlock = this.escapeMarkdownCodeBlock(violation.suggestion, language);
+      comment += `\n\n**💡 Suggested Fix**:\n${escapedCodeBlock}`;
     }
 
     comment += `\n\n---\n*🛡️ Automated review by **Yama** • Powered by AI*`;
@@ -370,9 +657,13 @@ Return ONLY this JSON structure:
   }
 
   /**
-   * Generate comprehensive summary comment
+   * Generate comprehensive summary comment with failed comments info
    */
-  private generateSummaryComment(violations: Violation[], context: UnifiedContext): string {
+  private generateSummaryComment(
+    violations: Violation[], 
+    context: UnifiedContext,
+    failedComments: { file?: string; issue: string; error: string }[] = []
+  ): string {
     const stats = this.calculateStats(violations);
     
     const statusEmoji = stats.criticalCount > 0 ? '🚨' : 
@@ -386,7 +677,7 @@ Return ONLY this JSON structure:
 
     let comment = `
 ╭─────────────────────────────────────────────────────────────╮
-│                    🛡️ **PR GUARDIAN REPORT** 🛡️               │
+│                    ⚔️ **YAMA REVIEW REPORT** ⚔️               │
 ╰─────────────────────────────────────────────────────────────╯
 
 ## ${statusEmoji} **${statusText}**
@@ -423,6 +714,17 @@ Return ONLY this JSON structure:
       }
     }
 
+    // Add failed comments section if any
+    if (failedComments.length > 0) {
+      comment += `\n\n### ⚠️ **Note on Inline Comments**\n`;
+      comment += `Some inline comments could not be posted due to code matching issues. `;
+      comment += `Please review the following issues manually:\n\n`;
+      
+      for (const failed of failedComments) {
+        comment += `- **${failed.issue}** in \`${failed.file || 'unknown file'}\`\n`;
+      }
+    }
+
     // Add recommendation
     const recommendation = stats.criticalCount > 0 
       ? '🚨 **URGENT**: Critical security issues must be resolved before merge'
@@ -446,24 +748,135 @@ ${recommendation}
    * Helper methods for processing violations
    */
   private cleanFilePath(filePath: string): string {
-    return filePath.replace(/^(src|dst):\/\//, '');
+    // Clean the file path but preserve the structure - EXACTLY like pr-police.js
+    // Only clean src:// and dst:// prefixes, keep a/ and b/ prefixes
+    const cleaned = filePath
+      .replace(/^(src|dst):\/\//, '');
+    
+    // Log the cleaning for debugging
+    if (cleaned !== filePath) {
+      logger.debug(`Cleaned file path: ${filePath} -> ${cleaned}`);
+    }
+    
+    return cleaned;
+  }
+
+  /**
+   * Extract exact file path from diff
+   */
+  private extractFilePathFromDiff(diff: string, fileName: string): string | null {
+    const lines = diff.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('diff --git')) {
+        // Extract both paths: a/path/to/file b/path/to/file
+        const match = line.match(/diff --git a\/(.*?) b\/(.*?)$/);
+        if (match && (match[1].includes(fileName) || match[2].includes(fileName))) {
+          return match[2]; // Return the 'b/' path (destination)
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Extract line number from diff for a specific code snippet
+   */
+  private extractLineNumberFromDiff(
+    fileDiff: string, 
+    codeSnippet: string
+  ): { lineNumber: number; lineType: 'ADDED' | 'REMOVED' | 'CONTEXT' } | null {
+    const lines = fileDiff.split('\n');
+    let currentNewLine = 0;
+    let currentOldLine = 0;
+    let inHunk = false;
+    
+    // Debug logging
+    logger.debug(`Looking for snippet: "${codeSnippet}"`);
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Parse hunk headers (e.g., @@ -10,6 +10,8 @@)
+      const hunkMatch = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+      if (hunkMatch) {
+        // Hunk headers show the starting line numbers (1-based)
+        currentOldLine = parseInt(hunkMatch[1]);
+        currentNewLine = parseInt(hunkMatch[2]);
+        inHunk = true;
+        logger.debug(`Found hunk header: old=${currentOldLine}, new=${currentNewLine}`);
+        continue;
+      }
+      
+      // Skip lines that aren't part of the diff content
+      if (!inHunk || (!line.startsWith('+') && !line.startsWith('-') && !line.startsWith(' '))) {
+        continue;
+      }
+      
+      // Check if this line matches our snippet
+      if (line === codeSnippet) {
+        let resultLine: number;
+        let lineType: 'ADDED' | 'REMOVED' | 'CONTEXT';
+        
+        if (line.startsWith('+')) {
+          resultLine = currentNewLine;
+          lineType = 'ADDED';
+        } else if (line.startsWith('-')) {
+          resultLine = currentOldLine;
+          lineType = 'REMOVED';
+        } else {
+          resultLine = currentNewLine;
+          lineType = 'CONTEXT';
+        }
+        
+        logger.debug(`Found match at line ${resultLine} (${lineType})`);
+        return { lineNumber: resultLine, lineType };
+      }
+      
+      // Update line counters AFTER checking for match
+      // For added lines: only increment new line counter
+      // For removed lines: only increment old line counter
+      // For context lines: increment both counters
+      if (line.startsWith('+')) {
+        currentNewLine++;
+      } else if (line.startsWith('-')) {
+        currentOldLine++;
+      } else if (line.startsWith(' ')) {
+        currentNewLine++;
+        currentOldLine++;
+      }
+    }
+    
+    logger.debug(`Snippet not found in diff`);
+    return null;
+  }
+
+  /**
+   * Escape markdown code blocks properly
+   */
+  private escapeMarkdownCodeBlock(code: string, language: string): string {
+    // If code contains triple backticks, use quadruple backticks
+    if (code.includes('```')) {
+      return `\`\`\`\`${language}\n${code}\n\`\`\`\``;
+    }
+    return `\`\`\`${language}\n${code}\n\`\`\``;
   }
 
   private cleanCodeSnippet(violation: Violation): Violation | null {
     try {
+      // Clone the violation to avoid modifying the original - EXACTLY like pr-police.js
       const fixed = JSON.parse(JSON.stringify(violation));
-
-      // Clean search context arrays
+      
+      // Fix search_context arrays if they contain embedded newlines
       if (fixed.search_context) {
-        if (fixed.search_context.before) {
+        if (fixed.search_context.before && Array.isArray(fixed.search_context.before)) {
           fixed.search_context.before = this.splitArrayLines(fixed.search_context.before);
         }
-        if (fixed.search_context.after) {
+        if (fixed.search_context.after && Array.isArray(fixed.search_context.after)) {
           fixed.search_context.after = this.splitArrayLines(fixed.search_context.after);
         }
       }
 
-      // Set line type based on code snippet prefix
+      // Ensure line_type is set based on code snippet prefix BEFORE cleaning
       if (!fixed.line_type && fixed.code_snippet) {
         if (fixed.code_snippet.startsWith('+')) {
           fixed.line_type = 'ADDED';
@@ -474,18 +887,23 @@ ${recommendation}
         }
       }
 
-      // Clean suggestion field
+      // Clean the code_snippet field to remove diff symbols - EXACTLY like pr-police.js
+      if (fixed.code_snippet) {
+        fixed.code_snippet = fixed.code_snippet.replace(/^[+\-\s]/, '').trim();
+      }
+
+      // Clean the suggestion field to remove any diff symbols
       if (fixed.suggestion) {
         fixed.suggestion = fixed.suggestion
           .split('\n')
-          .map((line: string) => line.replace(/^[+\-\s]/, ''))
+          .map((line: string) => line.replace(/^[+\-\s]/, '')) // Remove diff symbols at start of each line
           .join('\n')
           .trim();
       }
 
       return fixed;
     } catch (error) {
-      logger.debug(`Error cleaning code snippet: ${(error as Error).message}`);
+      logger.debug(`❌ Error cleaning code snippet: ${(error as Error).message}`);
       return null;
     }
   }
@@ -527,8 +945,8 @@ ${recommendation}
 
   private generateReviewResult(
     violations: Violation[], 
-    duration: number, 
-    context: UnifiedContext
+    _duration: number, 
+    _context: UnifiedContext
   ): ReviewResult {
     const stats = this.calculateStats(violations);
     
@@ -552,7 +970,7 @@ ${recommendation}
    */
   private parseAIResponse(result: any): any {
     try {
-      let responseText = result.content || result.text || result.response || '';
+      const responseText = result.content || result.text || result.response || '';
       
       if (!responseText) {
         return { violations: [] };
@@ -571,18 +989,145 @@ ${recommendation}
     }
   }
 
-  private truncateForAI(text: string): string {
-    const maxLength = 15000; // Larger limit for better analysis
-    if (text.length > maxLength) {
-      return text.substring(0, maxLength) + '\n\n... (content truncated for analysis)';
+  /**
+   * Extract line information for comment from context
+   */
+  private extractLineInfoForComment(
+    violation: Violation,
+    context: UnifiedContext
+  ): { lineNumber: number; lineType: 'ADDED' | 'REMOVED' | 'CONTEXT' } | null {
+    if (!violation.file || !violation.code_snippet) return null;
+
+    try {
+      // Get the diff for this specific file
+      let fileDiff: string | undefined;
+      
+      if (context.diffStrategy.strategy === 'whole' && context.prDiff) {
+        // Extract file diff from whole diff
+        const diffLines = context.prDiff.diff.split('\n');
+        let fileStartIndex = -1;
+        
+        // Create all possible path variations for matching
+        const filePathVariations = this.generatePathVariations(violation.file);
+        
+        for (let i = 0; i < diffLines.length; i++) {
+          const line = diffLines[i];
+          if (line.startsWith('diff --git')) {
+            // Check if any variation matches
+            for (const pathVariation of filePathVariations) {
+              if (line.includes(pathVariation)) {
+                fileStartIndex = i;
+                break;
+              }
+            }
+            if (fileStartIndex >= 0) break;
+          }
+        }
+        
+        if (fileStartIndex >= 0) {
+          const nextFileIndex = diffLines.findIndex((line, idx) => 
+            idx > fileStartIndex && line.startsWith('diff --git')
+          );
+          
+          fileDiff = diffLines.slice(
+            fileStartIndex, 
+            nextFileIndex > 0 ? nextFileIndex : diffLines.length
+          ).join('\n');
+        }
+      } else if (context.diffStrategy.strategy === 'file-by-file' && context.fileDiffs) {
+        // Try all possible path variations
+        const pathVariations = this.generatePathVariations(violation.file);
+        
+        for (const path of pathVariations) {
+          fileDiff = context.fileDiffs.get(path);
+          if (fileDiff) {
+            logger.debug(`Found diff for ${violation.file} using variation: ${path}`);
+            break;
+          }
+        }
+
+        // If still not found, try to find by partial match
+        if (!fileDiff) {
+          for (const [key, value] of context.fileDiffs.entries()) {
+            if (key.endsWith(violation.file) || violation.file.endsWith(key)) {
+              fileDiff = value;
+              logger.debug(`Found diff for ${violation.file} using partial match: ${key}`);
+              break;
+            }
+          }
+        }
+      }
+
+      if (fileDiff) {
+        const lineInfo = this.extractLineNumberFromDiff(fileDiff, violation.code_snippet);
+        if (lineInfo) {
+          logger.debug(`Extracted line info for ${violation.file}: line ${lineInfo.lineNumber}, type ${lineInfo.lineType}`);
+        }
+        return lineInfo;
+      } else {
+        logger.debug(`No diff found for file: ${violation.file}`);
+      }
+    } catch (error) {
+      logger.debug(`Error extracting line info: ${(error as Error).message}`);
     }
-    return text;
+
+    return null;
+  }
+
+  /**
+   * Generate all possible path variations for a file
+   */
+  private generatePathVariations(filePath: string): string[] {
+    const variations = new Set<string>();
+    
+    // Add original path
+    variations.add(filePath);
+    
+    // Add with a/ and b/ prefixes
+    variations.add(`a/${filePath}`);
+    variations.add(`b/${filePath}`);
+    
+    // Handle nested paths 
+    if (filePath.includes('/')) {
+      const parts = filePath.split('/');
+      
+      // Try removing first directory
+      if (parts.length > 1) {
+        variations.add(parts.slice(1).join('/'));
+      }
+      
+      // Try removing first two directories
+      if (parts.length > 2) {
+        variations.add(parts.slice(2).join('/'));
+      }
+      
+      // Try with just the filename
+      variations.add(parts[parts.length - 1]);
+    }
+    
+    // Remove app/ prefix variations
+    if (filePath.startsWith('app/')) {
+      const withoutApp = filePath.substring(4);
+      variations.add(withoutApp);
+      variations.add(`a/${withoutApp}`);
+      variations.add(`b/${withoutApp}`);
+    }
+    
+    // Add app/ prefix variations
+    if (!filePath.startsWith('app/')) {
+      variations.add(`app/${filePath}`);
+      variations.add(`a/app/${filePath}`);
+      variations.add(`b/app/${filePath}`);
+    }
+    
+    return Array.from(variations);
   }
 }
 
 export function createCodeReviewer(
   bitbucketProvider: BitbucketProvider,
-  aiConfig: AIProviderConfig
+  aiConfig: AIProviderConfig,
+  reviewConfig: CodeReviewConfig
 ): CodeReviewer {
-  return new CodeReviewer(bitbucketProvider, aiConfig);
+  return new CodeReviewer(bitbucketProvider, aiConfig, reviewConfig);
 }

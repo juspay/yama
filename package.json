@@ -1,6 +1,6 @@
 {
   "name": "@juspay/yama",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Enterprise-grade Pull Request automation toolkit with AI-powered code review and description enhancement",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -86,7 +86,7 @@
   "homepage": "https://github.com/juspay/yama#readme",
   "license": "MIT",
   "author": {
-    "name": "Juspay",
-    "email": "opensource@juspay.in"
+    "name": "Juspay Technologies",
+    "email": "support@juspay.in"
   }
 }

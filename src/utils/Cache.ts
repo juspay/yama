@@ -4,7 +4,7 @@
  */
 
 import NodeCache from 'node-cache';
-import { Cache as ICache, CacheOptions, CacheEntry } from '../types';
+import { Cache as ICache, CacheOptions } from '../types';
 import { logger } from './Logger';
 
 export class Cache implements ICache {
@@ -25,20 +25,19 @@ export class Cache implements ICache {
       stdTTL: ttl,
       maxKeys: maxSize,
       checkperiod: checkPeriod,
-      useClones: false, // Better performance, be careful with object mutations
+      useClones: false,
       deleteOnExpire: true
     });
 
-    // Set up event listeners for cache management
-    this.cache.on('set', (key: string, value: any) => {
+    this.cache.on('set', (key: string, _value: any) => {
       logger.debug(`Cache SET: ${key}`);
     });
 
-    this.cache.on('expired', (key: string, value: any) => {
+    this.cache.on('expired', (key: string, _value: any) => {
       logger.debug(`Cache EXPIRED: ${key}`);
     });
 
-    this.cache.on('del', (key: string, value: any) => {
+    this.cache.on('del', (key: string, _value: any) => {
       logger.debug(`Cache DELETE: ${key}`);
     });
   }
@@ -138,13 +137,11 @@ export class Cache implements ICache {
     fetchFn: () => Promise<T>, 
     ttl?: number
   ): Promise<T> {
-    // Try to get from cache first
     const cached = this.get<T>(key);
     if (cached !== undefined) {
       return cached;
     }
 
-    // If not in cache, fetch and cache the result
     try {
       logger.debug(`Cache FETCH: ${key}`);
       const value = await fetchFn();

@@ -1,0 +1,136 @@
+# Yama Configuration Example
+# This file contains all available configuration options with explanations
+
+# AI Provider Configuration
+providers:
+  ai:
+    provider: "auto"  # Options: auto, google-ai, openai, anthropic, azure, bedrock
+    model: "best"     # Model name or "best" for auto-selection
+    temperature: 0.3  # Lower = more focused (0.0-1.0)
+    maxTokens: 2000000  # Maximum tokens for response
+    timeout: "15m"    # Timeout for AI operations
+    enableAnalytics: true
+    enableEvaluation: false
+
+  # Git Platform Configuration
+  git:
+    platform: "bitbucket"  # Options: bitbucket, github, gitlab, azure-devops
+    credentials:
+      username: "${BITBUCKET_USERNAME}"  # Environment variable
+      token: "${BITBUCKET_TOKEN}"        # Environment variable
+      baseUrl: "${BITBUCKET_BASE_URL}"   # Your Bitbucket server URL
+
+# Feature Configuration
+features:
+  # Code Review Configuration
+  codeReview:
+    enabled: true
+    severityLevels: ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"]
+    categories: ["security", "performance", "maintainability", "functionality", "error_handling"]
+    excludePatterns:
+      - "*.lock"
+      - "*.svg"
+      - "*.png"
+      - "*.jpg"
+      - "*.gif"
+      - "*.min.js"
+      - "*.min.css"
+      - "dist/**"
+      - "build/**"
+      - "vendor/**"
+    contextLines: 3  # Lines of context around changes
+    focusAreas:
+      - "Security vulnerabilities"
+      - "Performance bottlenecks"
+      - "Error handling"
+      - "Code quality"
+
+  # Description Enhancement Configuration
+  descriptionEnhancement:
+    enabled: true
+    preserveContent: true  # Always preserve existing content
+    autoFormat: true
+    requiredSections:
+      - key: "changelog"
+        name: "Changelog (Modules Modified)"
+        required: true
+      - key: "testcases"
+        name: "Test Cases (What to be tested)"
+        required: true
+      - key: "config_changes"
+        name: "CAC Config Or Service Config Changes"
+        required: true
+
+  # NEW: Diff Strategy Configuration
+  diffStrategy:
+    enabled: true
+    thresholds:
+      wholeDiffMaxFiles: 2      # Use whole diff for ≤2 files
+      fileByFileMinFiles: 3     # Use file-by-file for ≥3 files
+    # Optional: Force a specific strategy regardless of file count
+    # forceStrategy: "file-by-file"  # Options: whole, file-by-file, auto
+
+  # Security Scan Configuration (Future)
+  securityScan:
+    enabled: false
+    level: "strict"  # Options: strict, moderate, basic
+    scanTypes: ["dependencies", "secrets", "vulnerabilities"]
+
+  # Analytics Configuration (Future)
+  analytics:
+    enabled: false
+    trackMetrics: true
+    exportFormat: "json"  # Options: json, csv, yaml
+
+# Cache Configuration
+cache:
+  enabled: true
+  ttl: "30m"  # Time to live for cache entries
+  maxSize: "100MB"
+  storage: "memory"  # Options: memory, redis, file
+
+# Performance Configuration
+performance:
+  batch:
+    enabled: true
+    maxConcurrent: 5      # Max concurrent API calls
+    delayBetween: "1s"    # Delay between batches
+  optimization:
+    reuseConnections: true
+    compressRequests: false
+    enableHttp2: true
+
+# Custom Rules Configuration
+rules:
+  security:
+    - name: "No hardcoded secrets"
+      pattern: "(password|secret|key)\\s*=\\s*[\"'][^\"']+[\"']"
+      severity: "CRITICAL"
+      message: "Hardcoded secrets detected"
+      suggestion: "Use environment variables or secure configuration"
+    
+    - name: "SQL injection prevention"
+      pattern: "query\\([^?]+\\+.*\\)"
+      severity: "CRITICAL"
+      message: "Potential SQL injection vulnerability"
+      suggestion: "Use parameterized queries"
+
+  performance:
+    - name: "Avoid N+1 queries"
+      pattern: "forEach.*await.*query"
+      severity: "MAJOR"
+      message: "Potential N+1 query pattern detected"
+      suggestion: "Consider batch loading or joins"
+
+# Reporting Configuration
+reporting:
+  formats: ["markdown", "json"]
+  includeAnalytics: true
+  includeMetrics: true
+
+# Monitoring Configuration (Future)
+monitoring:
+  enabled: false
+  metrics: ["api_calls", "cache_hits", "processing_time"]
+  exportFormat: "prometheus"
+  interval: "1m"

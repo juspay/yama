@@ -120,3 +120,9 @@ simple-test.js
 # Cache directories
 .cache/
 *.cache/
+
+# Reference files
+*.reference.js
+*.old.js
+*.backup.js
+.claude/

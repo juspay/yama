@@ -3,14 +3,14 @@
  * Gathers all necessary context once and reuses it across all operations
  */
 
-import { NeuroLink } from '@juspay/neurolink';
+// NeuroLink will be dynamically imported
 import {
   PRIdentifier,
   PRInfo,
   PRDiff,
-  FileChange,
   AIProviderConfig,
-  ProviderError
+  ProviderError,
+  DiffStrategyConfig
 } from '../types';
 import { BitbucketProvider } from './providers/BitbucketProvider';
 import { logger } from '../utils/Logger';
@@ -35,19 +35,12 @@ export interface DiffStrategy {
 }
 
 export interface UnifiedContext {
-  // Core PR Information
   pr: PRInfo;
   identifier: PRIdentifier;
-  
-  // Project Context
   projectContext: ProjectContext;
-  
-  // Diff Information (with smart strategy)
   diffStrategy: DiffStrategy;
   prDiff?: PRDiff;
-  fileDiffs?: Map<string, string>; // file-by-file diffs
-  
-  // Metadata
+  fileDiffs?: Map<string, string>;
   contextId: string;
   gatheredAt: string;
   cacheHits: string[];
@@ -55,7 +48,7 @@ export interface UnifiedContext {
 }
 
 export class ContextGatherer {
-  private neurolink: NeuroLink;
+  private neurolink: any;
   private bitbucketProvider: BitbucketProvider;
   private aiConfig: AIProviderConfig;
   private startTime = 0;
@@ -66,7 +59,6 @@ export class ContextGatherer {
   ) {
     this.bitbucketProvider = bitbucketProvider;
     this.aiConfig = aiConfig;
-    this.neurolink = new NeuroLink();
   }
 
   /**
@@ -79,6 +71,7 @@ export class ContextGatherer {
       contextLines?: number;
       forceRefresh?: boolean;
       includeDiff?: boolean;
+      diffStrategyConfig?: DiffStrategyConfig;
     } = {}
   ): Promise<UnifiedContext> {
     this.startTime = Date.now();
@@ -92,7 +85,6 @@ export class ContextGatherer {
       // Step 1: Find and get PR information
       const pr = await this.findAndGetPR(identifier, cacheHits, options.forceRefresh);
       
-      // Update identifier with found PR ID
       const completeIdentifier: PRIdentifier = {
         ...identifier,
         pullRequestId: pr.id
@@ -105,8 +97,8 @@ export class ContextGatherer {
         options.forceRefresh
       );
 
-      // Step 3: Determine diff strategy based on file count
-      const diffStrategy = this.determineDiffStrategy(pr.fileChanges || []);
+      // Step 3: Determine diff strategy based on file count and config
+      const diffStrategy = this.determineDiffStrategy(pr.fileChanges || [], options.diffStrategyConfig);
       logger.info(`Diff strategy: ${diffStrategy.strategy} (${diffStrategy.reason})`);
 
       // Step 4: Get diff data based on strategy (if requested)
@@ -378,16 +370,40 @@ Extract and summarize the content and return ONLY this JSON format:
 }`;
 
     try {
+      // Initialize NeuroLink with eval-based dynamic import
+      if (!this.neurolink) {
+        const dynamicImport = eval('(specifier) => import(specifier)');
+        const { NeuroLink } = await dynamicImport('@juspay/neurolink');
+        this.neurolink = new NeuroLink();
+      }
+
+      // Context for project analysis
+      const aiContext = {
+        operation: 'project-context-analysis',
+        fileCount: Object.keys(fileContents).length,
+        hasClinerules: !!clinerules,
+        analysisType: 'memory-bank-synthesis'
+      };
+
       const result = await this.neurolink.generate({
         input: { text: prompt },
+        systemPrompt: 'You are an Expert Project Analyst. Synthesize project context from documentation and configuration files to help AI understand the codebase architecture, patterns, and business domain.',
         provider: this.aiConfig.provider,
         model: this.aiConfig.model,
-        temperature: 0.3, // Lower temperature for more consistent parsing
-        maxTokens: 50000,
-        timeout: '2m',
-        enableAnalytics: this.aiConfig.enableAnalytics
+        temperature: 0.3,
+        maxTokens: Math.max(this.aiConfig.maxTokens || 0, 500000), // Quality first - always use higher limit
+        timeout: '10m', // Allow longer processing for quality
+        context: aiContext,
+        enableAnalytics: this.aiConfig.enableAnalytics || true,
+        enableEvaluation: false  // Not needed for context synthesis
       });
 
+      // Log context analysis
+      if (result.analytics) {
+        logger.debug(`Context Analysis - Files: ${Object.keys(fileContents).length}, Provider: ${result.provider}`);
+      }
+
+      // Modern NeuroLink returns { content: string }
       const response = this.parseAIResponse(result);
       
       if (response.success) {
@@ -412,42 +428,57 @@ Extract and summarize the content and return ONLY this JSON format:
   /**
    * Step 3: Determine optimal diff strategy
    */
-  private determineDiffStrategy(fileChanges: string[]): DiffStrategy {
+  private determineDiffStrategy(fileChanges: string[], config?: DiffStrategyConfig): DiffStrategy {
     const fileCount = fileChanges.length;
     
-    // Estimate total diff size
-    let estimatedSize = 'Unknown';
+    // Get threshold values from config or use defaults
+    const wholeDiffMaxFiles = config?.thresholds?.wholeDiffMaxFiles ?? 2;
+    // Note: fileByFileMinFiles is currently same as wholeDiffMaxFiles + 1 
+    // but kept separate for future flexibility
+    
+    // Check if force strategy is configured
+    if (config?.forceStrategy && config.forceStrategy !== 'auto') {
+      return {
+        strategy: config.forceStrategy,
+        reason: `Forced by configuration`,
+        fileCount,
+        estimatedSize: this.estimateDiffSize(fileCount)
+      };
+    }
+    
+    // Determine strategy based on thresholds
     let strategy: 'whole' | 'file-by-file' = 'whole';
     let reason = '';
 
     if (fileCount === 0) {
       strategy = 'whole';
       reason = 'No files to analyze';
-      estimatedSize = '0 KB';
-    } else if (fileCount <= 5) {
+    } else if (fileCount <= wholeDiffMaxFiles) {
       strategy = 'whole';
-      reason = 'Small number of files, whole diff is efficient';
-      estimatedSize = 'Small (~10-50 KB)';
-    } else if (fileCount <= 20) {
-      strategy = 'whole';
-      reason = 'Moderate number of files, whole diff manageable';
-      estimatedSize = 'Medium (~50-200 KB)';
-    } else if (fileCount <= 50) {
-      strategy = 'file-by-file';
-      reason = 'Large number of files, file-by-file more efficient';
-      estimatedSize = 'Large (~200-500 KB)';
+      reason = `${fileCount} file(s) ≤ ${wholeDiffMaxFiles} (threshold), using whole diff`;
     } else {
       strategy = 'file-by-file';
-      reason = 'Very large changeset, file-by-file required for performance';
-      estimatedSize = 'Very Large (>500 KB)';
+      reason = `${fileCount} file(s) > ${wholeDiffMaxFiles} (threshold), using file-by-file`;
     }
 
     return {
       strategy,
       reason,
       fileCount,
-      estimatedSize
+      estimatedSize: this.estimateDiffSize(fileCount)
     };
+  }
+
+  /**
+   * Estimate diff size based on file count
+   */
+  private estimateDiffSize(fileCount: number): string {
+    if (fileCount === 0) return '0 KB';
+    if (fileCount <= 2) return 'Small (~5-20 KB)';
+    if (fileCount <= 5) return 'Small (~10-50 KB)';
+    if (fileCount <= 20) return 'Medium (~50-200 KB)';
+    if (fileCount <= 50) return 'Large (~200-500 KB)';
+    return 'Very Large (>500 KB)';
   }
 
   /**
@@ -524,14 +555,14 @@ Extract and summarize the content and return ONLY this JSON format:
         return cache.getOrSet(
           fileCacheKey,
           async () => {
-            // This would need to be implemented in BitbucketProvider
-            // For now, we'll get the whole diff and extract the file portion
-            const wholeDiff = await this.bitbucketProvider.getPRDiff(
+            // Use include_patterns to get diff for just this file
+            const fileDiff = await this.bitbucketProvider.getPRDiff(
               identifier,
               contextLines,
-              [file] // Get diff for just this file
+              excludePatterns,
+              [file] // Include patterns with single file
             );
-            return wholeDiff.diff;
+            return fileDiff.diff;
           },
           1800 // 30 minutes
         );
@@ -618,7 +649,7 @@ Extract and summarize the content and return ONLY this JSON format:
    */
   private parseAIResponse(result: any): any {
     try {
-      let responseText = result.content || result.text || result.response || '';
+      const responseText = result.content || result.text || result.response || '';
       
       if (!responseText) {
         return { success: false, error: 'Empty response' };

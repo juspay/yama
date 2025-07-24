@@ -3,9 +3,7 @@
  * Preserves all original functionality from pr-describe.js but optimized
  */
 
-import { NeuroLink } from '@juspay/neurolink';
 import {
-  PRIdentifier,
   EnhancementOptions,
   EnhancementResult,
   RequiredSection,
@@ -19,11 +17,10 @@ import { BitbucketProvider } from '../core/providers/BitbucketProvider';
 import { logger } from '../utils/Logger';
 
 export class DescriptionEnhancer {
-  private neurolink: NeuroLink;
+  private neurolink: any;
   private bitbucketProvider: BitbucketProvider;
   private aiConfig: AIProviderConfig;
 
-  // Default required sections (can be overridden by config)
   private defaultRequiredSections: RequiredSection[] = [
     { key: 'changelog', name: 'Changelog (Modules Modified)', required: true },
     { key: 'testcases', name: 'Test Cases (What to be tested)', required: true },
@@ -36,7 +33,6 @@ export class DescriptionEnhancer {
   ) {
     this.bitbucketProvider = bitbucketProvider;
     this.aiConfig = aiConfig;
-    this.neurolink = new NeuroLink();
   }
 
   /**
@@ -268,6 +264,13 @@ export class DescriptionEnhancer {
   ): Promise<string> {
     logger.debug('Generating AI-enhanced description...');
 
+    // Initialize NeuroLink with eval-based dynamic import
+    if (!this.neurolink) {
+      const dynamicImport = eval('(specifier) => import(specifier)');
+      const { NeuroLink } = await dynamicImport('@juspay/neurolink');
+      this.neurolink = new NeuroLink();
+    }
+
     const enhancementPrompt = this.buildEnhancementPrompt(context, analysisResult, options);
 
     try {
@@ -323,10 +326,8 @@ export class DescriptionEnhancer {
   private buildEnhancementPrompt(
     context: UnifiedContext,
     analysisResult: SectionAnalysis,
-    options: EnhancementOptions
+    _options: EnhancementOptions
   ): string {
-    const missingSection = analysisResult.requiredSections.filter(s => !s.present);
-    const incompleteSections = analysisResult.requiredSections.filter(s => s.present && (s.content?.length || 0) < 50);
 
     // Prepare diff information based on strategy
     let diffInfo = '';
@@ -495,7 +496,7 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
     originalDescription: string,
     enhancedDescription: string,
     analysisResult: SectionAnalysis,
-    duration: number
+    _duration: number
   ): EnhancementResult {
     // Determine what sections were added or enhanced
     const originalSections = this.validateRequiredSections(

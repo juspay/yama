@@ -176,6 +176,19 @@ features:
       - "coverage/**"
     contextLines: 3
     
+    # Custom AI Prompts for Code Review (Advanced)
+    systemPrompt: |
+      You are an Expert Security Code Reviewer focusing on enterprise standards.
+      Prioritize security vulnerabilities, performance issues, and code quality.
+      Provide actionable feedback with specific examples and solutions.
+    
+    focusAreas:
+      - "🔒 Security Analysis (CRITICAL PRIORITY)"
+      - "⚡ Performance Review" 
+      - "🏗️ Code Quality & Best Practices"
+      - "🧪 Testing & Error Handling"
+      - "📖 Documentation & Maintainability"
+    
   descriptionEnhancement:
     enabled: true
     preserveContent: true  # NEVER remove existing content
@@ -209,6 +222,31 @@ features:
       - key: "security_considerations"
         name: "🔒 Security Considerations"
         required: false
+    
+    # Custom AI Prompts and Templates (Advanced)
+    systemPrompt: |
+      You are an Expert Technical Writer specializing in pull request documentation.
+      Focus on clarity, completeness, and helping reviewers understand the changes.
+      CRITICAL: Return ONLY the enhanced description without meta-commentary.
+    
+    enhancementInstructions: |
+      Return ONLY the enhanced PR description as clean markdown.
+      Start directly with the enhanced description content.
+    
+    outputTemplate: |
+      # {{PR_TITLE}}
+      
+      ## Summary
+      [Clear overview of what this PR accomplishes]
+      
+      ## Changes Made
+      [Specific technical changes with file references]
+      
+      ## Testing Strategy
+      [How changes were tested and validated]
+      
+      ## Impact & Considerations
+      [Business impact, performance implications, breaking changes]
 
 # Performance Configuration
 cache:
@@ -304,6 +342,23 @@ const enhancementResult = await guardian.enhanceDescription({
     { key: 'summary', name: '📝 Summary', required: true },
     { key: 'rollback', name: '🔄 Rollback Plan', required: true }
   ]
+});
+```
+
+### **Configuration Hot-Reload**
+```typescript
+import { configManager } from '@juspay/yama';
+
+// Enable hot-reload for configuration changes
+const stopWatching = configManager.enableHotReload((newConfig) => {
+  console.log('Configuration updated:', newConfig);
+  // Optionally reinitialize Guardian with new config
+});
+
+// Stop watching when done
+process.on('SIGINT', () => {
+  stopWatching();
+  process.exit(0);
 });
 ```
 

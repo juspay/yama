@@ -20,8 +20,7 @@ import {
   OperationType, 
   OperationOptions,
   ReviewOptions,
-  EnhancementOptions,
-  GuardianConfig
+  EnhancementOptions
 } from '../types';
 
 // Load environment variables
@@ -32,7 +31,7 @@ const program = new Command();
 // Package info
 const packageInfo = {
   name: '@juspay/yama',
-  version: '1.0.0',
+  version: '1.1.0',
   description: 'Enterprise-grade Pull Request automation toolkit'
 };
 
@@ -52,23 +51,9 @@ function setupCLI(): void {
     .option('--dry-run', 'Preview mode - no changes made')
     .option('--no-cache', 'Disable caching');
 
-  // Configure global error handling
+  // Configure help options (removed custom formatter to fix recursion)
   program.configureHelp({
-    sortSubcommands: true,
-    formatHelp: (cmd, helper) => {
-      const banner = chalk.cyan(`
-⚔️ ═══════════════════════════════════════════════════════════ ⚔️
-   ██╗   ██╗ █████╗ ███╗   ███╗ █████╗ 
-   ╚██╗ ██╔╝██╔══██╗████╗ ████║██╔══██╗
-    ╚████╔╝ ███████║██╔████╔██║███████║
-     ╚██╔╝  ██╔══██║██║╚██╔╝██║██╔══██║
-      ██║   ██║  ██║██║ ╚═╝ ██║██║  ██║
-      ╚═╝   ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
-⚔️ ═══════════════════════════════════════════════════════════ ⚔️
-        AI-Powered PR Automation • Enterprise Security • Code Quality Judge
-      `);
-      return banner + '\n' + helper.formatHelp(cmd, helper);
-    }
+    sortSubcommands: true
   });
 
   // Setup commands
@@ -545,7 +530,7 @@ function printEnhancementResult(result: any): void {
 async function interactiveInit(): Promise<void> {
   console.log(chalk.cyan('\n🛡️ Yama Interactive Setup\n'));
 
-  const answers = await inquirer.prompt([
+  await inquirer.prompt([
     {
       type: 'input',
       name: 'workspace',
@@ -578,32 +563,6 @@ async function interactiveInit(): Promise<void> {
       default: true
     }
   ]);
-
-  // Create custom configuration
-  const customConfig: Partial<GuardianConfig> = {
-    providers: {
-      ai: {
-        provider: answers.aiProvider,
-        enableAnalytics: answers.enableAnalytics,
-        enableFallback: true
-      },
-      git: {
-        platform: 'bitbucket',
-        credentials: {
-          username: '${BITBUCKET_USERNAME}',
-          token: '${BITBUCKET_TOKEN}',
-          baseUrl: answers.baseUrl
-        },
-        defaultWorkspace: answers.workspace
-      }
-    },
-    cache: {
-      enabled: answers.enableCache,
-      ttl: '1h',
-      maxSize: '100mb',
-      storage: 'memory'
-    }
-  };
 
   const configPath = await configManager.createDefaultConfig();
   console.log(chalk.green(`\n✅ Configuration created: ${configPath}`));

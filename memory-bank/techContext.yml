@@ -1,0 +1,118 @@
+core_technologies:
+  language: "TypeScript"
+  version: "5.0+"
+  runtime: "Node.js 18+"
+  package_manager: "npm"
+  
+libraries_and_bindings:
+  - name: "@juspay/neurolink"
+    purpose: "AI integration for code analysis and text generation"
+    usage: "Dynamic import due to ESM"
+  - name: "@nexus2520/bitbucket-mcp-server"
+    purpose: "Bitbucket API integration via MCP"
+    usage: "Dynamic import for handlers"
+  - name: "yaml"
+    purpose: "Configuration file parsing"
+  - name: "chalk"
+    purpose: "Terminal output formatting"
+  - name: "yargs"
+    purpose: "CLI argument parsing"
+  - name: "node-cache"
+    purpose: "In-memory caching"
+
+development_environment:
+  build_tools:
+    - "TypeScript compiler (tsc)"
+    - "ESLint for code quality"
+    - "Jest for testing"
+  commands:
+    build: "npm run build"
+    test: "npm test"
+    lint: "npm run lint"
+    dev: "npm run dev"
+  
+  test_setup:
+    framework: "Jest"
+    coverage_target: "80%"
+    mock_strategy: "Manual mocks for ESM modules"
+
+technical_patterns:
+  - name: "Dynamic Import Pattern"
+    description: "Handle ESM modules in CommonJS environment"
+    implementation: |
+      const dynamicImport = eval('(specifier) => import(specifier)');
+      const { Module } = await dynamicImport('@module/name');
+    rationale: "Bypasses TypeScript compilation issues with ESM"
+  
+  - name: "MCP Handler Pattern"
+    description: "Initialize and use MCP handlers for Bitbucket"
+    implementation: |
+      Initialize handlers once in provider
+      Reuse connection across operations
+    files:
+      - "src/core/providers/BitbucketProvider.ts"
+  
+  - name: "Configuration Pattern"
+    description: "YAML-based configuration with environment variable support"
+    implementation: |
+      Support ${ENV_VAR} syntax in YAML
+      Merge with defaults
+      Validate required fields
+    files:
+      - "src/utils/ConfigManager.ts"
+
+api_integrations:
+  bitbucket:
+    type: "REST API via MCP"
+    authentication: "Personal Access Token"
+    key_endpoints:
+      - "GET branch info with PR lookup"
+      - "GET PR details"
+      - "GET PR diff with include/exclude patterns"
+      - "POST comments with inline support"
+      - "UPDATE PR description"
+  
+  neurolink:
+    type: "AI Provider Abstraction"
+    providers_supported:
+      - "Google AI"
+      - "OpenAI"
+      - "Anthropic"
+      - "Azure"
+      - "Bedrock"
+    features:
+      - "Auto provider selection"
+      - "Fallback support"
+      - "Analytics tracking"
+
+performance_optimizations:
+  - name: "Unified Context"
+    description: "Single context gathering for all operations"
+    impact: "90% reduction in API calls"
+  
+  - name: "Smart Caching"
+    description: "TTL-based caching with hierarchical keys"
+    impact: "Faster subsequent operations"
+  
+  - name: "Batch Processing"
+    description: "Process file diffs in batches of 5"
+    impact: "Prevents API rate limiting"
+
+security_considerations:
+  - name: "Credential Management"
+    description: "Environment variables for sensitive data"
+    implementation: "Never log tokens, use ${} syntax in config"
+  
+  - name: "Input Validation"
+    description: "Validate all external inputs"
+    implementation: "Type guards and schema validation"
+
+deployment:
+  packaging: "npm package"
+  distribution: "GitHub releases"
+  cli_usage: |
+    node dist/index.js guardian \
+      --workspace WORKSPACE \
+      --repository REPO \
+      --branch BRANCH \
+      --review --enhance
