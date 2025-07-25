@@ -3,7 +3,7 @@ core_technologies:
   version: "5.0+"
   runtime: "Node.js 18+"
   package_manager: "npm"
-  
+
 libraries_and_bindings:
   - name: "@juspay/neurolink"
     purpose: "AI integration for code analysis and text generation"
@@ -30,7 +30,7 @@ development_environment:
     test: "npm test"
     lint: "npm run lint"
     dev: "npm run dev"
-  
+
   test_setup:
     framework: "Jest"
     coverage_target: "80%"
@@ -43,7 +43,7 @@ technical_patterns:
       const dynamicImport = eval('(specifier) => import(specifier)');
       const { Module } = await dynamicImport('@module/name');
     rationale: "Bypasses TypeScript compilation issues with ESM"
-  
+
   - name: "MCP Handler Pattern"
     description: "Initialize and use MCP handlers for Bitbucket"
     implementation: |
@@ -51,7 +51,7 @@ technical_patterns:
       Reuse connection across operations
     files:
       - "src/core/providers/BitbucketProvider.ts"
-  
+
   - name: "Configuration Pattern"
     description: "YAML-based configuration with environment variable support"
     implementation: |
@@ -71,7 +71,7 @@ api_integrations:
       - "GET PR diff with include/exclude patterns"
       - "POST comments with inline support"
       - "UPDATE PR description"
-  
+
   neurolink:
     type: "AI Provider Abstraction"
     providers_supported:
@@ -89,11 +89,11 @@ performance_optimizations:
   - name: "Unified Context"
     description: "Single context gathering for all operations"
     impact: "90% reduction in API calls"
-  
+
   - name: "Smart Caching"
     description: "TTL-based caching with hierarchical keys"
     impact: "Faster subsequent operations"
-  
+
   - name: "Batch Processing"
     description: "Process file diffs in batches of 5"
     impact: "Prevents API rate limiting"
@@ -102,7 +102,7 @@ security_considerations:
   - name: "Credential Management"
     description: "Environment variables for sensitive data"
     implementation: "Never log tokens, use ${} syntax in config"
-  
+
   - name: "Input Validation"
     description: "Validate all external inputs"
     implementation: "Type guards and schema validation"

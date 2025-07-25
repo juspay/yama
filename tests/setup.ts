@@ -24,7 +24,7 @@ afterEach(() => {
   console.log = originalConsoleLog;
   console.error = originalConsoleError;
   console.warn = originalConsoleWarn;
-  
+
   // Clear all mocks
   jest.clearAllMocks();
 });
@@ -34,40 +34,45 @@ afterEach(() => {
   // Helper to create mock PR data
   createMockPR: (overrides = {}) => ({
     id: 12345,
-    title: 'Test PR',
-    description: 'Test description',
-    author: 'test-user',
-    state: 'OPEN',
-    sourceRef: 'feature/test',
-    targetRef: 'main',
-    createdDate: '2024-01-01T00:00:00Z',
-    updatedDate: '2024-01-01T00:00:00Z',
+    title: "Test PR",
+    description: "Test description",
+    author: "test-user",
+    state: "OPEN",
+    sourceRef: "feature/test",
+    targetRef: "main",
+    createdDate: "2024-01-01T00:00:00Z",
+    updatedDate: "2024-01-01T00:00:00Z",
     reviewers: [],
     fileChanges: [],
-    ...overrides
+    ...overrides,
   }),
 
   // Helper to create mock diff data
   createMockDiff: (overrides = {}) => ({
-    diff: 'diff --git a/test.js b/test.js\n+added line\n-removed line',
-    fileChanges: ['test.js'],
+    diff: "diff --git a/test.js b/test.js\n+added line\n-removed line",
+    fileChanges: ["test.js"],
     totalAdditions: 1,
     totalDeletions: 1,
-    ...overrides
+    ...overrides,
   }),
 
   // Helper to create mock MCP response
-  createMockMCPResponse: (data: any, format: 'direct' | 'content' = 'content') => {
-    if (format === 'direct') {
+  createMockMCPResponse: (
+    data: any,
+    format: "direct" | "content" = "content",
+  ) => {
+    if (format === "direct") {
       return data;
     }
     return {
-      content: [{
-        text: JSON.stringify(data)
-      }]
+      content: [
+        {
+          text: JSON.stringify(data),
+        },
+      ],
     };
   },
 
   // Helper to wait for async operations
-  wait: (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+  wait: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
