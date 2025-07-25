@@ -1,3 +1,11 @@
+# 1.0.0 (2025-07-25)
+
+
+### Features
+
+* add enterprise-grade CI/CD pipeline and release automation ([e385d69](https://github.com/juspay/yama/commit/e385d69d135bee72f51ac4462adcfc9a4a4be17b))
+* v1.1.0 - Enhanced AI configuration and performance improvements ([e763e93](https://github.com/juspay/yama/commit/e763e9341c2869433097b7a6bcc9080028934e1b))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
