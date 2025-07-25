@@ -10,11 +10,11 @@ import {
   PreservableContent,
   SectionAnalysis,
   AIProviderConfig,
-  ProviderError
-} from '../types';
-import { UnifiedContext } from '../core/ContextGatherer';
-import { BitbucketProvider } from '../core/providers/BitbucketProvider';
-import { logger } from '../utils/Logger';
+  ProviderError,
+} from "../types";
+import { UnifiedContext } from "../core/ContextGatherer";
+import { BitbucketProvider } from "../core/providers/BitbucketProvider";
+import { logger } from "../utils/Logger";
 
 export class DescriptionEnhancer {
   private neurolink: any;
@@ -22,14 +22,22 @@ export class DescriptionEnhancer {
   private aiConfig: AIProviderConfig;
 
   private defaultRequiredSections: RequiredSection[] = [
-    { key: 'changelog', name: 'Changelog (Modules Modified)', required: true },
-    { key: 'testcases', name: 'Test Cases (What to be tested)', required: true },
-    { key: 'config_changes', name: 'CAC Config Or Service Config Changes', required: true }
+    { key: "changelog", name: "Changelog (Modules Modified)", required: true },
+    {
+      key: "testcases",
+      name: "Test Cases (What to be tested)",
+      required: true,
+    },
+    {
+      key: "config_changes",
+      name: "CAC Config Or Service Config Changes",
+      required: true,
+    },
   ];
 
   constructor(
     bitbucketProvider: BitbucketProvider,
-    aiConfig: AIProviderConfig
+    aiConfig: AIProviderConfig,
   ) {
     this.bitbucketProvider = bitbucketProvider;
     this.aiConfig = aiConfig;
@@ -40,30 +48,30 @@ export class DescriptionEnhancer {
    */
   async enhanceWithContext(
     context: UnifiedContext,
-    options: EnhancementOptions
+    options: EnhancementOptions,
   ): Promise<EnhancementResult> {
     const startTime = Date.now();
-    
+
     try {
-      logger.phase('📝 Enhancing PR description...');
+      logger.phase("📝 Enhancing PR description...");
       logger.info(`Processing PR #${context.pr.id}: "${context.pr.title}"`);
 
       // Step 1: Analyze existing content and identify what needs enhancement
       const analysisResult = this.analyzeExistingContent(
         context.pr.description,
-        options.customSections || this.defaultRequiredSections
+        options.customSections || this.defaultRequiredSections,
       );
 
       logger.info(
         `Content analysis: ${analysisResult.preservedContent.media.length} media items, ` +
-        `${analysisResult.missingCount} missing sections`
+          `${analysisResult.missingCount} missing sections`,
       );
 
       // Step 2: Generate enhanced description using AI
       const enhancedDescription = await this.generateEnhancedDescription(
         context,
         analysisResult,
-        options
+        options,
       );
 
       // Step 3: Update PR description if not dry run
@@ -78,19 +86,22 @@ export class DescriptionEnhancer {
         context.pr.description,
         enhancedDescription,
         analysisResult,
-        duration
+        duration,
       );
 
       logger.success(
         `Description enhancement completed in ${duration}s: ` +
-        `${result.sectionsAdded.length} sections added, ${result.sectionsEnhanced.length} enhanced`
+          `${result.sectionsAdded.length} sections added, ${result.sectionsEnhanced.length} enhanced`,
       );
 
       return result;
-
     } catch (error) {
-      logger.error(`Description enhancement failed: ${(error as Error).message}`);
-      throw new ProviderError(`Description enhancement failed: ${(error as Error).message}`);
+      logger.error(
+        `Description enhancement failed: ${(error as Error).message}`,
+      );
+      throw new ProviderError(
+        `Description enhancement failed: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -99,16 +110,19 @@ export class DescriptionEnhancer {
    */
   private analyzeExistingContent(
     description: string,
-    requiredSections: RequiredSection[]
+    requiredSections: RequiredSection[],
   ): SectionAnalysis {
-    logger.debug('Analyzing existing PR description content...');
+    logger.debug("Analyzing existing PR description content...");
 
     // Extract preservable content (media, files, links)
     const preservedContent = this.extractPreservableContent(description);
 
     // Validate required sections
-    const sectionsAnalysis = this.validateRequiredSections(description, requiredSections);
-    const missingCount = sectionsAnalysis.filter(s => !s.present).length;
+    const sectionsAnalysis = this.validateRequiredSections(
+      description,
+      requiredSections,
+    );
+    const missingCount = sectionsAnalysis.filter((s) => !s.present).length;
 
     // Identify content gaps
     const gaps = this.identifyContentGaps(description);
@@ -117,7 +131,7 @@ export class DescriptionEnhancer {
       requiredSections: sectionsAnalysis,
       missingCount,
       preservedContent,
-      gaps
+      gaps,
     };
   }
 
@@ -129,7 +143,7 @@ export class DescriptionEnhancer {
       media: [],
       files: [],
       links: [],
-      originalText: description || ''
+      originalText: description || "",
     };
 
     if (!description) {
@@ -141,19 +155,20 @@ export class DescriptionEnhancer {
     preservableContent.media = description.match(mediaRegex) || [];
 
     // Extract file attachments
-    const fileRegex = /\[.*?\]\([^)]*\.(pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|tar|gz)[^)]*\)/gi;
+    const fileRegex =
+      /\[.*?\]\([^)]*\.(pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|tar|gz)[^)]*\)/gi;
     preservableContent.files = description.match(fileRegex) || [];
 
     // Extract links (excluding images and files)
     const linkRegex = /\[[^\]]*\]\([^)]+\)/g;
     const allLinks = description.match(linkRegex) || [];
-    preservableContent.links = allLinks.filter(link => 
-      !mediaRegex.test(link) && !fileRegex.test(link)
+    preservableContent.links = allLinks.filter(
+      (link) => !mediaRegex.test(link) && !fileRegex.test(link),
     );
 
     logger.debug(
       `Preservable content: ${preservableContent.media.length} media, ` +
-      `${preservableContent.files.length} files, ${preservableContent.links.length} links`
+        `${preservableContent.files.length} files, ${preservableContent.links.length} links`,
     );
 
     return preservableContent;
@@ -164,13 +179,13 @@ export class DescriptionEnhancer {
    */
   private validateRequiredSections(
     description: string,
-    requiredSections: RequiredSection[]
+    requiredSections: RequiredSection[],
   ): RequiredSection[] {
     if (!description) {
-      return requiredSections.map(section => ({
+      return requiredSections.map((section) => ({
         ...section,
         present: false,
-        content: ''
+        content: "",
       }));
     }
 
@@ -179,30 +194,35 @@ export class DescriptionEnhancer {
         /##.*?[Cc]hangelog/i,
         /##.*?[Mm]odules?\s+[Mm]odified/i,
         /##.*?[Cc]hanges?\s+[Mm]ade/i,
-        /📋.*?[Cc]hangelog/i
+        /📋.*?[Cc]hangelog/i,
       ],
       testcases: [
         /##.*?[Tt]est\s+[Cc]ases?/i,
         /##.*?[Tt]esting/i,
         /🧪.*?[Tt]est/i,
-        /##.*?[Tt]est\s+[Pp]lan/i
+        /##.*?[Tt]est\s+[Pp]lan/i,
       ],
       config_changes: [
         /##.*?[Cc]onfig/i,
         /##.*?CAC/i,
         /##.*?[Ss]ervice\s+[Cc]onfig/i,
-        /⚙️.*?[Cc]onfig/i
-      ]
+        /⚙️.*?[Cc]onfig/i,
+      ],
     };
 
-    return requiredSections.map(section => {
-      const patterns = sectionPatterns[section.key as keyof typeof sectionPatterns];
-      const isPresent = patterns ? patterns.some(pattern => pattern.test(description)) : false;
-      
+    return requiredSections.map((section) => {
+      const patterns =
+        sectionPatterns[section.key as keyof typeof sectionPatterns];
+      const isPresent = patterns
+        ? patterns.some((pattern) => pattern.test(description))
+        : false;
+
       return {
         ...section,
         present: isPresent,
-        content: isPresent ? this.extractSectionContent(description, patterns || []) : ''
+        content: isPresent
+          ? this.extractSectionContent(description, patterns || [])
+          : "",
       };
     });
   }
@@ -210,17 +230,25 @@ export class DescriptionEnhancer {
   /**
    * Extract content for a specific section
    */
-  private extractSectionContent(description: string, patterns: RegExp[]): string {
+  private extractSectionContent(
+    description: string,
+    patterns: RegExp[],
+  ): string {
     for (const pattern of patterns) {
       const match = description.match(pattern);
       if (match) {
         const startIndex = match.index! + match[0].length;
-        const nextHeaderIndex = description.substring(startIndex).search(/\n##/);
-        const endIndex = nextHeaderIndex === -1 ? description.length : startIndex + nextHeaderIndex;
+        const nextHeaderIndex = description
+          .substring(startIndex)
+          .search(/\n##/);
+        const endIndex =
+          nextHeaderIndex === -1
+            ? description.length
+            : startIndex + nextHeaderIndex;
         return description.substring(startIndex, endIndex).trim();
       }
     }
-    return '';
+    return "";
   }
 
   /**
@@ -228,23 +256,23 @@ export class DescriptionEnhancer {
    */
   private identifyContentGaps(description: string): string[] {
     const gaps: string[] = [];
-    
+
     if (!description) {
-      gaps.push('No description provided');
+      gaps.push("No description provided");
       return gaps;
     }
 
     // Check for unanswered questions and placeholders
     const gapMarkers = [
-      { pattern: /\?\s*$/gm, name: 'unanswered questions' },
-      { pattern: /TODO/gi, name: 'TODO items' },
-      { pattern: /FIXME/gi, name: 'FIXME items' },
-      { pattern: /\[TBD\]/gi, name: 'TBD placeholders' },
-      { pattern: /\[TO BE DETERMINED\]/gi, name: 'TBD placeholders' },
-      { pattern: /\[PENDING\]/gi, name: 'pending items' }
+      { pattern: /\?\s*$/gm, name: "unanswered questions" },
+      { pattern: /TODO/gi, name: "TODO items" },
+      { pattern: /FIXME/gi, name: "FIXME items" },
+      { pattern: /\[TBD\]/gi, name: "TBD placeholders" },
+      { pattern: /\[TO BE DETERMINED\]/gi, name: "TBD placeholders" },
+      { pattern: /\[PENDING\]/gi, name: "pending items" },
     ];
 
-    gapMarkers.forEach(marker => {
+    gapMarkers.forEach((marker) => {
       const matches = description.match(marker.pattern);
       if (matches) {
         gaps.push(`${matches.length} ${marker.name}`);
@@ -260,18 +288,22 @@ export class DescriptionEnhancer {
   private async generateEnhancedDescription(
     context: UnifiedContext,
     analysisResult: SectionAnalysis,
-    options: EnhancementOptions
+    options: EnhancementOptions,
   ): Promise<string> {
-    logger.debug('Generating AI-enhanced description...');
+    logger.debug("Generating AI-enhanced description...");
 
     // Initialize NeuroLink with eval-based dynamic import
     if (!this.neurolink) {
-      const dynamicImport = eval('(specifier) => import(specifier)');
-      const { NeuroLink } = await dynamicImport('@juspay/neurolink');
+      const dynamicImport = eval("(specifier) => import(specifier)");
+      const { NeuroLink } = await dynamicImport("@juspay/neurolink");
       this.neurolink = new NeuroLink();
     }
 
-    const enhancementPrompt = this.buildEnhancementPrompt(context, analysisResult, options);
+    const enhancementPrompt = this.buildEnhancementPrompt(
+      context,
+      analysisResult,
+      options,
+    );
 
     try {
       const result = await this.neurolink.generate({
@@ -280,42 +312,51 @@ export class DescriptionEnhancer {
         model: this.aiConfig.model,
         temperature: this.aiConfig.temperature || 0.7,
         maxTokens: this.aiConfig.maxTokens || 1000000,
-        timeout: '8m', // Longer timeout for description generation
+        timeout: "8m", // Longer timeout for description generation
         enableAnalytics: this.aiConfig.enableAnalytics,
-        enableEvaluation: this.aiConfig.enableEvaluation
+        enableEvaluation: this.aiConfig.enableEvaluation,
       });
 
-      let enhancedDescription = result.content || (result as any).text || (result as any).response || '';
+      let enhancedDescription =
+        result.content ||
+        (result as any).text ||
+        (result as any).response ||
+        "";
 
       // Clean up any markdown code blocks if AI wrapped the response
       enhancedDescription = enhancedDescription
-        .replace(/^```markdown\s*/, '')
-        .replace(/\s*```$/, '')
+        .replace(/^```markdown\s*/, "")
+        .replace(/\s*```$/, "")
         .trim();
 
       if (!enhancedDescription) {
-        throw new Error('AI generated empty description');
+        throw new Error("AI generated empty description");
       }
 
       // Validate that required sections are present after enhancement
       const finalValidation = this.validateRequiredSections(
         enhancedDescription,
-        options.customSections || this.defaultRequiredSections
+        options.customSections || this.defaultRequiredSections,
       );
-      
-      const stillMissing = finalValidation.filter(s => !s.present);
+
+      const stillMissing = finalValidation.filter((s) => !s.present);
       if (stillMissing.length > 0) {
-        logger.warn(`Warning: ${stillMissing.length} required sections still missing after AI enhancement`);
+        logger.warn(
+          `Warning: ${stillMissing.length} required sections still missing after AI enhancement`,
+        );
       }
 
       return enhancedDescription;
-
     } catch (error) {
-      if ((error as Error).message?.includes('timeout')) {
-        logger.error('⏰ Description enhancement timed out after 8 minutes');
-        throw new Error('Enhancement timeout - try with smaller diff or adjust timeout');
+      if ((error as Error).message?.includes("timeout")) {
+        logger.error("⏰ Description enhancement timed out after 8 minutes");
+        throw new Error(
+          "Enhancement timeout - try with smaller diff or adjust timeout",
+        );
       }
-      logger.error(`AI description generation failed: ${(error as Error).message}`);
+      logger.error(
+        `AI description generation failed: ${(error as Error).message}`,
+      );
       throw error;
     }
   }
@@ -326,15 +367,17 @@ export class DescriptionEnhancer {
   private buildEnhancementPrompt(
     context: UnifiedContext,
     analysisResult: SectionAnalysis,
-    _options: EnhancementOptions
+    _options: EnhancementOptions,
   ): string {
-
     // Prepare diff information based on strategy
-    let diffInfo = '';
-    if (context.diffStrategy.strategy === 'whole' && context.prDiff) {
+    let diffInfo = "";
+    if (context.diffStrategy.strategy === "whole" && context.prDiff) {
       diffInfo = `**Diff Strategy**: Whole PR diff (${context.diffStrategy.fileCount} files)
 **Changes**: ${JSON.stringify(context.prDiff.fileChanges?.slice(0, 20) || [], null, 2)}`;
-    } else if (context.diffStrategy.strategy === 'file-by-file' && context.fileDiffs) {
+    } else if (
+      context.diffStrategy.strategy === "file-by-file" &&
+      context.fileDiffs
+    ) {
       const fileList = Array.from(context.fileDiffs.keys()).slice(0, 20);
       diffInfo = `**Diff Strategy**: File-by-file analysis (${context.diffStrategy.fileCount} files)
 **Modified Files**: ${JSON.stringify(fileList, null, 2)}`;
@@ -346,7 +389,7 @@ export class DescriptionEnhancer {
 **Title**: ${context.pr.title}
 **Author**: ${context.pr.author}
 **Current Description**: 
-${analysisResult.preservedContent.originalText || '[No existing description]'}
+${analysisResult.preservedContent.originalText || "[No existing description]"}
 
 ## CODE CHANGES ANALYSIS:
 ${diffInfo}
@@ -355,16 +398,16 @@ ${diffInfo}
 ${context.projectContext.memoryBank.summary}
 
 ## PROJECT RULES:
-${context.projectContext.clinerules || 'No specific rules defined'}
+${context.projectContext.clinerules || "No specific rules defined"}
 
 ## CONTENT PRESERVATION REQUIREMENTS:
 **CRITICAL**: This is content ENHANCEMENT, not replacement!
 
 ### Preserved Content Analysis:
-- **Media Items**: ${analysisResult.preservedContent.media.length} (${analysisResult.preservedContent.media.join(', ')})
-- **File Attachments**: ${analysisResult.preservedContent.files.length} (${analysisResult.preservedContent.files.join(', ')})
+- **Media Items**: ${analysisResult.preservedContent.media.length} (${analysisResult.preservedContent.media.join(", ")})
+- **File Attachments**: ${analysisResult.preservedContent.files.length} (${analysisResult.preservedContent.files.join(", ")})
 - **Links**: ${analysisResult.preservedContent.links.length}
-- **Content Gaps**: ${analysisResult.gaps.join(', ') || 'None identified'}
+- **Content Gaps**: ${analysisResult.gaps.join(", ") || "None identified"}
 
 ### PRESERVATION RULES:
 - **NEVER REMOVE**: Screenshots, images, file attachments, existing explanations, or links
@@ -373,11 +416,15 @@ ${context.projectContext.clinerules || 'No specific rules defined'}
 - **MAINTAIN**: Original structure, tone, and author's explanations
 
 ## REQUIRED SECTIONS STATUS:
-${analysisResult.requiredSections.map(section => `
+${analysisResult.requiredSections
+  .map(
+    (section) => `
 **${section.name}**:
-- Present: ${section.present ? '✅ Yes' : '❌ Missing'}
-- Content: ${section.content ? `"${section.content.substring(0, 100)}..."` : 'None'}
-- Action Needed: ${section.present ? ((section.content?.length || 0) < 50 ? 'Enhancement' : 'None') : 'Add Section'}`).join('')}
+- Present: ${section.present ? "✅ Yes" : "❌ Missing"}
+- Content: ${section.content ? `"${section.content.substring(0, 100)}..."` : "None"}
+- Action Needed: ${section.present ? ((section.content?.length || 0) < 50 ? "Enhancement" : "None") : "Add Section"}`,
+  )
+  .join("")}
 
 ## REQUIRED SECTIONS TO IMPLEMENT:
 
@@ -439,8 +486,7 @@ Return the COMPLETE enhanced description as properly formatted markdown text (NO
 5. **EXTRACT**: Specific details from the code changes for accuracy
 6. **MAINTAIN**: Professional tone and clear markdown formatting
 
-Generate the enhanced description now, ensuring ALL preservation requirements are met:`
-
+Generate the enhanced description now, ensuring ALL preservation requirements are met:`;
   }
 
   /**
@@ -448,21 +494,24 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
    */
   private async updatePRDescription(
     context: UnifiedContext,
-    enhancedDescription: string
+    enhancedDescription: string,
   ): Promise<void> {
     logger.debug(`Updating PR description for #${context.pr.id}...`);
 
     try {
       await this.bitbucketProvider.updatePRDescription(
         context.identifier,
-        enhancedDescription
+        enhancedDescription,
       );
 
-      logger.success('✅ PR description updated successfully');
-
+      logger.success("✅ PR description updated successfully");
     } catch (error) {
-      logger.error(`Failed to update PR description: ${(error as Error).message}`);
-      throw new ProviderError(`Description update failed: ${(error as Error).message}`);
+      logger.error(
+        `Failed to update PR description: ${(error as Error).message}`,
+      );
+      throw new ProviderError(
+        `Description update failed: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -471,21 +520,29 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
    */
   private showDescriptionPreview(
     enhancedDescription: string,
-    analysisResult: SectionAnalysis
+    analysisResult: SectionAnalysis,
   ): void {
-    console.log('\n' + '═'.repeat(80));
-    console.log('📝 ENHANCED PR DESCRIPTION PREVIEW');
-    console.log('═'.repeat(80));
+    console.log("\n" + "═".repeat(80));
+    console.log("📝 ENHANCED PR DESCRIPTION PREVIEW");
+    console.log("═".repeat(80));
     console.log(enhancedDescription);
-    console.log('═'.repeat(80));
-    
-    console.log('\n📊 ENHANCEMENT SUMMARY:');
-    console.log(`✅ Required sections completed: ${analysisResult.requiredSections.filter(s => s.present).length}/${analysisResult.requiredSections.length}`);
-    console.log(`📎 Preserved content: ${analysisResult.preservedContent.media.length} media items, ${analysisResult.preservedContent.files.length} files`);
-    console.log(`📏 Enhanced description length: ${enhancedDescription.length} characters`);
-    
+    console.log("═".repeat(80));
+
+    console.log("\n📊 ENHANCEMENT SUMMARY:");
+    console.log(
+      `✅ Required sections completed: ${analysisResult.requiredSections.filter((s) => s.present).length}/${analysisResult.requiredSections.length}`,
+    );
+    console.log(
+      `📎 Preserved content: ${analysisResult.preservedContent.media.length} media items, ${analysisResult.preservedContent.files.length} files`,
+    );
+    console.log(
+      `📏 Enhanced description length: ${enhancedDescription.length} characters`,
+    );
+
     if (analysisResult.gaps.length > 0) {
-      console.log(`🔍 Content gaps addressed: ${analysisResult.gaps.join(', ')}`);
+      console.log(
+        `🔍 Content gaps addressed: ${analysisResult.gaps.join(", ")}`,
+      );
     }
   }
 
@@ -496,47 +553,50 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
     originalDescription: string,
     enhancedDescription: string,
     analysisResult: SectionAnalysis,
-    _duration: number
+    _duration: number,
   ): EnhancementResult {
     // Determine what sections were added or enhanced
     const originalSections = this.validateRequiredSections(
       originalDescription,
-      analysisResult.requiredSections
+      analysisResult.requiredSections,
     );
     const enhancedSections = this.validateRequiredSections(
       enhancedDescription,
-      analysisResult.requiredSections
+      analysisResult.requiredSections,
     );
 
     const sectionsAdded = enhancedSections
       .filter((enhanced, i) => enhanced.present && !originalSections[i].present)
-      .map(s => s.name);
+      .map((s) => s.name);
 
     const sectionsEnhanced = enhancedSections
-      .filter((enhanced, i) => 
-        enhanced.present && originalSections[i].present && 
-        (enhanced.content?.length || 0) > (originalSections[i].content?.length || 0) + 50
+      .filter(
+        (enhanced, i) =>
+          enhanced.present &&
+          originalSections[i].present &&
+          (enhanced.content?.length || 0) >
+            (originalSections[i].content?.length || 0) + 50,
       )
-      .map(s => s.name);
+      .map((s) => s.name);
 
-    const completedSections = enhancedSections.filter(s => s.present).length;
+    const completedSections = enhancedSections.filter((s) => s.present).length;
 
     return {
-      originalDescription: originalDescription || '',
+      originalDescription: originalDescription || "",
       enhancedDescription,
       sectionsAdded,
       sectionsEnhanced,
       preservedItems: {
         media: analysisResult.preservedContent.media.length,
         files: analysisResult.preservedContent.files.length,
-        links: analysisResult.preservedContent.links.length
+        links: analysisResult.preservedContent.links.length,
       },
       statistics: {
         originalLength: originalDescription?.length || 0,
         enhancedLength: enhancedDescription.length,
         completedSections,
-        totalSections: analysisResult.requiredSections.length
-      }
+        totalSections: analysisResult.requiredSections.length,
+      },
     };
   }
 
@@ -546,14 +606,14 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
   getStats(): any {
     return {
       defaultSections: this.defaultRequiredSections.length,
-      aiProvider: this.aiConfig.provider
+      aiProvider: this.aiConfig.provider,
     };
   }
 }
 
 export function createDescriptionEnhancer(
   bitbucketProvider: BitbucketProvider,
-  aiConfig: AIProviderConfig
+  aiConfig: AIProviderConfig,
 ): DescriptionEnhancer {
   return new DescriptionEnhancer(bitbucketProvider, aiConfig);
 }

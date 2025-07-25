@@ -3,22 +3,22 @@
  * Provides intelligent caching for PR data, file contents, and AI responses
  */
 
-import NodeCache from 'node-cache';
-import { Cache as ICache, CacheOptions } from '../types';
-import { logger } from './Logger';
+import NodeCache from "node-cache";
+import { Cache as ICache, CacheOptions } from "../types";
+import { logger } from "./Logger";
 
 export class Cache implements ICache {
   private cache: NodeCache;
   private statsData = {
     hits: 0,
-    misses: 0
+    misses: 0,
   };
 
   constructor(options: CacheOptions = {}) {
     const {
       ttl = 3600, // 1 hour default
       maxSize = 100, // 100 keys max
-      checkPeriod = 600 // Check every 10 minutes
+      checkPeriod = 600, // Check every 10 minutes
     } = options;
 
     this.cache = new NodeCache({
@@ -26,18 +26,18 @@ export class Cache implements ICache {
       maxKeys: maxSize,
       checkperiod: checkPeriod,
       useClones: false,
-      deleteOnExpire: true
+      deleteOnExpire: true,
     });
 
-    this.cache.on('set', (key: string, _value: any) => {
+    this.cache.on("set", (key: string, _value: any) => {
       logger.debug(`Cache SET: ${key}`);
     });
 
-    this.cache.on('expired', (key: string, _value: any) => {
+    this.cache.on("expired", (key: string, _value: any) => {
       logger.debug(`Cache EXPIRED: ${key}`);
     });
 
-    this.cache.on('del', (key: string, _value: any) => {
+    this.cache.on("del", (key: string, _value: any) => {
       logger.debug(`Cache DELETE: ${key}`);
     });
   }
@@ -47,7 +47,7 @@ export class Cache implements ICache {
    */
   get<T>(key: string): T | undefined {
     const value = this.cache.get<T>(key);
-    
+
     if (value !== undefined) {
       this.statsData.hits++;
       logger.debug(`Cache HIT: ${key}`);
@@ -100,7 +100,7 @@ export class Cache implements ICache {
     this.cache.flushAll();
     this.statsData.hits = 0;
     this.statsData.misses = 0;
-    logger.debug('Cache cleared');
+    logger.debug("Cache cleared");
   }
 
   /**
@@ -118,7 +118,7 @@ export class Cache implements ICache {
       hits: this.statsData.hits,
       misses: this.statsData.misses,
       keys: this.cache.keys().length,
-      size: this.cache.getStats().keys
+      size: this.cache.getStats().keys,
     };
   }
 
@@ -133,9 +133,9 @@ export class Cache implements ICache {
    * Get or set pattern - common caching pattern
    */
   async getOrSet<T>(
-    key: string, 
-    fetchFn: () => Promise<T>, 
-    ttl?: number
+    key: string,
+    fetchFn: () => Promise<T>,
+    ttl?: number,
   ): Promise<T> {
     const cached = this.get<T>(key);
     if (cached !== undefined) {
@@ -160,17 +160,17 @@ export class Cache implements ICache {
 
   setWithTags<T>(key: string, value: T, tags: string[], ttl?: number): boolean {
     const success = this.set(key, value, ttl);
-    
+
     if (success) {
       // Associate key with tags
-      tags.forEach(tag => {
+      tags.forEach((tag) => {
         if (!this.tags.has(tag)) {
           this.tags.set(tag, new Set());
         }
         this.tags.get(tag)!.add(key);
       });
     }
-    
+
     return success;
   }
 
@@ -179,16 +179,16 @@ export class Cache implements ICache {
    */
   invalidateTag(tag: string): number {
     const keys = this.tags.get(tag);
-    if (!keys) return 0;
+    if (!keys) {return 0;}
 
     let deleted = 0;
-    keys.forEach(key => {
+    keys.forEach((key) => {
       deleted += this.del(key);
     });
 
     // Clean up tag associations
     this.tags.delete(tag);
-    
+
     logger.debug(`Invalidated tag "${tag}": ${deleted} keys`);
     return deleted;
   }
@@ -197,48 +197,64 @@ export class Cache implements ICache {
    * Cache key generators for common patterns
    */
   static keys = {
-    prInfo: (workspace: string, repository: string, prId: string | number) => 
+    prInfo: (workspace: string, repository: string, prId: string | number) =>
       `pr:${workspace}:${repository}:${prId}`,
-    
-    prDiff: (workspace: string, repository: string, prId: string | number) => 
+
+    prDiff: (workspace: string, repository: string, prId: string | number) =>
       `diff:${workspace}:${repository}:${prId}`,
-    
-    fileContent: (workspace: string, repository: string, filePath: string, branch: string) => 
-      `file:${workspace}:${repository}:${branch}:${filePath}`,
-    
-    directoryContent: (workspace: string, repository: string, path: string, branch: string) => 
-      `dir:${workspace}:${repository}:${branch}:${path}`,
-    
-    branchInfo: (workspace: string, repository: string, branch: string) => 
+
+    fileContent: (
+      workspace: string,
+      repository: string,
+      filePath: string,
+      branch: string,
+    ) => `file:${workspace}:${repository}:${branch}:${filePath}`,
+
+    directoryContent: (
+      workspace: string,
+      repository: string,
+      path: string,
+      branch: string,
+    ) => `dir:${workspace}:${repository}:${branch}:${path}`,
+
+    branchInfo: (workspace: string, repository: string, branch: string) =>
       `branch:${workspace}:${repository}:${branch}`,
-    
+
     aiResponse: (prompt: string, provider: string, model: string) => {
       // Create a hash of the prompt for consistent keys
-      const hash = Buffer.from(prompt).toString('base64').slice(0, 16);
+      const hash = Buffer.from(prompt).toString("base64").slice(0, 16);
       return `ai:${provider}:${model}:${hash}`;
     },
-    
-    projectContext: (workspace: string, repository: string, branch: string) => 
+
+    projectContext: (workspace: string, repository: string, branch: string) =>
       `context:${workspace}:${repository}:${branch}`,
-    
-    reviewResult: (workspace: string, repository: string, prId: string | number, configHash: string) => 
-      `review:${workspace}:${repository}:${prId}:${configHash}`
+
+    reviewResult: (
+      workspace: string,
+      repository: string,
+      prId: string | number,
+      configHash: string,
+    ) => `review:${workspace}:${repository}:${prId}:${configHash}`,
   };
 
   /**
    * Smart cache warming for common patterns
    */
-  async warmPRCache(workspace: string, repository: string, prId: string | number): Promise<void> {
+  async warmPRCache(
+    workspace: string,
+    repository: string,
+    prId: string | number,
+  ): Promise<void> {
     logger.debug(`Warming cache for PR ${workspace}/${repository}#${prId}`);
-    
+
     // Pre-generate cache keys that are likely to be needed
     const keys = [
       Cache.keys.prInfo(workspace, repository, prId),
-      Cache.keys.prDiff(workspace, repository, prId)
+      Cache.keys.prDiff(workspace, repository, prId),
     ];
 
     // This would be implemented by the calling code to actually fetch the data
-    logger.debug(`Cache warming prepared for keys: ${keys.join(', ')}`);
+    logger.debug(`Cache warming prepared for keys: ${keys.join(", ")}`);
   }
 
   /**
@@ -247,22 +263,22 @@ export class Cache implements ICache {
   cleanup(): void {
     // Node-cache handles TTL cleanup automatically, but we can force it
     const beforeKeys = this.cache.keys().length;
-    
+
     // Force check for expired keys
-    this.cache.keys().forEach(key => {
+    this.cache.keys().forEach((key) => {
       this.cache.get(key); // This triggers expiry check
     });
 
     const afterKeys = this.cache.keys().length;
     const cleaned = beforeKeys - afterKeys;
-    
+
     if (cleaned > 0) {
       logger.debug(`Cache cleanup: removed ${cleaned} expired entries`);
     }
 
     // Clean up tag associations for deleted keys
     this.tags.forEach((keys, tag) => {
-      const validKeys = new Set([...keys].filter(key => this.cache.has(key)));
+      const validKeys = new Set([...keys].filter((key) => this.cache.has(key)));
       if (validKeys.size !== keys.size) {
         this.tags.set(tag, validKeys);
       }
@@ -286,7 +302,7 @@ export class Cache implements ICache {
       hitRatio: this.getHitRatio(),
       detailedStats: this.getDetailedStats(),
       keys: this.keys(),
-      tags: Object.fromEntries(this.tags.entries())
+      tags: Object.fromEntries(this.tags.entries()),
     };
   }
 }

@@ -8,7 +8,13 @@
 // ============================================================================
 
 export interface AIProviderConfig {
-  provider?: 'auto' | 'google-ai' | 'openai' | 'anthropic' | 'azure' | 'bedrock';
+  provider?:
+    | "auto"
+    | "google-ai"
+    | "openai"
+    | "anthropic"
+    | "azure"
+    | "bedrock";
   model?: string;
   enableFallback?: boolean;
   enableAnalytics?: boolean;
@@ -60,7 +66,7 @@ export interface EvaluationData {
 // Git Platform Types
 // ============================================================================
 
-export type GitPlatform = 'bitbucket' | 'github' | 'gitlab' | 'azure-devops';
+export type GitPlatform = "bitbucket" | "github" | "gitlab" | "azure-devops";
 
 export interface GitCredentials {
   username: string;
@@ -90,7 +96,7 @@ export interface PRInfo {
   title: string;
   description: string;
   author: string;
-  state: 'OPEN' | 'MERGED' | 'DECLINED' | 'CLOSED';
+  state: "OPEN" | "MERGED" | "DECLINED" | "CLOSED";
   sourceRef: string;
   targetRef: string;
   createdDate: string;
@@ -107,7 +113,7 @@ export interface PRReviewer {
     displayName: string;
   };
   approved: boolean;
-  status: 'APPROVED' | 'UNAPPROVED' | 'NEEDS_WORK';
+  status: "APPROVED" | "UNAPPROVED" | "NEEDS_WORK";
 }
 
 export interface PRComment {
@@ -123,7 +129,7 @@ export interface PRComment {
     filePath: string;
     lineFrom: number;
     lineTo: number;
-    lineType: 'ADDED' | 'REMOVED' | 'CONTEXT';
+    lineType: "ADDED" | "REMOVED" | "CONTEXT";
   };
 }
 
@@ -136,7 +142,7 @@ export interface PRDiff {
 
 export interface FileChange {
   path: string;
-  changeType: 'ADDED' | 'MODIFIED' | 'DELETED' | 'RENAMED';
+  changeType: "ADDED" | "MODIFIED" | "DELETED" | "RENAMED";
   additions: number;
   deletions: number;
   hunks: DiffHunk[];
@@ -151,7 +157,7 @@ export interface DiffHunk {
 }
 
 export interface DiffLine {
-  type: 'added' | 'removed' | 'context';
+  type: "added" | "removed" | "context";
   content: string;
   oldLineNumber?: number;
   newLineNumber?: number;
@@ -161,9 +167,16 @@ export interface DiffLine {
 // Code Review Types (Enhanced from pr-police.js)
 // ============================================================================
 
-export type ViolationSeverity = 'CRITICAL' | 'MAJOR' | 'MINOR' | 'SUGGESTION';
-export type ViolationType = 'inline' | 'general';
-export type ViolationCategory = 'security' | 'performance' | 'maintainability' | 'functionality' | 'error_handling' | 'testing' | 'general';
+export type ViolationSeverity = "CRITICAL" | "MAJOR" | "MINOR" | "SUGGESTION";
+export type ViolationType = "inline" | "general";
+export type ViolationCategory =
+  | "security"
+  | "performance"
+  | "maintainability"
+  | "functionality"
+  | "error_handling"
+  | "testing"
+  | "general";
 
 export interface Violation {
   type: ViolationType;
@@ -173,7 +186,7 @@ export interface Violation {
     before: string[];
     after: string[];
   };
-  line_type?: 'ADDED' | 'REMOVED' | 'CONTEXT';
+  line_type?: "ADDED" | "REMOVED" | "CONTEXT";
   severity: ViolationSeverity;
   category: ViolationCategory;
   issue: string;
@@ -315,29 +328,29 @@ export interface DescriptionEnhancementConfig {
 export interface DiffStrategyConfig {
   enabled: boolean;
   thresholds: {
-    wholeDiffMaxFiles: number;        // Default: 2
-    fileByFileMinFiles: number;       // Default: 3
+    wholeDiffMaxFiles: number; // Default: 2
+    fileByFileMinFiles: number; // Default: 3
   };
-  forceStrategy?: 'whole' | 'file-by-file' | 'auto';  // Override to force a specific strategy
+  forceStrategy?: "whole" | "file-by-file" | "auto"; // Override to force a specific strategy
 }
 
 export interface SecurityScanConfig {
   enabled: boolean;
-  level: 'strict' | 'moderate' | 'basic';
+  level: "strict" | "moderate" | "basic";
   scanTypes: string[];
 }
 
 export interface AnalyticsConfig {
   enabled: boolean;
   trackMetrics: boolean;
-  exportFormat: 'json' | 'csv' | 'yaml';
+  exportFormat: "json" | "csv" | "yaml";
 }
 
 export interface CacheConfig {
   enabled: boolean;
   ttl: string;
   maxSize: string;
-  storage: 'memory' | 'redis' | 'file';
+  storage: "memory" | "redis" | "file";
 }
 
 export interface PerformanceConfig {
@@ -375,7 +388,7 @@ export interface ReportingConfig {
 export interface MonitoringConfig {
   enabled: boolean;
   metrics: string[];
-  exportFormat?: 'json' | 'prometheus' | 'csv';
+  exportFormat?: "json" | "prometheus" | "csv";
   endpoint?: string;
   interval?: string;
 }
@@ -384,7 +397,12 @@ export interface MonitoringConfig {
 // Operation Types
 // ============================================================================
 
-export type OperationType = 'review' | 'enhance-description' | 'security-scan' | 'analytics' | 'all';
+export type OperationType =
+  | "review"
+  | "enhance-description"
+  | "security-scan"
+  | "analytics"
+  | "all";
 
 export interface OperationOptions {
   workspace: string;
@@ -399,7 +417,7 @@ export interface OperationOptions {
 
 export interface OperationResult {
   operation: OperationType;
-  status: 'success' | 'error' | 'skipped';
+  status: "success" | "error" | "skipped";
   data?: any;
   error?: string;
   duration: number;
@@ -424,7 +442,7 @@ export interface ProcessResult {
 
 export interface StreamUpdate {
   operation: OperationType;
-  status: 'started' | 'progress' | 'completed' | 'error';
+  status: "started" | "progress" | "completed" | "error";
   progress?: number;
   message?: string;
   data?: any;
@@ -441,12 +459,12 @@ export interface StreamOptions {
 // Logger Types
 // ============================================================================
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface LoggerOptions {
   level: LogLevel;
   verbose: boolean;
-  format: 'simple' | 'json' | 'detailed';
+  format: "simple" | "json" | "detailed";
   colors: boolean;
 }
 
@@ -500,31 +518,31 @@ export class GuardianError extends Error {
   constructor(
     public code: string,
     message: string,
-    public context?: any
+    public context?: any,
   ) {
     super(message);
-    this.name = 'GuardianError';
+    this.name = "GuardianError";
   }
 }
 
 export class ConfigurationError extends GuardianError {
   constructor(message: string, context?: any) {
-    super('CONFIGURATION_ERROR', message, context);
-    this.name = 'ConfigurationError';
+    super("CONFIGURATION_ERROR", message, context);
+    this.name = "ConfigurationError";
   }
 }
 
 export class ProviderError extends GuardianError {
   constructor(message: string, context?: any) {
-    super('PROVIDER_ERROR', message, context);
-    this.name = 'ProviderError';
+    super("PROVIDER_ERROR", message, context);
+    this.name = "ProviderError";
   }
 }
 
 export class ValidationError extends GuardianError {
   constructor(message: string, context?: any) {
-    super('VALIDATION_ERROR', message, context);
-    this.name = 'ValidationError';
+    super("VALIDATION_ERROR", message, context);
+    this.name = "ValidationError";
   }
 }
 

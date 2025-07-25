@@ -2,6 +2,29 @@
   "name": "@juspay/yama",
   "version": "1.1.0",
   "description": "Enterprise-grade Pull Request automation toolkit with AI-powered code review and description enhancement",
+  "keywords": [
+    "pr",
+    "pull-request",
+    "code-review",
+    "ai",
+    "automation",
+    "bitbucket",
+    "github",
+    "gitlab",
+    "security",
+    "quality"
+  ],
+  "homepage": "https://github.com/juspay/yama#readme",
+  "bugs": {
+    "url": "https://github.com/juspay/yama/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/juspay/yama.git"
+  },
+  "license": "MIT",
+  "author": "Juspay Technologies <support@juspay.in> (https://juspay.io)",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -10,15 +33,41 @@
     "pr-police": "dist/cli/index.js",
     "pr-scribe": "dist/cli/index.js"
   },
+  "directories": {
+    "test": "tests"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.map",
+    "!dist/**/tests",
+    "!dist/**/test-*",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "yama.config.example.yaml"
+  ],
   "scripts": {
     "build": "tsc && tsc-alias",
     "dev": "ts-node-dev --respawn --transpile-only src/cli/index.ts",
     "test": "jest",
-    "lint": "eslint src/**/*.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "type-check": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "docs": "typedoc src",
     "clean": "rimraf dist",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "prepack": "npm run build && npm run test",
+    "changeset": "changeset",
+    "changeset:version": "changeset version && git add --all",
+    "release": "npm run build && npm run test && changeset publish",
+    "release:dry": "npm publish --dry-run",
+    "release:github": "npm publish --registry https://npm.pkg.github.com",
+    "version:check": "npm version --no-git-tag-version",
+    "pack:verify": "npm pack && tar -tzf *.tgz | head -20"
   },
   "dependencies": {
     "@juspay/neurolink": "^5.1.0",
@@ -40,9 +89,10 @@
     "@types/jest": "^29.0.0",
     "@types/lodash": "^4.14.0",
     "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
-    "eslint": "^8.0.0",
+    "@eslint/js": "^9.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
     "jest": "^29.0.0",
     "rimraf": "^5.0.0",
     "ts-jest": "^29.0.0",
@@ -50,43 +100,39 @@
     "ts-node-dev": "^2.0.0",
     "tsc-alias": "^1.8.0",
     "typedoc": "^0.25.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "@changesets/changelog-github": "^0.5.1",
+    "@changesets/cli": "^2.26.2",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^13.0.0",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^11.0.0",
+    "@semantic-release/npm": "^12.0.1",
+    "@semantic-release/release-notes-generator": "^14.0.1",
+    "semantic-release": "^24.0.0",
+    "prettier": "^3.0.0",
+    "publint": "^0.3.0"
   },
   "peerDependencies": {
     "typescript": ">=4.5.0"
   },
   "engines": {
     "node": ">=18.0.0",
-    "npm": ">=8.0.0"
+    "npm": ">=8.0.0",
+    "pnpm": ">=8.0.0"
   },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
   ],
-  "keywords": [
-    "pr",
-    "pull-request",
-    "code-review",
-    "ai",
-    "automation",
-    "bitbucket",
-    "github",
-    "gitlab",
-    "security",
-    "quality"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git@github.com:juspay/yama.git"
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
-  "bugs": {
-    "url": "https://github.com/juspay/yama/issues"
-  },
-  "homepage": "https://github.com/juspay/yama#readme",
-  "license": "MIT",
-  "author": {
-    "name": "Juspay Technologies",
-    "email": "support@juspay.in"
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

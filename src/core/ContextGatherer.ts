@@ -10,11 +10,11 @@ import {
   PRDiff,
   AIProviderConfig,
   ProviderError,
-  DiffStrategyConfig
-} from '../types';
-import { BitbucketProvider } from './providers/BitbucketProvider';
-import { logger } from '../utils/Logger';
-import { cache, Cache } from '../utils/Cache';
+  DiffStrategyConfig,
+} from "../types";
+import { BitbucketProvider } from "./providers/BitbucketProvider";
+import { logger } from "../utils/Logger";
+import { cache, Cache } from "../utils/Cache";
 
 export interface ProjectContext {
   memoryBank: {
@@ -28,7 +28,7 @@ export interface ProjectContext {
 }
 
 export interface DiffStrategy {
-  strategy: 'whole' | 'file-by-file';
+  strategy: "whole" | "file-by-file";
   reason: string;
   fileCount: number;
   estimatedSize: string;
@@ -55,7 +55,7 @@ export class ContextGatherer {
 
   constructor(
     bitbucketProvider: BitbucketProvider,
-    aiConfig: AIProviderConfig
+    aiConfig: AIProviderConfig,
   ) {
     this.bitbucketProvider = bitbucketProvider;
     this.aiConfig = aiConfig;
@@ -72,62 +72,71 @@ export class ContextGatherer {
       forceRefresh?: boolean;
       includeDiff?: boolean;
       diffStrategyConfig?: DiffStrategyConfig;
-    } = {}
+    } = {},
   ): Promise<UnifiedContext> {
     this.startTime = Date.now();
     const contextId = this.generateContextId(identifier);
     const cacheHits: string[] = [];
 
-    logger.phase('🔍 Gathering unified context...');
+    logger.phase("🔍 Gathering unified context...");
     logger.info(`Target: ${identifier.workspace}/${identifier.repository}`);
-    
+
     try {
       // Step 1: Find and get PR information
-      const pr = await this.findAndGetPR(identifier, cacheHits, options.forceRefresh);
-      
+      const pr = await this.findAndGetPR(
+        identifier,
+        cacheHits,
+        options.forceRefresh,
+      );
+
       const completeIdentifier: PRIdentifier = {
         ...identifier,
-        pullRequestId: pr.id
+        pullRequestId: pr.id,
       };
 
       // Step 2: Gather project context (memory bank + clinerules)
       const projectContext = await this.gatherProjectContext(
-        completeIdentifier, 
-        cacheHits, 
-        options.forceRefresh
+        completeIdentifier,
+        cacheHits,
+        options.forceRefresh,
       );
 
       // Step 3: Determine diff strategy based on file count and config
-      const diffStrategy = this.determineDiffStrategy(pr.fileChanges || [], options.diffStrategyConfig);
-      logger.info(`Diff strategy: ${diffStrategy.strategy} (${diffStrategy.reason})`);
+      const diffStrategy = this.determineDiffStrategy(
+        pr.fileChanges || [],
+        options.diffStrategyConfig,
+      );
+      logger.info(
+        `Diff strategy: ${diffStrategy.strategy} (${diffStrategy.reason})`,
+      );
 
       // Step 4: Get diff data based on strategy (if requested)
       let prDiff: PRDiff | undefined;
       let fileDiffs: Map<string, string> | undefined;
 
       if (options.includeDiff !== false) {
-        if (diffStrategy.strategy === 'whole') {
+        if (diffStrategy.strategy === "whole") {
           prDiff = await this.getPRDiff(
             completeIdentifier,
             options.contextLines || 3,
-            options.excludePatterns || ['*.lock', '*.svg'],
+            options.excludePatterns || ["*.lock", "*.svg"],
             cacheHits,
-            options.forceRefresh
+            options.forceRefresh,
           );
         } else {
           fileDiffs = await this.getFileByFileDiffs(
             completeIdentifier,
             pr.fileChanges || [],
             options.contextLines || 3,
-            options.excludePatterns || ['*.lock', '*.svg'],
+            options.excludePatterns || ["*.lock", "*.svg"],
             cacheHits,
-            options.forceRefresh
+            options.forceRefresh,
           );
         }
       }
 
       const gatheringDuration = Date.now() - this.startTime;
-      
+
       const context: UnifiedContext = {
         pr,
         identifier: completeIdentifier,
@@ -138,22 +147,23 @@ export class ContextGatherer {
         contextId,
         gatheredAt: new Date().toISOString(),
         cacheHits,
-        gatheringDuration
+        gatheringDuration,
       };
 
       logger.success(
         `Context gathered in ${Math.round(gatheringDuration / 1000)}s ` +
-        `(${cacheHits.length} cache hits, ${diffStrategy.fileCount} files, ${diffStrategy.estimatedSize})`
+          `(${cacheHits.length} cache hits, ${diffStrategy.fileCount} files, ${diffStrategy.estimatedSize})`,
       );
 
       // Cache the complete context for reuse
       this.cacheContext(context);
 
       return context;
-
     } catch (error) {
       logger.error(`Context gathering failed: ${(error as Error).message}`);
-      throw new ProviderError(`Failed to gather context: ${(error as Error).message}`);
+      throw new ProviderError(
+        `Failed to gather context: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -163,29 +173,31 @@ export class ContextGatherer {
   private async findAndGetPR(
     identifier: PRIdentifier,
     cacheHits: string[],
-    forceRefresh = false
+    forceRefresh = false,
   ): Promise<PRInfo> {
-    logger.debug('Step 1: Finding and getting PR information...');
+    logger.debug("Step 1: Finding and getting PR information...");
 
     // If PR ID is provided, get details directly
     if (identifier.pullRequestId) {
       const cacheKey = Cache.keys.prInfo(
         identifier.workspace,
         identifier.repository,
-        identifier.pullRequestId
+        identifier.pullRequestId,
       );
 
       if (!forceRefresh && cache.has(cacheKey)) {
-        cacheHits.push('pr-details');
+        cacheHits.push("pr-details");
       }
 
       return cache.getOrSet(
         cacheKey,
         async () => {
-          logger.debug(`Getting PR details: ${identifier.workspace}/${identifier.repository}#${identifier.pullRequestId}`);
+          logger.debug(
+            `Getting PR details: ${identifier.workspace}/${identifier.repository}#${identifier.pullRequestId}`,
+          );
           return await this.bitbucketProvider.getPRDetails(identifier);
         },
-        1800 // 30 minutes
+        1800, // 30 minutes
       );
     }
 
@@ -194,31 +206,33 @@ export class ContextGatherer {
       const branchCacheKey = Cache.keys.branchInfo(
         identifier.workspace,
         identifier.repository,
-        identifier.branch
+        identifier.branch,
       );
 
       if (!forceRefresh && cache.has(branchCacheKey)) {
-        cacheHits.push('branch-pr-lookup');
+        cacheHits.push("branch-pr-lookup");
       }
 
       const prInfo = await cache.getOrSet(
         branchCacheKey,
         async () => {
-          logger.debug(`Finding PR for branch: ${identifier.workspace}/${identifier.repository}@${identifier.branch}`);
+          logger.debug(
+            `Finding PR for branch: ${identifier.workspace}/${identifier.repository}@${identifier.branch}`,
+          );
           return await this.bitbucketProvider.findPRForBranch(identifier);
         },
-        3600 // 1 hour
+        3600, // 1 hour
       );
 
       // Now get full PR details
       const detailsCacheKey = Cache.keys.prInfo(
         identifier.workspace,
         identifier.repository,
-        prInfo.id
+        prInfo.id,
       );
 
       if (!forceRefresh && cache.has(detailsCacheKey)) {
-        cacheHits.push('pr-details-from-branch');
+        cacheHits.push("pr-details-from-branch");
       }
 
       return cache.getOrSet(
@@ -226,14 +240,14 @@ export class ContextGatherer {
         async () => {
           return await this.bitbucketProvider.getPRDetails({
             ...identifier,
-            pullRequestId: prInfo.id
+            pullRequestId: prInfo.id,
           });
         },
-        1800 // 30 minutes
+        1800, // 30 minutes
       );
     }
 
-    throw new ProviderError('Either pullRequestId or branch must be provided');
+    throw new ProviderError("Either pullRequestId or branch must be provided");
   }
 
   /**
@@ -242,18 +256,18 @@ export class ContextGatherer {
   private async gatherProjectContext(
     identifier: PRIdentifier,
     cacheHits: string[],
-    forceRefresh = false
+    forceRefresh = false,
   ): Promise<ProjectContext> {
-    logger.debug('Step 2: Gathering project context...');
+    logger.debug("Step 2: Gathering project context...");
 
     const cacheKey = Cache.keys.projectContext(
       identifier.workspace,
       identifier.repository,
-      identifier.branch || 'main'
+      identifier.branch || "main",
     );
 
     if (!forceRefresh && cache.has(cacheKey)) {
-      cacheHits.push('project-context');
+      cacheHits.push("project-context");
     }
 
     return cache.getOrSet(
@@ -261,61 +275,70 @@ export class ContextGatherer {
       async () => {
         try {
           // Get memory-bank directory listing
-          const memoryBankFiles = await this.bitbucketProvider.listDirectoryContent(
-            identifier.workspace,
-            identifier.repository,
-            'memory-bank',
-            identifier.branch || 'main'
-          );
+          const memoryBankFiles =
+            await this.bitbucketProvider.listDirectoryContent(
+              identifier.workspace,
+              identifier.repository,
+              "memory-bank",
+              identifier.branch || "main",
+            );
 
           if (!memoryBankFiles.length) {
-            logger.debug('No memory-bank directory found');
+            logger.debug("No memory-bank directory found");
             return {
               memoryBank: {
-                summary: 'No project context available',
-                projectContext: 'None',
-                patterns: 'None',
-                standards: 'None'
+                summary: "No project context available",
+                projectContext: "None",
+                patterns: "None",
+                standards: "None",
               },
-              clinerules: '',
-              filesProcessed: 0
+              clinerules: "",
+              filesProcessed: 0,
             };
           }
 
           // Get content of each memory bank file
           const fileContents: Record<string, string> = {};
-          const files = memoryBankFiles.filter(f => f.type === 'file');
-          
+          const files = memoryBankFiles.filter((f) => f.type === "file");
+
           for (const file of files) {
             try {
-              fileContents[file.name] = await this.bitbucketProvider.getFileContent(
-                identifier.workspace,
-                identifier.repository,
-                `memory-bank/${file.name}`,
-                identifier.branch || 'main'
-              );
+              fileContents[file.name] =
+                await this.bitbucketProvider.getFileContent(
+                  identifier.workspace,
+                  identifier.repository,
+                  `memory-bank/${file.name}`,
+                  identifier.branch || "main",
+                );
               logger.debug(`✓ Got content for: ${file.name}`);
             } catch (error) {
-              logger.debug(`Could not read file ${file.name}: ${(error as Error).message}`);
+              logger.debug(
+                `Could not read file ${file.name}: ${(error as Error).message}`,
+              );
             }
           }
 
           // Get .clinerules file
-          let clinerules = '';
+          let clinerules = "";
           try {
             clinerules = await this.bitbucketProvider.getFileContent(
               identifier.workspace,
               identifier.repository,
-              '.clinerules',
-              identifier.branch || 'main'
+              ".clinerules",
+              identifier.branch || "main",
             );
-            logger.debug('✓ Got .clinerules content');
+            logger.debug("✓ Got .clinerules content");
           } catch (error) {
-            logger.debug(`Could not read .clinerules: ${(error as Error).message}`);
+            logger.debug(
+              `Could not read .clinerules: ${(error as Error).message}`,
+            );
           }
 
           // Parse and summarize with AI
-          const contextData = await this.parseProjectContextWithAI(fileContents, clinerules);
+          const contextData = await this.parseProjectContextWithAI(
+            fileContents,
+            clinerules,
+          );
 
           return {
             memoryBank: {
@@ -324,27 +347,28 @@ Patterns: ${contextData.patterns}
 Standards: ${contextData.standards}`,
               projectContext: contextData.projectContext,
               patterns: contextData.patterns,
-              standards: contextData.standards
+              standards: contextData.standards,
             },
             clinerules,
-            filesProcessed: Object.keys(fileContents).length
+            filesProcessed: Object.keys(fileContents).length,
           };
-
         } catch (error) {
-          logger.debug(`Failed to gather project context: ${(error as Error).message}`);
+          logger.debug(
+            `Failed to gather project context: ${(error as Error).message}`,
+          );
           return {
             memoryBank: {
-              summary: 'Context gathering failed',
-              projectContext: 'Failed to load',
-              patterns: 'Failed to load',
-              standards: 'Failed to load'
+              summary: "Context gathering failed",
+              projectContext: "Failed to load",
+              patterns: "Failed to load",
+              standards: "Failed to load",
             },
-            clinerules: '',
-            filesProcessed: 0
+            clinerules: "",
+            filesProcessed: 0,
           };
         }
       },
-      7200 // 2 hours - project context changes less frequently
+      7200, // 2 hours - project context changes less frequently
     );
   }
 
@@ -353,7 +377,7 @@ Standards: ${contextData.standards}`,
    */
   private async parseProjectContextWithAI(
     fileContents: Record<string, string>,
-    clinerules: string
+    clinerules: string,
   ): Promise<{ projectContext: string; patterns: string; standards: string }> {
     const prompt = `Parse and summarize these memory bank files and .clinerules:
 
@@ -372,55 +396,60 @@ Extract and summarize the content and return ONLY this JSON format:
     try {
       // Initialize NeuroLink with eval-based dynamic import
       if (!this.neurolink) {
-        const dynamicImport = eval('(specifier) => import(specifier)');
-        const { NeuroLink } = await dynamicImport('@juspay/neurolink');
+        const dynamicImport = eval("(specifier) => import(specifier)");
+        const { NeuroLink } = await dynamicImport("@juspay/neurolink");
         this.neurolink = new NeuroLink();
       }
 
       // Context for project analysis
       const aiContext = {
-        operation: 'project-context-analysis',
+        operation: "project-context-analysis",
         fileCount: Object.keys(fileContents).length,
         hasClinerules: !!clinerules,
-        analysisType: 'memory-bank-synthesis'
+        analysisType: "memory-bank-synthesis",
       };
 
       const result = await this.neurolink.generate({
         input: { text: prompt },
-        systemPrompt: 'You are an Expert Project Analyst. Synthesize project context from documentation and configuration files to help AI understand the codebase architecture, patterns, and business domain.',
+        systemPrompt:
+          "You are an Expert Project Analyst. Synthesize project context from documentation and configuration files to help AI understand the codebase architecture, patterns, and business domain.",
         provider: this.aiConfig.provider,
         model: this.aiConfig.model,
         temperature: 0.3,
         maxTokens: Math.max(this.aiConfig.maxTokens || 0, 500000), // Quality first - always use higher limit
-        timeout: '10m', // Allow longer processing for quality
+        timeout: "10m", // Allow longer processing for quality
         context: aiContext,
         enableAnalytics: this.aiConfig.enableAnalytics || true,
-        enableEvaluation: false  // Not needed for context synthesis
+        enableEvaluation: false, // Not needed for context synthesis
       });
 
       // Log context analysis
       if (result.analytics) {
-        logger.debug(`Context Analysis - Files: ${Object.keys(fileContents).length}, Provider: ${result.provider}`);
+        logger.debug(
+          `Context Analysis - Files: ${Object.keys(fileContents).length}, Provider: ${result.provider}`,
+        );
       }
 
       // Modern NeuroLink returns { content: string }
       const response = this.parseAIResponse(result);
-      
+
       if (response.success) {
         return {
-          projectContext: response.projectContext || 'None',
-          patterns: response.patterns || 'None',
-          standards: response.standards || 'None'
+          projectContext: response.projectContext || "None",
+          patterns: response.patterns || "None",
+          standards: response.standards || "None",
         };
       }
 
-      throw new Error('AI parsing failed');
+      throw new Error("AI parsing failed");
     } catch (error) {
-      logger.warn(`AI context parsing failed, using fallback: ${(error as Error).message}`);
+      logger.warn(
+        `AI context parsing failed, using fallback: ${(error as Error).message}`,
+      );
       return {
-        projectContext: 'AI parsing unavailable',
-        patterns: 'Standard patterns assumed',
-        standards: 'Standard quality requirements'
+        projectContext: "AI parsing unavailable",
+        patterns: "Standard patterns assumed",
+        standards: "Standard quality requirements",
       };
     }
   }
@@ -428,36 +457,39 @@ Extract and summarize the content and return ONLY this JSON format:
   /**
    * Step 3: Determine optimal diff strategy
    */
-  private determineDiffStrategy(fileChanges: string[], config?: DiffStrategyConfig): DiffStrategy {
+  private determineDiffStrategy(
+    fileChanges: string[],
+    config?: DiffStrategyConfig,
+  ): DiffStrategy {
     const fileCount = fileChanges.length;
-    
+
     // Get threshold values from config or use defaults
     const wholeDiffMaxFiles = config?.thresholds?.wholeDiffMaxFiles ?? 2;
-    // Note: fileByFileMinFiles is currently same as wholeDiffMaxFiles + 1 
+    // Note: fileByFileMinFiles is currently same as wholeDiffMaxFiles + 1
     // but kept separate for future flexibility
-    
+
     // Check if force strategy is configured
-    if (config?.forceStrategy && config.forceStrategy !== 'auto') {
+    if (config?.forceStrategy && config.forceStrategy !== "auto") {
       return {
         strategy: config.forceStrategy,
         reason: `Forced by configuration`,
         fileCount,
-        estimatedSize: this.estimateDiffSize(fileCount)
+        estimatedSize: this.estimateDiffSize(fileCount),
       };
     }
-    
+
     // Determine strategy based on thresholds
-    let strategy: 'whole' | 'file-by-file' = 'whole';
-    let reason = '';
+    let strategy: "whole" | "file-by-file" = "whole";
+    let reason = "";
 
     if (fileCount === 0) {
-      strategy = 'whole';
-      reason = 'No files to analyze';
+      strategy = "whole";
+      reason = "No files to analyze";
     } else if (fileCount <= wholeDiffMaxFiles) {
-      strategy = 'whole';
+      strategy = "whole";
       reason = `${fileCount} file(s) ≤ ${wholeDiffMaxFiles} (threshold), using whole diff`;
     } else {
-      strategy = 'file-by-file';
+      strategy = "file-by-file";
       reason = `${fileCount} file(s) > ${wholeDiffMaxFiles} (threshold), using file-by-file`;
     }
 
@@ -465,7 +497,7 @@ Extract and summarize the content and return ONLY this JSON format:
       strategy,
       reason,
       fileCount,
-      estimatedSize: this.estimateDiffSize(fileCount)
+      estimatedSize: this.estimateDiffSize(fileCount),
     };
   }
 
@@ -473,12 +505,12 @@ Extract and summarize the content and return ONLY this JSON format:
    * Estimate diff size based on file count
    */
   private estimateDiffSize(fileCount: number): string {
-    if (fileCount === 0) return '0 KB';
-    if (fileCount <= 2) return 'Small (~5-20 KB)';
-    if (fileCount <= 5) return 'Small (~10-50 KB)';
-    if (fileCount <= 20) return 'Medium (~50-200 KB)';
-    if (fileCount <= 50) return 'Large (~200-500 KB)';
-    return 'Very Large (>500 KB)';
+    if (fileCount === 0) {return "0 KB";}
+    if (fileCount <= 2) {return "Small (~5-20 KB)";}
+    if (fileCount <= 5) {return "Small (~10-50 KB)";}
+    if (fileCount <= 20) {return "Medium (~50-200 KB)";}
+    if (fileCount <= 50) {return "Large (~200-500 KB)";}
+    return "Very Large (>500 KB)";
   }
 
   /**
@@ -489,18 +521,18 @@ Extract and summarize the content and return ONLY this JSON format:
     contextLines: number,
     excludePatterns: string[],
     cacheHits: string[],
-    forceRefresh = false
+    forceRefresh = false,
   ): Promise<PRDiff> {
-    logger.debug('Getting whole PR diff...');
+    logger.debug("Getting whole PR diff...");
 
     const cacheKey = Cache.keys.prDiff(
       identifier.workspace,
       identifier.repository,
-      identifier.pullRequestId!
+      identifier.pullRequestId!,
     );
 
     if (!forceRefresh && cache.has(cacheKey)) {
-      cacheHits.push('pr-diff');
+      cacheHits.push("pr-diff");
     }
 
     return cache.getOrSet(
@@ -509,10 +541,10 @@ Extract and summarize the content and return ONLY this JSON format:
         return await this.bitbucketProvider.getPRDiff(
           identifier,
           contextLines,
-          excludePatterns
+          excludePatterns,
         );
       },
-      1800 // 30 minutes
+      1800, // 30 minutes
     );
   }
 
@@ -525,17 +557,20 @@ Extract and summarize the content and return ONLY this JSON format:
     contextLines: number,
     excludePatterns: string[],
     cacheHits: string[],
-    forceRefresh = false
+    forceRefresh = false,
   ): Promise<Map<string, string>> {
-    logger.debug(`Getting file-by-file diffs for ${fileChanges.length} files...`);
-    
+    logger.debug(
+      `Getting file-by-file diffs for ${fileChanges.length} files...`,
+    );
+
     const fileDiffs = new Map<string, string>();
-    
+
     // Filter out excluded files
-    const filteredFiles = fileChanges.filter(file => 
-      !excludePatterns.some(pattern => 
-        new RegExp(pattern.replace(/\*/g, '.*')).test(file)
-      )
+    const filteredFiles = fileChanges.filter(
+      (file) =>
+        !excludePatterns.some((pattern) =>
+          new RegExp(pattern.replace(/\*/g, ".*")).test(file),
+        ),
     );
 
     logger.debug(`Processing ${filteredFiles.length} files after exclusions`);
@@ -544,10 +579,10 @@ Extract and summarize the content and return ONLY this JSON format:
     const batchSize = 5;
     for (let i = 0; i < filteredFiles.length; i += batchSize) {
       const batch = filteredFiles.slice(i, i + batchSize);
-      
+
       const batchPromises = batch.map(async (file) => {
         const fileCacheKey = `file-diff:${identifier.workspace}:${identifier.repository}:${identifier.pullRequestId}:${file}`;
-        
+
         if (!forceRefresh && cache.has(fileCacheKey)) {
           cacheHits.push(`file-diff-${file}`);
         }
@@ -560,23 +595,23 @@ Extract and summarize the content and return ONLY this JSON format:
               identifier,
               contextLines,
               excludePatterns,
-              [file] // Include patterns with single file
+              [file], // Include patterns with single file
             );
             return fileDiff.diff;
           },
-          1800 // 30 minutes
+          1800, // 30 minutes
         );
       });
 
       const batchResults = await Promise.all(batchPromises);
-      
+
       batch.forEach((file, index) => {
         fileDiffs.set(file, batchResults[index]);
       });
 
       // Small delay between batches to avoid overwhelming the API
       if (i + batchSize < filteredFiles.length) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
 
@@ -590,7 +625,7 @@ Extract and summarize the content and return ONLY this JSON format:
   private cacheContext(context: UnifiedContext): void {
     const contextCacheKey = `context:${context.contextId}`;
     cache.set(contextCacheKey, context, 1800); // 30 minutes
-    
+
     // Tag it for easy invalidation
     cache.setWithTags(
       contextCacheKey,
@@ -598,25 +633,27 @@ Extract and summarize the content and return ONLY this JSON format:
       [
         `workspace:${context.identifier.workspace}`,
         `repository:${context.identifier.repository}`,
-        `pr:${context.identifier.pullRequestId}`
+        `pr:${context.identifier.pullRequestId}`,
       ],
-      1800
+      1800,
     );
   }
 
   /**
    * Get cached context if available
    */
-  async getCachedContext(identifier: PRIdentifier): Promise<UnifiedContext | null> {
+  async getCachedContext(
+    identifier: PRIdentifier,
+  ): Promise<UnifiedContext | null> {
     const contextId = this.generateContextId(identifier);
     const contextCacheKey = `context:${contextId}`;
-    
+
     const cached = cache.get<UnifiedContext>(contextCacheKey);
     if (cached) {
       logger.debug(`✓ Using cached context: ${contextId}`);
       return cached;
     }
-    
+
     return null;
   }
 
@@ -626,7 +663,9 @@ Extract and summarize the content and return ONLY this JSON format:
   invalidateContext(identifier: PRIdentifier): void {
     cache.invalidateTag(`pr:${identifier.pullRequestId}`);
     cache.invalidateTag(`workspace:${identifier.workspace}`);
-    logger.debug(`Context cache invalidated for PR ${identifier.pullRequestId}`);
+    logger.debug(
+      `Context cache invalidated for PR ${identifier.pullRequestId}`,
+    );
   }
 
   /**
@@ -636,11 +675,11 @@ Extract and summarize the content and return ONLY this JSON format:
     const parts = [
       identifier.workspace,
       identifier.repository,
-      identifier.pullRequestId || identifier.branch || 'unknown'
+      identifier.pullRequestId || identifier.branch || "unknown",
     ];
-    return Buffer.from(parts.join(':'))
-      .toString('base64')
-      .replace(/[+/=]/g, '')
+    return Buffer.from(parts.join(":"))
+      .toString("base64")
+      .replace(/[+/=]/g, "")
       .substring(0, 16);
   }
 
@@ -649,10 +688,11 @@ Extract and summarize the content and return ONLY this JSON format:
    */
   private parseAIResponse(result: any): any {
     try {
-      const responseText = result.content || result.text || result.response || '';
-      
+      const responseText =
+        result.content || result.text || result.response || "";
+
       if (!responseText) {
-        return { success: false, error: 'Empty response' };
+        return { success: false, error: "Empty response" };
       }
 
       // Find JSON in response
@@ -661,7 +701,7 @@ Extract and summarize the content and return ONLY this JSON format:
         return JSON.parse(jsonMatch[0]);
       }
 
-      return { success: false, error: 'No JSON found' };
+      return { success: false, error: "No JSON found" };
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
@@ -674,7 +714,7 @@ Extract and summarize the content and return ONLY this JSON format:
     return {
       lastGatheringDuration: this.startTime ? Date.now() - this.startTime : 0,
       cacheStats: cache.stats(),
-      cacheHitRatio: cache.getHitRatio()
+      cacheHitRatio: cache.getHitRatio(),
     };
   }
 }
@@ -682,7 +722,7 @@ Extract and summarize the content and return ONLY this JSON format:
 // Export factory function
 export function createContextGatherer(
   bitbucketProvider: BitbucketProvider,
-  aiConfig: AIProviderConfig
+  aiConfig: AIProviderConfig,
 ): ContextGatherer {
   return new ContextGatherer(bitbucketProvider, aiConfig);
 }

@@ -26,7 +26,7 @@ user_personas:
       - "Automated security analysis"
       - "Inline suggestions"
       - "Focus on complex logic review"
-  
+
   - name: "Team Lead"
     needs:
       - "Consistent review standards"
@@ -36,7 +36,7 @@ user_personas:
       - "Enforces coding standards"
       - "Ensures required sections in PRs"
       - "Analytics on code quality trends"
-  
+
   - name: "DevOps Engineer"
     needs:
       - "CI/CD integration"
@@ -56,7 +56,7 @@ user_workflows:
       - "Review AI feedback"
       - "Fix critical issues"
       - "Request human review"
-  
+
   automated_pipeline:
     description: "CI/CD runs Yama on every PR"
     steps:
@@ -74,7 +74,7 @@ feature_highlights:
       - "Code quality assessment"
       - "Inline comment posting"
     severities: ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"]
-  
+
   description_enhancement:
     description: "Automatic PR description improvement"
     capabilities:
@@ -92,12 +92,12 @@ success_metrics:
     - "90% reduction in API calls via caching"
     - "80% reduction in review time"
     - "100% PR documentation compliance"
-  
+
   quality:
     - "Zero missed security patterns"
     - "Consistent review standards"
     - "Improved code quality scores"
-  
+
   adoption:
     - "Easy CLI integration"
     - "Minimal configuration required"

@@ -3,9 +3,15 @@
  * Provides unified, cached, and optimized Bitbucket operations
  */
 
-import { PRIdentifier, PRInfo, PRDiff, GitCredentials, ProviderError } from '../../types';
-import { logger } from '../../utils/Logger';
-import { cache, Cache } from '../../utils/Cache';
+import {
+  PRIdentifier,
+  PRInfo,
+  PRDiff,
+  GitCredentials,
+  ProviderError,
+} from "../../types";
+import { logger } from "../../utils/Logger";
+import { cache, Cache } from "../../utils/Cache";
 
 export interface BitbucketMCPResponse {
   content?: Array<{ text?: string }>;
@@ -25,7 +31,7 @@ export class BitbucketProvider {
 
   constructor(credentials: GitCredentials) {
     this.credentials = credentials;
-    this.baseUrl = credentials.baseUrl || 'https://your-bitbucket-server.com';
+    this.baseUrl = credentials.baseUrl || "https://your-bitbucket-server.com";
   }
 
   /**
@@ -37,45 +43,59 @@ export class BitbucketProvider {
     }
 
     try {
-      logger.debug('Initializing Bitbucket MCP handlers...');
+      logger.debug("Initializing Bitbucket MCP handlers...");
 
-      const dynamicImport = eval('(specifier) => import(specifier)');
-      
+      const dynamicImport = eval("(specifier) => import(specifier)");
+
       const [
         { BitbucketApiClient },
         { BranchHandlers },
         { PullRequestHandlers },
         { ReviewHandlers },
-        { FileHandlers }
+        { FileHandlers },
       ] = await Promise.all([
-        dynamicImport('@nexus2520/bitbucket-mcp-server/build/utils/api-client.js'),
-        dynamicImport('@nexus2520/bitbucket-mcp-server/build/handlers/branch-handlers.js'),
-        dynamicImport('@nexus2520/bitbucket-mcp-server/build/handlers/pull-request-handlers.js'),
-        dynamicImport('@nexus2520/bitbucket-mcp-server/build/handlers/review-handlers.js'),
-        dynamicImport('@nexus2520/bitbucket-mcp-server/build/handlers/file-handlers.js')
+        dynamicImport(
+          "@nexus2520/bitbucket-mcp-server/build/utils/api-client.js",
+        ),
+        dynamicImport(
+          "@nexus2520/bitbucket-mcp-server/build/handlers/branch-handlers.js",
+        ),
+        dynamicImport(
+          "@nexus2520/bitbucket-mcp-server/build/handlers/pull-request-handlers.js",
+        ),
+        dynamicImport(
+          "@nexus2520/bitbucket-mcp-server/build/handlers/review-handlers.js",
+        ),
+        dynamicImport(
+          "@nexus2520/bitbucket-mcp-server/build/handlers/file-handlers.js",
+        ),
       ]);
 
       this.apiClient = new BitbucketApiClient(
         this.baseUrl,
         this.credentials.username,
         undefined,
-        this.credentials.token
+        this.credentials.token,
       );
 
       this.branchHandlers = new BranchHandlers(this.apiClient, this.baseUrl);
       this.pullRequestHandlers = new PullRequestHandlers(
         this.apiClient,
         this.baseUrl,
-        this.credentials.username
+        this.credentials.username,
       );
-      this.reviewHandlers = new ReviewHandlers(this.apiClient, this.credentials.username);
+      this.reviewHandlers = new ReviewHandlers(
+        this.apiClient,
+        this.credentials.username,
+      );
       this.fileHandlers = new FileHandlers(this.apiClient, this.baseUrl);
 
       this.initialized = true;
-      logger.debug('Bitbucket MCP handlers initialized successfully');
-
+      logger.debug("Bitbucket MCP handlers initialized successfully");
     } catch (error) {
-      throw new ProviderError(`Failed to initialize Bitbucket provider: ${(error as Error).message}`);
+      throw new ProviderError(
+        `Failed to initialize Bitbucket provider: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -91,12 +111,12 @@ export class BitbucketProvider {
     // Check if result has MCP format (content array) or direct data - EXACTLY like pr-police.js
     if (result.content && result.content[0] && result.content[0].text) {
       const text = result.content[0].text;
-      
+
       // Check if it's an error message
-      if (typeof text === 'string' && text.startsWith('Error:')) {
+      if (typeof text === "string" && text.startsWith("Error:")) {
         throw new Error(text);
       }
-      
+
       try {
         return JSON.parse(text);
       } catch (error) {
@@ -117,7 +137,7 @@ export class BitbucketProvider {
 
     const { workspace, repository, branch } = identifier;
     if (!branch) {
-      throw new ProviderError('Branch name is required');
+      throw new ProviderError("Branch name is required");
     }
 
     const cacheKey = Cache.keys.branchInfo(workspace, repository, branch);
@@ -125,7 +145,9 @@ export class BitbucketProvider {
     return cache.getOrSet(
       cacheKey,
       async () => {
-        logger.debug(`Finding PR for branch: ${workspace}/${repository}@${branch}`);
+        logger.debug(
+          `Finding PR for branch: ${workspace}/${repository}@${branch}`,
+        );
 
         const rawBranchData = await this.branchHandlers.handleGetBranch({
           workspace,
@@ -137,30 +159,39 @@ export class BitbucketProvider {
         const branchData = this.parseMCPResponse(rawBranchData);
 
         // Direct data extraction
-        if ((branchData as any).open_pull_requests && (branchData as any).open_pull_requests.length > 0) {
+        if (
+          (branchData as any).open_pull_requests &&
+          (branchData as any).open_pull_requests.length > 0
+        ) {
           const firstPR = (branchData as any).open_pull_requests[0];
           // Debug author data structure
-          logger.debug(`Author data structure: ${JSON.stringify(firstPR.author, null, 2)}`);
-          logger.debug(`Raw firstPR keys: ${Object.keys(firstPR).join(', ')}`);
-          
+          logger.debug(
+            `Author data structure: ${JSON.stringify(firstPR.author, null, 2)}`,
+          );
+          logger.debug(`Raw firstPR keys: ${Object.keys(firstPR).join(", ")}`);
+
           return {
             id: firstPR.id,
             title: firstPR.title,
-            description: firstPR.description || '',
-            author: firstPR.author?.displayName || firstPR.author?.name || firstPR.author || 'Unknown',
-            state: 'OPEN',
+            description: firstPR.description || "",
+            author:
+              firstPR.author?.displayName ||
+              firstPR.author?.name ||
+              firstPR.author ||
+              "Unknown",
+            state: "OPEN",
             sourceRef: branch,
-            targetRef: firstPR.destination?.branch?.name || 'main',
+            targetRef: firstPR.destination?.branch?.name || "main",
             createdDate: firstPR.createdDate || new Date().toISOString(),
             updatedDate: firstPR.updatedDate || new Date().toISOString(),
             reviewers: firstPR.reviewers || [],
-            fileChanges: firstPR.file_changes || []
+            fileChanges: firstPR.file_changes || [],
           } as PRInfo;
         }
 
         throw new ProviderError(`No open PR found for branch: ${branch}`);
       },
-      3600 // Cache for 1 hour
+      3600, // Cache for 1 hour
     );
   }
 
@@ -172,7 +203,7 @@ export class BitbucketProvider {
 
     const { workspace, repository, pullRequestId } = identifier;
     if (!pullRequestId) {
-      throw new ProviderError('Pull request ID is required');
+      throw new ProviderError("Pull request ID is required");
     }
 
     const cacheKey = Cache.keys.prInfo(workspace, repository, pullRequestId);
@@ -180,36 +211,49 @@ export class BitbucketProvider {
     return cache.getOrSet(
       cacheKey,
       async () => {
-        logger.debug(`Getting PR details: ${workspace}/${repository}#${pullRequestId}`);
+        logger.debug(
+          `Getting PR details: ${workspace}/${repository}#${pullRequestId}`,
+        );
 
-        const rawPRDetails = await this.pullRequestHandlers.handleGetPullRequest({
-          workspace,
-          repository,
-          pull_request_id: pullRequestId,
-        });
+        const rawPRDetails =
+          await this.pullRequestHandlers.handleGetPullRequest({
+            workspace,
+            repository,
+            pull_request_id: pullRequestId,
+          });
 
         const prData = this.parseMCPResponse(rawPRDetails);
 
         // Debug author data structure
-        logger.debug(`PR Details author data structure: ${JSON.stringify((prData as any).author, null, 2)}`);
-        logger.debug(`PR Details raw keys: ${Object.keys(prData as any).join(', ')}`);
+        logger.debug(
+          `PR Details author data structure: ${JSON.stringify((prData as any).author, null, 2)}`,
+        );
+        logger.debug(
+          `PR Details raw keys: ${Object.keys(prData as any).join(", ")}`,
+        );
 
         return {
           id: (prData as any).id,
           title: (prData as any).title,
-          description: (prData as any).description || '',
-          author: (prData as any).author?.displayName || (prData as any).author?.name || (prData as any).author || 'Unknown',
-          state: (prData as any).state || 'OPEN',
-          sourceRef: (prData as any).source?.branch?.name || '',
-          targetRef: (prData as any).destination?.branch?.name || '',
+          description: (prData as any).description || "",
+          author:
+            (prData as any).author?.displayName ||
+            (prData as any).author?.name ||
+            (prData as any).author ||
+            "Unknown",
+          state: (prData as any).state || "OPEN",
+          sourceRef: (prData as any).source?.branch?.name || "",
+          targetRef: (prData as any).destination?.branch?.name || "",
           createdDate: (prData as any).createdDate || new Date().toISOString(),
           updatedDate: (prData as any).updatedDate || new Date().toISOString(),
           reviewers: (prData as any).reviewers || [],
           comments: (prData as any).active_comments || [],
-          fileChanges: (prData as any).file_changes?.map((f: any) => f.path || f.file) || []
+          fileChanges:
+            (prData as any).file_changes?.map((f: any) => f.path || f.file) ||
+            [],
         } as PRInfo;
       },
-      1800 // Cache for 30 minutes
+      1800, // Cache for 30 minutes
     );
   }
 
@@ -219,27 +263,30 @@ export class BitbucketProvider {
   async getPRDiff(
     identifier: PRIdentifier,
     contextLines = 3,
-    excludePatterns: string[] = ['*.lock', '*.svg'],
-    includePatterns?: string[]
+    excludePatterns: string[] = ["*.lock", "*.svg"],
+    includePatterns?: string[],
   ): Promise<PRDiff> {
     await this.initialize();
 
     const { workspace, repository, pullRequestId } = identifier;
     if (!pullRequestId) {
-      throw new ProviderError('Pull request ID is required');
+      throw new ProviderError("Pull request ID is required");
     }
 
     // Create a cache key that includes include patterns if specified
-    const cacheKey = includePatterns && includePatterns.length === 1
-      ? `file-diff:${workspace}:${repository}:${pullRequestId}:${includePatterns[0]}`
-      : Cache.keys.prDiff(workspace, repository, pullRequestId);
+    const cacheKey =
+      includePatterns && includePatterns.length === 1
+        ? `file-diff:${workspace}:${repository}:${pullRequestId}:${includePatterns[0]}`
+        : Cache.keys.prDiff(workspace, repository, pullRequestId);
 
     return cache.getOrSet(
       cacheKey,
       async () => {
-        logger.debug(`Getting PR diff: ${workspace}/${repository}#${pullRequestId}`);
+        logger.debug(
+          `Getting PR diff: ${workspace}/${repository}#${pullRequestId}`,
+        );
         if (includePatterns) {
-          logger.debug(`Include patterns: ${includePatterns.join(', ')}`);
+          logger.debug(`Include patterns: ${includePatterns.join(", ")}`);
         }
 
         const args: any = {
@@ -255,18 +302,19 @@ export class BitbucketProvider {
           args.include_patterns = includePatterns;
         }
 
-        const rawDiff = await this.reviewHandlers.handleGetPullRequestDiff(args);
+        const rawDiff =
+          await this.reviewHandlers.handleGetPullRequestDiff(args);
 
         const diffData = this.parseMCPResponse(rawDiff);
 
         return {
-          diff: (diffData as any).diff || '',
+          diff: (diffData as any).diff || "",
           fileChanges: (diffData as any).file_changes || [],
           totalAdditions: (diffData as any).total_additions || 0,
-          totalDeletions: (diffData as any).total_deletions || 0
+          totalDeletions: (diffData as any).total_deletions || 0,
         } as PRDiff;
       },
-      1800 // Cache for 30 minutes
+      1800, // Cache for 30 minutes
     );
   }
 
@@ -277,16 +325,23 @@ export class BitbucketProvider {
     workspace: string,
     repository: string,
     filePath: string,
-    branch: string
+    branch: string,
   ): Promise<string> {
     await this.initialize();
 
-    const cacheKey = Cache.keys.fileContent(workspace, repository, filePath, branch);
+    const cacheKey = Cache.keys.fileContent(
+      workspace,
+      repository,
+      filePath,
+      branch,
+    );
 
     return cache.getOrSet(
       cacheKey,
       async () => {
-        logger.debug(`Getting file content: ${workspace}/${repository}/${filePath}@${branch}`);
+        logger.debug(
+          `Getting file content: ${workspace}/${repository}/${filePath}@${branch}`,
+        );
 
         const result = await this.fileHandlers.handleGetFileContent({
           workspace,
@@ -298,13 +353,13 @@ export class BitbucketProvider {
         // Handle file content response directly (don't JSON parse)
         if (result.content && result.content[0] && result.content[0].text) {
           const fileResponse = JSON.parse(result.content[0].text);
-          return fileResponse.content || '';
+          return fileResponse.content || "";
         }
-        
+
         // Handle direct response format
-        return (result as any).content || '';
+        return (result as any).content || "";
       },
-      7200 // Cache for 2 hours (files change less frequently)
+      7200, // Cache for 2 hours (files change less frequently)
     );
   }
 
@@ -315,16 +370,23 @@ export class BitbucketProvider {
     workspace: string,
     repository: string,
     path: string,
-    branch: string
+    branch: string,
   ): Promise<any[]> {
     await this.initialize();
 
-    const cacheKey = Cache.keys.directoryContent(workspace, repository, path, branch);
+    const cacheKey = Cache.keys.directoryContent(
+      workspace,
+      repository,
+      path,
+      branch,
+    );
 
     return cache.getOrSet(
       cacheKey,
       async () => {
-        logger.debug(`Listing directory: ${workspace}/${repository}/${path}@${branch}`);
+        logger.debug(
+          `Listing directory: ${workspace}/${repository}/${path}@${branch}`,
+        );
 
         const result = await this.fileHandlers.handleListDirectoryContent({
           workspace,
@@ -336,7 +398,7 @@ export class BitbucketProvider {
         const dirData = this.parseMCPResponse(result);
         return (dirData as any).contents || [];
       },
-      3600 // Cache for 1 hour
+      3600, // Cache for 1 hour
     );
   }
 
@@ -345,53 +407,61 @@ export class BitbucketProvider {
    */
   async updatePRDescription(
     identifier: PRIdentifier,
-    description: string
+    description: string,
   ): Promise<{ success: boolean; message: string }> {
     await this.initialize();
 
     const { workspace, repository, pullRequestId } = identifier;
     if (!pullRequestId) {
-      throw new ProviderError('Pull request ID is required');
+      throw new ProviderError("Pull request ID is required");
     }
 
     try {
-      logger.debug(`Updating PR description: ${workspace}/${repository}#${pullRequestId}`);
+      logger.debug(
+        `Updating PR description: ${workspace}/${repository}#${pullRequestId}`,
+      );
       logger.debug(`Description length: ${description.length} characters`);
 
       const result = await this.pullRequestHandlers.handleUpdatePullRequest({
         workspace,
         repository,
         pull_request_id: pullRequestId,
-        description: description
+        description: description,
       });
 
       // Log the raw MCP response
-      logger.debug(`Raw MCP update response: ${JSON.stringify(result, null, 2)}`);
+      logger.debug(
+        `Raw MCP update response: ${JSON.stringify(result, null, 2)}`,
+      );
 
       const updateData = this.parseMCPResponse(result);
-      
+
       // Log the parsed response
-      logger.debug(`Parsed update response: ${JSON.stringify(updateData, null, 2)}`);
+      logger.debug(
+        `Parsed update response: ${JSON.stringify(updateData, null, 2)}`,
+      );
 
       // Invalidate related cache entries
       cache.del(Cache.keys.prInfo(workspace, repository, pullRequestId));
 
       // Check if the response indicates actual success
-      if (typeof updateData === 'string' && updateData.includes('Error')) {
+      if (typeof updateData === "string" && updateData.includes("Error")) {
         logger.error(`Update response contains error: ${updateData}`);
         return {
           success: false,
-          message: updateData
+          message: updateData,
         };
       }
 
       return {
         success: true,
-        message: (updateData as any).message || 'PR description updated successfully'
+        message:
+          (updateData as any).message || "PR description updated successfully",
       };
-
     } catch (error) {
-      logger.error(`Failed to update PR description: ${(error as Error).message}`);
+      logger.error(
+        `Failed to update PR description: ${(error as Error).message}`,
+      );
       throw new ProviderError(`Update failed: ${(error as Error).message}`);
     }
   }
@@ -405,25 +475,27 @@ export class BitbucketProvider {
     options: {
       filePath?: string;
       lineNumber?: number;
-      lineType?: 'ADDED' | 'REMOVED' | 'CONTEXT';
+      lineType?: "ADDED" | "REMOVED" | "CONTEXT";
       codeSnippet?: string;
       searchContext?: {
         before: string[];
         after: string[];
       };
-      matchStrategy?: 'exact' | 'best' | 'strict';
+      matchStrategy?: "exact" | "best" | "strict";
       suggestion?: string;
-    } = {}
+    } = {},
   ): Promise<{ success: boolean; commentId?: number }> {
     await this.initialize();
 
     const { workspace, repository, pullRequestId } = identifier;
     if (!pullRequestId) {
-      throw new ProviderError('Pull request ID is required');
+      throw new ProviderError("Pull request ID is required");
     }
 
     try {
-      logger.debug(`Adding comment to PR: ${workspace}/${repository}#${pullRequestId}`);
+      logger.debug(
+        `Adding comment to PR: ${workspace}/${repository}#${pullRequestId}`,
+      );
 
       const args: any = {
         workspace,
@@ -436,34 +508,38 @@ export class BitbucketProvider {
       if (options.filePath && options.codeSnippet) {
         args.file_path = options.filePath;
         args.code_snippet = options.codeSnippet;
-        if (options.searchContext) args.search_context = options.searchContext;
-        if (options.matchStrategy) args.match_strategy = options.matchStrategy;
-        if (options.suggestion) args.suggestion = options.suggestion;
-        
+        if (options.searchContext) {args.search_context = options.searchContext;}
+        if (options.matchStrategy) {args.match_strategy = options.matchStrategy;}
+        if (options.suggestion) {args.suggestion = options.suggestion;}
+
         logger.debug(`🔍 Inline comment details:`);
         logger.debug(`   File: ${options.filePath}`);
         logger.debug(`   Code snippet: "${options.codeSnippet}"`);
         logger.debug(`   Match strategy: ${options.matchStrategy}`);
         if (options.searchContext) {
-          logger.debug(`   Search context before: ${JSON.stringify(options.searchContext.before)}`);
-          logger.debug(`   Search context after: ${JSON.stringify(options.searchContext.after)}`);
+          logger.debug(
+            `   Search context before: ${JSON.stringify(options.searchContext.before)}`,
+          );
+          logger.debug(
+            `   Search context after: ${JSON.stringify(options.searchContext.after)}`,
+          );
         }
       } else if (options.filePath && options.lineNumber) {
         // Fallback to line number if no code snippet
         args.file_path = options.filePath;
         args.line_number = options.lineNumber;
-        args.line_type = options.lineType || 'CONTEXT';
-        
+        args.line_type = options.lineType || "CONTEXT";
+
         logger.debug(`🔍 Line-based comment details:`);
         logger.debug(`   File: ${options.filePath}`);
         logger.debug(`   Line: ${options.lineNumber}`);
-        logger.debug(`   Type: ${options.lineType || 'CONTEXT'}`);
+        logger.debug(`   Type: ${options.lineType || "CONTEXT"}`);
       }
-      
+
       logger.debug(`🔍 MCP addComment args: ${JSON.stringify(args, null, 2)}`);
 
       const result = await this.pullRequestHandlers.handleAddComment(args);
-      
+
       // Parse response exactly like pr-police.js
       let commentData;
       if (result.content && result.content[0] && result.content[0].text) {
@@ -474,9 +550,8 @@ export class BitbucketProvider {
 
       return {
         success: true,
-        commentId: commentData.id || commentData.comment_id
+        commentId: commentData.id || commentData.comment_id,
       };
-
     } catch (error) {
       logger.error(`Failed to add comment: ${(error as Error).message}`);
       throw new ProviderError(`Comment failed: ${(error as Error).message}`);
@@ -492,26 +567,27 @@ export class BitbucketProvider {
       maxConcurrent?: number;
       delayBetween?: number;
       continueOnError?: boolean;
-    } = {}
+    } = {},
   ): Promise<Array<{ success: boolean; data?: T; error?: string }>> {
     const {
       maxConcurrent = 5,
       delayBetween = 1000,
-      continueOnError = true
+      continueOnError = true,
     } = options;
 
     const results: Array<{ success: boolean; data?: T; error?: string }> = [];
-    
+
     // Process operations in batches
     for (let i = 0; i < operations.length; i += maxConcurrent) {
       const batch = operations.slice(i, i + maxConcurrent);
-      
+
       const batchPromises = batch.map(async (operation) => {
         try {
           const data = await operation();
           return { success: true, data };
         } catch (error) {
-          const errorMessage = error instanceof Error ? (error as Error).message : String(error);
+          const errorMessage =
+            error instanceof Error ? (error as Error).message : String(error);
           if (!continueOnError) {
             throw error;
           }
@@ -524,7 +600,7 @@ export class BitbucketProvider {
 
       // Add delay between batches (except for the last batch)
       if (i + maxConcurrent < operations.length && delayBetween > 0) {
-        await new Promise(resolve => setTimeout(resolve, delayBetween));
+        await new Promise((resolve) => setTimeout(resolve, delayBetween));
       }
     }
 
@@ -537,12 +613,12 @@ export class BitbucketProvider {
   async healthCheck(): Promise<{ healthy: boolean; details: any }> {
     try {
       await this.initialize();
-      
+
       // Try a simple API call to verify connectivity
       const testResult = await this.branchHandlers.handleGetBranch({
-        workspace: 'test',
-        repository: 'test',
-        branch_name: 'test',
+        workspace: "test",
+        repository: "test",
+        branch_name: "test",
         include_merged_prs: false,
       });
 
@@ -552,16 +628,16 @@ export class BitbucketProvider {
           initialized: this.initialized,
           baseUrl: this.baseUrl,
           username: this.credentials.username,
-          apiConnected: !!testResult
-        }
+          apiConnected: !!testResult,
+        },
       };
     } catch (error) {
       return {
         healthy: false,
         details: {
           initialized: this.initialized,
-          error: (error as Error).message
-        }
+          error: (error as Error).message,
+        },
       };
     }
   }
@@ -571,11 +647,11 @@ export class BitbucketProvider {
    */
   getStats(): any {
     return {
-      provider: 'bitbucket',
+      provider: "bitbucket",
       initialized: this.initialized,
       baseUrl: this.baseUrl,
       cacheStats: cache.stats(),
-      cacheHitRatio: cache.getHitRatio()
+      cacheHitRatio: cache.getHitRatio(),
     };
   }
 
@@ -585,11 +661,13 @@ export class BitbucketProvider {
   clearCache(): void {
     // Clear all cache entries (could be made more specific)
     cache.clear();
-    logger.debug('BitbucketProvider cache cleared');
+    logger.debug("BitbucketProvider cache cleared");
   }
 }
 
 // Export factory function
-export function createBitbucketProvider(credentials: GitCredentials): BitbucketProvider {
+export function createBitbucketProvider(
+  credentials: GitCredentials,
+): BitbucketProvider {
   return new BitbucketProvider(credentials);
 }

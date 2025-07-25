@@ -3,7 +3,7 @@ project_overview:
   description: "AI-powered pull request analysis tool for automated code review and description enhancement"
   version: "1.0.0"
   repository: "https://github.com/juspay/yama"
-  
+
 goals:
   primary:
     - "Automate code review process with AI-powered security and quality analysis"
@@ -39,7 +39,7 @@ constraints:
     - "API rate limits consideration"
     - "Large PR handling (100+ files)"
     - "AI token limits management"
-  
+
 key_features:
   - name: "Smart Diff Strategy"
     description: "Automatically chooses between whole diff or file-by-file based on PR size"

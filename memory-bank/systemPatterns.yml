@@ -4,7 +4,7 @@ architecture_overview:
     Guardian (Orchestrator) -> ContextGatherer -> BitbucketProvider
                            -> CodeReviewer    -> AI Analysis
                            -> DescriptionEnhancer -> AI Generation
-  
+
 design_patterns:
   - name: "Unified Context Pattern"
     category: "performance"
@@ -17,7 +17,7 @@ design_patterns:
     example_files:
       - "src/core/ContextGatherer.ts"
       - "src/core/Guardian.ts"
-  
+
   - name: "Provider Abstraction"
     category: "extensibility"
     description: "Abstract git platform operations for future extensibility"
@@ -27,7 +27,7 @@ design_patterns:
       - "Core features work with abstract interfaces"
     example_files:
       - "src/core/providers/BitbucketProvider.ts"
-  
+
   - name: "Smart Diff Strategy"
     category: "performance"
     description: "Adaptive diff fetching based on PR size"
@@ -62,7 +62,7 @@ caching_strategies:
       pr_diff: "30 minutes"
       file_content: "2 hours"
       project_context: "2 hours"
-  
+
   - name: "Context Caching"
     description: "Cache entire unified context for reuse"
     benefits:
@@ -77,7 +77,7 @@ error_handling_patterns:
       - "Catch errors per operation"
       - "Report failures without stopping"
       - "Provide partial results"
-  
+
   - name: "Detailed Error Context"
     description: "Include context in all error messages"
     implementation:
@@ -97,7 +97,7 @@ code_organization:
     tests:
       - "unit/ - Unit tests for all components"
       - "__mocks__/ - Mock implementations"
-  
+
   naming_conventions:
     files: "camelCase for files, PascalCase for classes"
     interfaces: "Prefix with 'I' only for pure interfaces"
