@@ -32,7 +32,7 @@ const program = new Command();
 // Package info
 const packageInfo = {
   name: "@juspay/yama",
-  version: "1.2.0",
+  version: "1.2.1",
   description: "Enterprise-grade Pull Request automation toolkit",
 };
 
