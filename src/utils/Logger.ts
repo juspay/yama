@@ -4,7 +4,7 @@
  */
 
 import chalk from "chalk";
-import { Logger as ILogger, LogLevel, LoggerOptions } from "../types";
+import { Logger as ILogger, LogLevel, LoggerOptions } from "../types/index.js";
 
 const YAMA_BADGE = `
 ⚔️ ═══════════════════════════════════════════════════════════ ⚔️

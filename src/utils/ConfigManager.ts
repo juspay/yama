@@ -6,8 +6,9 @@
 import fs from "fs";
 import path from "path";
 import yaml from "yaml";
-import { GuardianConfig, ConfigurationError } from "../types";
-import { logger } from "./Logger";
+import { homedir } from "os";
+import { GuardianConfig, ConfigurationError } from "../types/index.js";
+import { logger } from "./Logger.js";
 
 export class ConfigManager {
   private config: GuardianConfig | null = null;
@@ -163,7 +164,7 @@ export class ConfigManager {
    */
   private setupConfigPaths(): void {
     const cwd = process.cwd();
-    const homeDir = require("os").homedir();
+    const homeDir = homedir();
 
     this.configPaths = [
       path.join(cwd, "yama.config.yaml"),
@@ -507,7 +508,7 @@ export class ConfigManager {
           return true;
       }
     } catch (error) {
-      logger.error(`Validation failed for section ${section}:`, error);
+      logger.error(`Validation failed for section ${String(section)}:`, error);
       return false;
     }
   }

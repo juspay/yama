@@ -11,17 +11,18 @@ import chalk from "chalk";
 import ora from "ora";
 import inquirer from "inquirer";
 import dotenv from "dotenv";
+import { fileURLToPath } from "url";
 
-import { Guardian } from "../core/Guardian";
-import { logger } from "../utils/Logger";
-import { configManager } from "../utils/ConfigManager";
-import { cache } from "../utils/Cache";
+import { Guardian } from "../core/Guardian.js";
+import { logger } from "../utils/Logger.js";
+import { configManager } from "../utils/ConfigManager.js";
+import { cache } from "../utils/Cache.js";
 import {
   OperationType,
   OperationOptions,
   ReviewOptions,
   EnhancementOptions,
-} from "../types";
+} from "../types/index.js";
 
 // Load environment variables
 dotenv.config();
@@ -31,7 +32,7 @@ const program = new Command();
 // Package info
 const packageInfo = {
   name: "@juspay/yama",
-  version: "1.1.0",
+  version: "1.2.0",
   description: "Enterprise-grade Pull Request automation toolkit",
 };
 
@@ -674,7 +675,8 @@ process.on("unhandledRejection", (reason) => {
 });
 
 // Run if this is the main module
-if (require.main === module) {
+const __filename = fileURLToPath(import.meta.url);
+if (process.argv[1] === __filename) {
   main();
 }
 

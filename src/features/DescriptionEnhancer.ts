@@ -11,10 +11,10 @@ import {
   SectionAnalysis,
   AIProviderConfig,
   ProviderError,
-} from "../types";
-import { UnifiedContext } from "../core/ContextGatherer";
-import { BitbucketProvider } from "../core/providers/BitbucketProvider";
-import { logger } from "../utils/Logger";
+} from "../types/index.js";
+import { UnifiedContext } from "../core/ContextGatherer.js";
+import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
+import { logger } from "../utils/Logger.js";
 
 export class DescriptionEnhancer {
   private neurolink: any;
@@ -294,8 +294,7 @@ export class DescriptionEnhancer {
 
     // Initialize NeuroLink with eval-based dynamic import
     if (!this.neurolink) {
-      const dynamicImport = eval("(specifier) => import(specifier)");
-      const { NeuroLink } = await dynamicImport("@juspay/neurolink");
+      const { NeuroLink  } = await import("@juspay/neurolink");
       this.neurolink = new NeuroLink();
     }
 
@@ -418,7 +417,7 @@ ${context.projectContext.clinerules || "No specific rules defined"}
 ## REQUIRED SECTIONS STATUS:
 ${analysisResult.requiredSections
   .map(
-    (section) => `
+    (section: any) => `
 **${section.name}**:
 - Present: ${section.present ? "✅ Yes" : "❌ Missing"}
 - Content: ${section.content ? `"${section.content.substring(0, 100)}..."` : "None"}
@@ -530,7 +529,7 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
 
     console.log("\n📊 ENHANCEMENT SUMMARY:");
     console.log(
-      `✅ Required sections completed: ${analysisResult.requiredSections.filter((s) => s.present).length}/${analysisResult.requiredSections.length}`,
+      `✅ Required sections completed: ${analysisResult.requiredSections.filter((s: any) => s.present).length}/${analysisResult.requiredSections.length}`,
     );
     console.log(
       `📎 Preserved content: ${analysisResult.preservedContent.media.length} media items, ${analysisResult.preservedContent.files.length} files`,

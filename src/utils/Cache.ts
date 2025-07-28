@@ -4,8 +4,8 @@
  */
 
 import NodeCache from "node-cache";
-import { Cache as ICache, CacheOptions } from "../types";
-import { logger } from "./Logger";
+import { Cache as ICache, CacheOptions } from "../types/index.js";
+import { logger } from "./Logger.js";
 
 export class Cache implements ICache {
   private cache: NodeCache;

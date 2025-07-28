@@ -43,6 +43,8 @@ module.exports = {
   // Module path mapping for TypeScript aliases
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
+    // Handle .js extensions in imports for ESM compatibility
+    "^(\\.{1,2}/.*)\\.js$": "$1",
     // Mock ESM modules that cause issues
     "^@juspay/neurolink$": "<rootDir>/tests/__mocks__/@juspay/neurolink.ts",
     "^@nexus2520/bitbucket-mcp-server$":
