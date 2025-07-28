@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/juspay/yama/compare/v1.0.0...v1.1.0) (2025-07-28)
+
+
+### Features
+
+* migrate from CommonJS to ESM modules ([b45559f](https://github.com/juspay/yama/commit/b45559f86d37ab3516079becfa56a9f73ff8f062))
+
 # 1.0.0 (2025-07-25)
 
 
