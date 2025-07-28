@@ -11,10 +11,10 @@ import {
   AIProviderConfig,
   CodeReviewConfig,
   ProviderError,
-} from "../types";
-import { UnifiedContext } from "../core/ContextGatherer";
-import { BitbucketProvider } from "../core/providers/BitbucketProvider";
-import { logger } from "../utils/Logger";
+} from "../types/index.js";
+import { UnifiedContext } from "../core/ContextGatherer.js";
+import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
+import { logger } from "../utils/Logger.js";
 
 export class CodeReviewer {
   private neurolink: any;
@@ -155,7 +155,7 @@ export class CodeReviewer {
 
         if (fileStartIndex >= 0) {
           const nextFileIndex = diffLines.findIndex(
-            (line, idx) =>
+            (line: string, idx: number) =>
               idx > fileStartIndex &&
               (line.startsWith("diff --git") || line.startsWith("Index:")),
           );
@@ -302,7 +302,7 @@ CRITICAL INSTRUCTION: When identifying issues, you MUST copy the EXACT line from
       this.reviewConfig.focusAreas.length > 0
     ) {
       return this.reviewConfig.focusAreas
-        .map((area) => `### ${area}`)
+        .map((area: string) => `### ${area}`)
         .join("\n\n");
     }
 
@@ -441,7 +441,7 @@ Return ONLY valid JSON:
 
     // Extract file extensions from changes
     if (context.pr.fileChanges) {
-      context.pr.fileChanges.forEach((file) => {
+      context.pr.fileChanges.forEach((file: any) => {
         const ext = file.split(".").pop()?.toLowerCase();
         if (ext) {fileExtensions.add(ext);}
       });
@@ -500,8 +500,7 @@ Return ONLY valid JSON:
 
       // Initialize NeuroLink with eval-based dynamic import
       if (!this.neurolink) {
-        const dynamicImport = eval("(specifier) => import(specifier)");
-        const { NeuroLink } = await dynamicImport("@juspay/neurolink");
+        const { NeuroLink  } = await import("@juspay/neurolink");
         this.neurolink = new NeuroLink();
       }
 
@@ -732,7 +731,7 @@ Return ONLY valid JSON:
 
 **${categoryIcon} ${violation.issue}**
 
-**Category**: ${violation.category.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
+**Category**: ${violation.category.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
 
 **Issue**: ${violation.message}`;
 

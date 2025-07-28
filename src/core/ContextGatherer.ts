@@ -11,10 +11,10 @@ import {
   AIProviderConfig,
   ProviderError,
   DiffStrategyConfig,
-} from "../types";
-import { BitbucketProvider } from "./providers/BitbucketProvider";
-import { logger } from "../utils/Logger";
-import { cache, Cache } from "../utils/Cache";
+} from "../types/index.js";
+import { BitbucketProvider } from "./providers/BitbucketProvider.js";
+import { logger } from "../utils/Logger.js";
+import { cache, Cache } from "../utils/Cache.js";
 
 export interface ProjectContext {
   memoryBank: {
@@ -396,8 +396,7 @@ Extract and summarize the content and return ONLY this JSON format:
     try {
       // Initialize NeuroLink with eval-based dynamic import
       if (!this.neurolink) {
-        const dynamicImport = eval("(specifier) => import(specifier)");
-        const { NeuroLink } = await dynamicImport("@juspay/neurolink");
+        const { NeuroLink  } = await import("@juspay/neurolink");
         this.neurolink = new NeuroLink();
       }
 

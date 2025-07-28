@@ -1,6 +1,6 @@
 // Type declarations for global test utilities
 declare global {
-  var testUtils: {
+  const testUtils: {
     createMockPR: (overrides?: any) => any;
     createMockDiff: (overrides?: any) => any;
     createMockMCPResponse: (data: any, format?: "direct" | "content") => any;

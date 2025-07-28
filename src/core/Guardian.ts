@@ -15,16 +15,16 @@ import {
   ReviewOptions,
   EnhancementOptions,
   GuardianError,
-} from "../types";
+} from "../types/index.js";
 
-import { BitbucketProvider } from "./providers/BitbucketProvider";
-import { ContextGatherer, UnifiedContext } from "./ContextGatherer";
-import { CodeReviewer } from "../features/CodeReviewer";
-import { DescriptionEnhancer } from "../features/DescriptionEnhancer";
+import { BitbucketProvider } from "./providers/BitbucketProvider.js";
+import { ContextGatherer, UnifiedContext } from "./ContextGatherer.js";
+import { CodeReviewer } from "../features/CodeReviewer.js";
+import { DescriptionEnhancer } from "../features/DescriptionEnhancer.js";
 
-import { logger } from "../utils/Logger";
-import { configManager } from "../utils/ConfigManager";
-import { cache } from "../utils/Cache";
+import { logger } from "../utils/Logger.js";
+import { configManager } from "../utils/ConfigManager.js";
+import { cache } from "../utils/Cache.js";
 
 export class Guardian {
   private config: GuardianConfig;
@@ -63,9 +63,8 @@ export class Guardian {
       );
       await this.bitbucketProvider.initialize();
 
-      // Initialize NeuroLink with eval-based dynamic import to bypass TypeScript compilation
-      const dynamicImport = eval("(specifier) => import(specifier)");
-      const { NeuroLink } = await dynamicImport("@juspay/neurolink");
+      // Initialize NeuroLink with native ESM dynamic import
+      const { NeuroLink } = await import("@juspay/neurolink");
       this.neurolink = new NeuroLink();
 
       // Initialize core components

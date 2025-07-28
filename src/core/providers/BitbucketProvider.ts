@@ -9,9 +9,9 @@ import {
   PRDiff,
   GitCredentials,
   ProviderError,
-} from "../../types";
-import { logger } from "../../utils/Logger";
-import { cache, Cache } from "../../utils/Cache";
+} from "../../types/index.js";
+import { logger } from "../../utils/Logger.js";
+import { cache, Cache } from "../../utils/Cache.js";
 
 export interface BitbucketMCPResponse {
   content?: Array<{ text?: string }>;
