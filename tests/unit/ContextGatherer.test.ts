@@ -5,7 +5,7 @@
 
 import { ContextGatherer } from "../../src/core/ContextGatherer";
 import { BitbucketProvider } from "../../src/core/providers/BitbucketProvider";
-import { PRIdentifier, AIProviderConfig } from "../../src/types";
+import { PRIdentifier, AIProviderConfig, MemoryBankConfig } from "../../src/types/index.js";
 import { cache } from "../../src/utils/Cache";
 
 // Mock NeuroLink
@@ -41,14 +41,44 @@ jest.mock("../../src/utils/Cache", () => ({
       fileContent: jest.fn((w, r, f, b) => `file:${w}:${r}:${b}:${f}`),
       directoryContent: jest.fn((w, r, p, b) => `dir:${w}:${r}:${b}:${p}`),
       projectContext: jest.fn((w, r, b) => `context:${w}:${r}:${b}`),
+      memoryBankFiles: jest.fn((w, r, b, p) => `memory-bank:${w}:${r}:${b}:${p}`),
     },
   },
+}));
+
+// Mock MemoryBankManager
+jest.mock("../../src/utils/MemoryBankManager", () => ({
+  createMemoryBankManager: jest.fn().mockReturnValue({
+    getMemoryBankFiles: jest.fn().mockResolvedValue({
+      files: [],
+      resolvedPath: "",
+      filesProcessed: 0,
+      fallbackUsed: false,
+    }),
+    getConfig: jest.fn().mockReturnValue({
+      enabled: true,
+      path: "memory-bank",
+      fallbackPaths: ["docs"],
+    }),
+    hasMemoryBank: jest.fn().mockResolvedValue(false),
+    clearCache: jest.fn(),
+    getStats: jest.fn().mockResolvedValue({
+      enabled: true,
+      primaryPath: "memory-bank",
+      fallbackPaths: ["docs"],
+      hasMemoryBank: false,
+      resolvedPath: null,
+      fileCount: 0,
+      cacheHits: 0,
+    }),
+  }),
 }));
 
 describe("ContextGatherer", () => {
   let contextGatherer: ContextGatherer;
   let mockBitbucketProvider: jest.Mocked<BitbucketProvider>;
   let mockAIConfig: AIProviderConfig;
+  let mockMemoryBankConfig: MemoryBankConfig;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -82,7 +112,13 @@ describe("ContextGatherer", () => {
       maxTokens: 1000000,
     };
 
-    contextGatherer = new ContextGatherer(mockBitbucketProvider, mockAIConfig);
+    mockMemoryBankConfig = {
+      enabled: true,
+      path: "memory-bank",
+      fallbackPaths: ["docs", ".clinerules"],
+    };
+
+    contextGatherer = new ContextGatherer(mockBitbucketProvider, mockAIConfig, mockMemoryBankConfig);
   });
 
   describe("Constructor", () => {

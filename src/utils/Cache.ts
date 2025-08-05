@@ -194,6 +194,24 @@ export class Cache implements ICache {
   }
 
   /**
+   * Invalidate all keys matching a pattern
+   */
+  invalidatePattern(pattern: string): number {
+    const regex = new RegExp(pattern.replace(/\*/g, ".*"));
+    const allKeys = this.keys();
+    let deleted = 0;
+
+    allKeys.forEach((key) => {
+      if (regex.test(key)) {
+        deleted += this.del(key);
+      }
+    });
+
+    logger.debug(`Invalidated pattern "${pattern}": ${deleted} keys`);
+    return deleted;
+  }
+
+  /**
    * Cache key generators for common patterns
    */
   static keys = {
@@ -235,6 +253,13 @@ export class Cache implements ICache {
       prId: string | number,
       configHash: string,
     ) => `review:${workspace}:${repository}:${prId}:${configHash}`,
+
+    memoryBankFiles: (
+      workspace: string,
+      repository: string,
+      branch: string,
+      path: string,
+    ) => `memory-bank:${workspace}:${repository}:${branch}:${path}`,
   };
 
   /**

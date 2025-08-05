@@ -204,6 +204,11 @@ describe("Guardian", () => {
       expect(ContextGatherer).toHaveBeenCalledWith(
         mockBitbucketProvider,
         mockConfig.providers.ai,
+        expect.objectContaining({
+          enabled: true,
+          path: "memory-bank",
+          fallbackPaths: expect.arrayContaining(["docs/memory-bank", ".memory-bank"]),
+        }),
       );
       expect(CodeReviewer).toHaveBeenCalledWith(
         mockBitbucketProvider,

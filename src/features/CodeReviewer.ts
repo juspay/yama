@@ -15,6 +15,7 @@ import {
 import { UnifiedContext } from "../core/ContextGatherer.js";
 import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
 import { logger } from "../utils/Logger.js";
+import { getProviderTokenLimit } from "../utils/ProviderLimits.js";
 
 export class CodeReviewer {
   private neurolink: any;
@@ -489,6 +490,27 @@ Return ONLY valid JSON:
   }
 
   /**
+   * Get safe token limit based on AI provider using shared utility
+   */
+  private getSafeTokenLimit(): number {
+    const provider = this.aiConfig.provider || "auto";
+    const configuredTokens = this.aiConfig.maxTokens;
+    
+    // Use conservative limits for CodeReviewer (safer for large diffs)
+    const providerLimit = getProviderTokenLimit(provider, true);
+    
+    // Use the smaller of configured tokens or provider limit
+    if (configuredTokens && configuredTokens > 0) {
+      const safeLimit = Math.min(configuredTokens, providerLimit);
+      logger.debug(`Token limit: configured=${configuredTokens}, provider=${providerLimit}, using=${safeLimit}`);
+      return safeLimit;
+    }
+
+    logger.debug(`Token limit: using provider default=${providerLimit} for ${provider}`);
+    return providerLimit;
+  }
+
+  /**
    * Analyze code with AI using the enhanced prompt
    */
   private async analyzeWithAI(
@@ -526,13 +548,20 @@ Return ONLY valid JSON:
       // Simplified, focused prompt without context pollution
       const corePrompt = this.buildCoreAnalysisPrompt(context);
 
+      // Get safe token limit based on provider
+      const safeMaxTokens = this.getSafeTokenLimit();
+      
+      logger.debug(`Using AI provider: ${this.aiConfig.provider || "auto"}`);
+      logger.debug(`Configured maxTokens: ${this.aiConfig.maxTokens}`);
+      logger.debug(`Safe maxTokens limit: ${safeMaxTokens}`);
+
       const result = await this.neurolink.generate({
         input: { text: corePrompt },
         systemPrompt: this.getSecurityReviewSystemPrompt(),
         provider: this.aiConfig.provider || "auto", // Auto-select best provider
         model: this.aiConfig.model || "best", // Use most capable model
         temperature: this.aiConfig.temperature || 0.3, // Lower for more focused analysis
-        maxTokens: Math.max(this.aiConfig.maxTokens || 0, 2000000), // Quality first - always use higher limit
+        maxTokens: safeMaxTokens, // Use provider-aware safe token limit
         timeout: "15m", // Allow plenty of time for thorough analysis
         context: aiContext,
         enableAnalytics: this.aiConfig.enableAnalytics || true,
