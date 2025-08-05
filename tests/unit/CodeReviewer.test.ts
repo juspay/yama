@@ -227,7 +227,7 @@ index 1234567..abcdefg 100644
           systemPrompt: expect.stringContaining("Test system prompt"),
           provider: "google-ai", // Uses provided config
           model: "gemini-2.5-pro", // Uses provided config
-          maxTokens: 2000000, // Quality-first enhancement applied
+          maxTokens: 65536, // Safe token limit for google-ai/vertex provider (65537 exclusive = 65536 max)
           timeout: "15m", // Quality-first enhancement applied
           context: expect.objectContaining({
             operation: "code-review",

@@ -52,6 +52,34 @@ design_patterns:
       - "src/core/Guardian.ts"
       - "src/features/CodeReviewer.ts"
 
+  - name: "Provider-Aware Token Management"
+    category: "reliability"
+    description: "Intelligent token limit management based on AI provider capabilities"
+    usage: "Prevents API failures by respecting provider-specific token limits"
+    implementation:
+      - "Provider-specific token limits (Vertex: 65536, OpenAI: 120000, etc.)"
+      - "Conservative defaults for auto-selection mode"
+      - "Runtime validation and adjustment of configured limits"
+      - "Graceful fallback to safe limits when configured limits exceed provider capacity"
+    example_files:
+      - "src/utils/ConfigManager.ts"
+      - "src/features/CodeReviewer.ts"
+    related_patterns:
+      - "Configuration Pattern"
+
+  - name: "Memory Bank Integration"
+    category: "context_management"
+    description: "Integration with Cline's memory bank system for persistent context"
+    usage: "Maintains project context and patterns across sessions"
+    implementation:
+      - "Configurable memory bank path with fallback options"
+      - "YAML-based memory bank files for better merge handling"
+      - "Automatic memory bank discovery and loading"
+    example_files:
+      - "src/utils/ConfigManager.ts"
+    related_patterns:
+      - "Configuration Pattern"
+
 caching_strategies:
   - name: "Hierarchical Cache Keys"
     description: "Structured cache keys for easy invalidation"

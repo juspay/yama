@@ -175,6 +175,37 @@ node dist/index.js guardian --branch <branch-name> --review --enhance
 - Types: feat, fix, docs, style, refactor, test, chore
 - Include ticket number when applicable
 
+## AI Provider Management
+
+### Token Limit Patterns
+- Provider-specific token limits must be enforced at runtime
+- Vertex AI: Conservative limit of 65,536 tokens (API limit is 65,537 exclusive)
+- OpenAI: Up to 120,000 tokens for comprehensive analysis
+- Anthropic: Up to 190,000 tokens for large PRs
+- Auto mode: Conservative 60,000 tokens for reliability
+- Always validate configured limits against provider capabilities
+
+### Configuration Validation Patterns
+- Runtime validation is more robust than static validation
+- Provider-specific constraints may not be known until runtime
+- Implement dynamic configuration adjustment with logging
+- Use conservative fallbacks when configured limits exceed provider capacity
+
+## Memory Bank Integration
+
+### Configuration Patterns
+- Memory bank path should be configurable with fallback discovery
+- Default path: "memory-bank"
+- Fallback paths: ["docs/memory-bank", ".memory-bank"]
+- Enable/disable memory bank features via configuration
+- Integration with Cline's memory bank system for context preservation
+
+### Context Management Patterns
+- YAML-based memory bank files for better merge handling
+- Automatic memory bank discovery and loading
+- Persistent project context and pattern learning across sessions
+- Document patterns discovered during development
+
 ## Future Considerations
 
 ### Planned Enhancements
@@ -185,6 +216,8 @@ node dist/index.js guardian --branch <branch-name> --review --enhance
 - Persistent caching with Redis
 - Custom rule configuration
 - Performance monitoring dashboard
+- Enhanced memory bank integration with automatic pattern learning
+- Telemetry for configuration validation and adjustment events
 
 ### Technical Debt
 - Line number extraction needs more robust implementation
@@ -192,3 +225,5 @@ node dist/index.js guardian --branch <branch-name> --review --enhance
 - Add more comprehensive error types
 - Implement retry logic for transient failures
 - Add telemetry for usage analytics
+- Monitor token limit effectiveness in production
+- Add metrics for configuration validation and adjustment events

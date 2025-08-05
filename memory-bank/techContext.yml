@@ -12,13 +12,23 @@ libraries_and_bindings:
     purpose: "Bitbucket API integration via MCP"
     usage: "Dynamic import for handlers"
   - name: "yaml"
-    purpose: "Configuration file parsing"
+    purpose: "Configuration file parsing and memory bank management"
   - name: "chalk"
     purpose: "Terminal output formatting"
   - name: "yargs"
     purpose: "CLI argument parsing"
   - name: "node-cache"
     purpose: "In-memory caching"
+
+context_management:
+  - name: "Memory Bank System"
+    purpose: "Persistent project context and pattern storage"
+    implementation: "YAML-based files with configurable paths"
+    features:
+      - "Project context preservation across sessions"
+      - "Pattern learning and documentation"
+      - "Fallback path discovery"
+      - "Integration with Cline's memory bank system"
 
 development_environment:
   build_tools:
@@ -58,6 +68,26 @@ technical_patterns:
       Support ${ENV_VAR} syntax in YAML
       Merge with defaults
       Validate required fields
+    files:
+      - "src/utils/ConfigManager.ts"
+
+  - name: "Provider-Aware Token Management"
+    description: "Intelligent token limit management based on AI provider capabilities"
+    implementation: |
+      Provider-specific token limits (Vertex: 65536, OpenAI: 120000, etc.)
+      Conservative defaults for auto-selection mode
+      Runtime validation and adjustment of configured limits
+      Graceful fallback to safe limits when configured limits exceed provider capacity
+    files:
+      - "src/utils/ConfigManager.ts"
+      - "src/features/CodeReviewer.ts"
+
+  - name: "Memory Bank Integration"
+    description: "Integration with Cline's memory bank system for persistent context"
+    implementation: |
+      Configurable memory bank path with fallback options
+      YAML-based memory bank files for better merge handling
+      Automatic memory bank discovery and loading
     files:
       - "src/utils/ConfigManager.ts"
 

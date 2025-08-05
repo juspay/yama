@@ -67,6 +67,15 @@ current_features:
     - "Webhook automation"
 
 recent_improvements:
+  - date: "2025-08-05"
+    changes:
+      - "CRITICAL FIX: Resolved AI token limit error for Vertex AI"
+      - "Added provider-aware token limit validation in CodeReviewer"
+      - "Implemented getSafeTokenLimit() method with conservative limits"
+      - "Fixed 500,000 token request issue causing API failures"
+      - "Enhanced ConfigManager with provider-specific token limits"
+      - "Added comprehensive logging for token limit decisions"
+
   - date: "2025-01-25"
     changes:
       - "Added configurable diff strategy thresholds"
@@ -87,6 +96,8 @@ technical_debt:
     - "TypeScript compilation errors"
     - "Test suite failures"
     - "Lint violations"
+    - "AI token limit errors for Vertex AI"
+    - "Provider-specific token limit validation"
 
   remaining:
     - "Add integration tests"
