@@ -40,7 +40,7 @@ Yama is the **code quality judge** that combines and optimizes the functionality
 
 ### 🏗️ **Enterprise Ready**
 
-- **🌐 Multi-Platform**: Bitbucket Server (Phase 1), GitHub/GitLab (Future phases)
+- **🌐 Multi-Platform**: Bitbucket Server (Phase 1), GitHub(Phase 2), GitLab/Azure DevOps (Future phases)
 - **📘 Full TypeScript**: Complete type safety and excellent developer experience
 - **⚙️ Highly Configurable**: YAML/JSON configuration with validation and hot-reload
 - **🛠️ CLI + API**: Use as command-line tool or programmatic library
@@ -88,8 +88,11 @@ yama init
 #### **Unified Processing (Recommended)**
 
 ```bash
-# Process PR with both review and description enhancement
-yama process --workspace YOUR_WORKSPACE --repository my-repo --branch feature/auth
+# GitHub Repository
+yama process --workspace GITHUB_ORG --repository my-repo --branch feature/auth
+
+# Bitbucket Repository
+yama process --workspace BITBUCKET_WORKSPACE --repository my-repo --branch feature/auth
 
 # Process specific operations
 yama process --workspace YOUR_WORKSPACE --repository my-repo --branch feature/auth --operations review,enhance
@@ -164,12 +167,20 @@ ai:
 
 # Git Platform Configuration
 git:
-  platform: "bitbucket"
+  # Choose your platform: "bitbucket" or "github"
+  platform: "github"
   credentials:
-    username: "${BITBUCKET_USERNAME}"
-    token: "${BITBUCKET_TOKEN}"
-    baseUrl: "https://your-bitbucket-server.com"
-  defaultWorkspace: "${DEFAULT_WORKSPACE}"
+    username: "${GITHUB_USERNAME}"        # Optional for GitHub
+    token: "${GITHUB_TOKEN}"              # GitHub Personal Access Token
+    baseUrl: "${GITHUB_BASE_URL}"         # Optional: https://api.github.com (default)
+  
+  # Alternative: Bitbucket Configuration
+  # platform: "bitbucket"
+  # credentials:
+  #   username: "${BITBUCKET_USERNAME}"   # Required for Bitbucket
+  #   token: "${BITBUCKET_TOKEN}"         # Bitbucket Personal Access Token
+  #   baseUrl: "${BITBUCKET_BASE_URL}"    # Your Bitbucket server URL
+  #   defaultWorkspace: "${DEFAULT_WORKSPACE}"
 
 # Feature Configuration
 features:
@@ -806,17 +817,45 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🎯 **Environment Variables**
 
+### **GitHub Setup**
+
+**Prerequisites**: Create a GitHub Personal Access Token with `repo` scope:
+1. Go to GitHub Settings → Developer Settings → Personal Access Tokens → Tokens (classic)
+2. Generate new token with `repo` permissions (for private repos) or `public_repo` (for public repos only)
+3. Copy the token (starts with `ghp_`)
+
 ```bash
-# Required
+# Required for GitHub
+GITHUB_TOKEN=ghp_your_github_personal_access_token
+GOOGLE_AI_API_KEY=your-google-ai-api-key
+
+# Optional for GitHub
+GITHUB_USERNAME=your-github-username
+GITHUB_BASE_URL=https://api.github.com  # For GitHub.com (default)
+# GITHUB_BASE_URL=https://github.enterprise.com/api/v3  # For GitHub Enterprise
+
+# AI Configuration
+AI_PROVIDER=google-ai
+AI_MODEL=gemini-2.5-pro
+ENABLE_CACHE=true
+YAMA_DEBUG=false
+```
+
+### **Bitbucket Setup**
+
+```bash
+# Required for Bitbucket
 BITBUCKET_USERNAME=your-username
 BITBUCKET_TOKEN=your-personal-access-token
 GOOGLE_AI_API_KEY=your-google-ai-api-key
 
-# Optional
+# Optional for Bitbucket
 BITBUCKET_BASE_URL=https://your-bitbucket-server.com
+DEFAULT_WORKSPACE=YOUR_WORKSPACE
+
+# AI Configuration
 AI_PROVIDER=google-ai
 AI_MODEL=gemini-2.5-pro
-DEFAULT_WORKSPACE=YOUR_WORKSPACE
 ENABLE_CACHE=true
 YAMA_DEBUG=false
 ```

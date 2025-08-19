@@ -33,10 +33,11 @@ export class ConfigManager {
       git: {
         platform: "bitbucket",
         credentials: {
-          username: process.env.BITBUCKET_USERNAME || "",
-          token: process.env.BITBUCKET_TOKEN || "",
+          username: process.env.BITBUCKET_USERNAME || process.env.GIT_USERNAME || "",
+          token: process.env.BITBUCKET_TOKEN || process.env.GIT_TOKEN || "",
           baseUrl:
             process.env.BITBUCKET_BASE_URL ||
+            process.env.GIT_BASE_URL ||
             "https://your-bitbucket-server.com",
         },
       },
@@ -313,7 +314,10 @@ export class ConfigManager {
       config.providers.ai.maxTokens = parseInt(env.AI_MAX_TOKENS);
     }
 
-    // Git Provider overrides
+    // Git Provider overrides - platform-specific
+    const platform = config.providers.git.platform;
+    
+    // Bitbucket-specific overrides
     if (env.BITBUCKET_USERNAME) {
       config.providers.git.credentials.username = env.BITBUCKET_USERNAME;
     }
@@ -322,6 +326,28 @@ export class ConfigManager {
     }
     if (env.BITBUCKET_BASE_URL) {
       config.providers.git.credentials.baseUrl = env.BITBUCKET_BASE_URL;
+    }
+
+    // GitHub-specific overrides
+    if (env.GITHUB_USERNAME) {
+      config.providers.git.credentials.username = env.GITHUB_USERNAME;
+    }
+    if (env.GITHUB_TOKEN) {
+      config.providers.git.credentials.token = env.GITHUB_TOKEN;
+    }
+    if (env.GITHUB_BASE_URL) {
+      config.providers.git.credentials.baseUrl = env.GITHUB_BASE_URL;
+    }
+
+    // Generic git overrides (fallback for any platform)
+    if (env.GIT_USERNAME) {
+      config.providers.git.credentials.username = env.GIT_USERNAME;
+    }
+    if (env.GIT_TOKEN) {
+      config.providers.git.credentials.token = env.GIT_TOKEN;
+    }
+    if (env.GIT_BASE_URL) {
+      config.providers.git.credentials.baseUrl = env.GIT_BASE_URL;
     }
 
     // Feature toggles
