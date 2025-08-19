@@ -4,7 +4,7 @@
  */
 
 import { MemoryBankConfig, PRIdentifier, ConfigurationError } from "../types/index.js";
-import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
+import { GitProvider } from "../core/providers/GitProvider.js";
 import { logger } from "./Logger.js";
 import { cache, Cache } from "./Cache.js";
 
@@ -23,11 +23,11 @@ export interface MemoryBankResult {
 
 export class MemoryBankManager {
   private config: MemoryBankConfig;
-  private bitbucketProvider: BitbucketProvider;
+  private gitProvider: GitProvider;
 
-  constructor(config: MemoryBankConfig, bitbucketProvider: BitbucketProvider) {
+  constructor(config: MemoryBankConfig, gitProvider: GitProvider) {
     this.config = config;
-    this.bitbucketProvider = bitbucketProvider;
+    this.gitProvider = gitProvider;
     this.validateConfig();
   }
 
@@ -137,7 +137,7 @@ export class MemoryBankManager {
   ): Promise<{ files: MemoryBankFile[]; filesProcessed: number }> {
     try {
       // Get directory listing
-      const directoryFiles = await this.bitbucketProvider.listDirectoryContent(
+      const directoryFiles = await this.gitProvider.listDirectoryContent(
         identifier.workspace,
         identifier.repository,
         path,
@@ -158,7 +158,7 @@ export class MemoryBankManager {
 
       for (const file of files) {
         try {
-          const content = await this.bitbucketProvider.getFileContent(
+          const content = await this.gitProvider.getFileContent(
             identifier.workspace,
             identifier.repository,
             `${path}/${file.name}`,
@@ -432,7 +432,7 @@ export class MemoryBankManager {
 // Export factory function
 export function createMemoryBankManager(
   config: MemoryBankConfig,
-  bitbucketProvider: BitbucketProvider,
+  gitProvider: GitProvider,
 ): MemoryBankManager {
-  return new MemoryBankManager(config, bitbucketProvider);
+  return new MemoryBankManager(config, gitProvider);
 }

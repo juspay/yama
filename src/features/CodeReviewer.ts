@@ -13,22 +13,22 @@ import {
   ProviderError,
 } from "../types/index.js";
 import { UnifiedContext } from "../core/ContextGatherer.js";
-import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
+import { GitProvider } from "../core/providers/GitProvider.js";
 import { logger } from "../utils/Logger.js";
 import { getProviderTokenLimit } from "../utils/ProviderLimits.js";
 
 export class CodeReviewer {
   private neurolink: any;
-  private bitbucketProvider: BitbucketProvider;
+  private gitProvider: GitProvider;
   private aiConfig: AIProviderConfig;
   private reviewConfig: CodeReviewConfig;
 
   constructor(
-    bitbucketProvider: BitbucketProvider,
+    gitProvider: GitProvider,
     aiConfig: AIProviderConfig,
     reviewConfig: CodeReviewConfig,
   ) {
-    this.bitbucketProvider = bitbucketProvider;
+    this.gitProvider = gitProvider;
     this.aiConfig = aiConfig;
     this.reviewConfig = reviewConfig;
   }
@@ -667,7 +667,7 @@ Return ONLY valid JSON:
         }
 
         // Use new code snippet approach - EXACTLY like pr-police.js
-        await this.bitbucketProvider.addComment(
+        await this.gitProvider.addComment(
           context.identifier,
           formattedComment,
           {
@@ -708,7 +708,7 @@ Return ONLY valid JSON:
           context,
           failedComments,
         );
-        await this.bitbucketProvider.addComment(
+        await this.gitProvider.addComment(
           context.identifier,
           summaryComment,
         );
@@ -1333,9 +1333,9 @@ ${recommendation}
 }
 
 export function createCodeReviewer(
-  bitbucketProvider: BitbucketProvider,
+  gitProvider: GitProvider,
   aiConfig: AIProviderConfig,
   reviewConfig: CodeReviewConfig,
 ): CodeReviewer {
-  return new CodeReviewer(bitbucketProvider, aiConfig, reviewConfig);
+  return new CodeReviewer(gitProvider, aiConfig, reviewConfig);
 }

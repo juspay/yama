@@ -17,7 +17,8 @@ import {
   GuardianError,
 } from "../types/index.js";
 
-import { BitbucketProvider } from "./providers/BitbucketProvider.js";
+import { GitProvider } from "./providers/GitProvider.js";
+import { createGitProvider } from "./providers/ProviderFactory.js";
 import { ContextGatherer, UnifiedContext } from "./ContextGatherer.js";
 import { CodeReviewer } from "../features/CodeReviewer.js";
 import { DescriptionEnhancer } from "../features/DescriptionEnhancer.js";
@@ -28,7 +29,7 @@ import { cache } from "../utils/Cache.js";
 
 export class Guardian {
   private config: GuardianConfig;
-  private bitbucketProvider!: BitbucketProvider;
+  private gitProvider!: GitProvider;
   private contextGatherer!: ContextGatherer;
   private codeReviewer!: CodeReviewer;
   private descriptionEnhancer!: DescriptionEnhancer;
@@ -57,11 +58,9 @@ export class Guardian {
       // Load configuration
       this.config = await configManager.loadConfig(configPath);
 
-      // Initialize providers
-      this.bitbucketProvider = new BitbucketProvider(
-        this.config.providers.git.credentials,
-      );
-      await this.bitbucketProvider.initialize();
+      // Initialize git provider based on platform configuration
+      this.gitProvider = createGitProvider(this.config.providers.git);
+      await this.gitProvider.initialize();
 
       // Initialize NeuroLink with native ESM dynamic import
       const { NeuroLink } = await import("@juspay/neurolink");
@@ -69,7 +68,7 @@ export class Guardian {
 
       // Initialize core components
       this.contextGatherer = new ContextGatherer(
-        this.bitbucketProvider,
+        this.gitProvider,
         this.config.providers.ai,
         this.config.memoryBank || {
           enabled: true,
@@ -79,13 +78,13 @@ export class Guardian {
       );
 
       this.codeReviewer = new CodeReviewer(
-        this.bitbucketProvider,
+        this.gitProvider,
         this.config.providers.ai,
         this.config.features.codeReview,
       );
 
       this.descriptionEnhancer = new DescriptionEnhancer(
-        this.bitbucketProvider,
+        this.gitProvider,
         this.config.providers.ai,
       );
 
@@ -530,8 +529,8 @@ export class Guardian {
     const components: any = {};
 
     try {
-      // Check Bitbucket provider
-      components.bitbucket = await this.bitbucketProvider.healthCheck();
+      // Check git provider
+      components.gitProvider = await this.gitProvider.healthCheck();
 
       // Check cache
       components.cache = {
@@ -575,7 +574,7 @@ export class Guardian {
         cacheEnabled: this.config.cache?.enabled,
       },
       providers: {
-        bitbucket: this.bitbucketProvider?.getStats(),
+        git: this.gitProvider?.getStats(),
         context: this.contextGatherer?.getStats(),
       },
       cache: cache.stats(),
@@ -587,7 +586,7 @@ export class Guardian {
    */
   clearCache(): void {
     cache.clear();
-    this.bitbucketProvider?.clearCache();
+    this.gitProvider?.clearCache();
     logger.info("All caches cleared");
   }
 

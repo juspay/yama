@@ -13,7 +13,7 @@ import {
   DiffStrategyConfig,
   MemoryBankConfig,
 } from "../types/index.js";
-import { BitbucketProvider } from "./providers/BitbucketProvider.js";
+import { GitProvider } from "./providers/GitProvider.js";
 import { logger } from "../utils/Logger.js";
 import { cache, Cache } from "../utils/Cache.js";
 import { MemoryBankManager, createMemoryBankManager } from "../utils/MemoryBankManager.js";
@@ -52,19 +52,19 @@ export interface UnifiedContext {
 
 export class ContextGatherer {
   private neurolink: any;
-  private bitbucketProvider: BitbucketProvider;
+  private gitProvider: GitProvider;
   private aiConfig: AIProviderConfig;
   private memoryBankManager: MemoryBankManager;
   private startTime = 0;
 
   constructor(
-    bitbucketProvider: BitbucketProvider,
+    gitProvider: GitProvider,
     aiConfig: AIProviderConfig,
     memoryBankConfig: MemoryBankConfig,
   ) {
-    this.bitbucketProvider = bitbucketProvider;
+    this.gitProvider = gitProvider;
     this.aiConfig = aiConfig;
-    this.memoryBankManager = createMemoryBankManager(memoryBankConfig, bitbucketProvider);
+    this.memoryBankManager = createMemoryBankManager(memoryBankConfig, gitProvider);
   }
 
   /**
@@ -86,6 +86,7 @@ export class ContextGatherer {
 
     logger.phase("🔍 Gathering unified context...");
     logger.info(`Target: ${identifier.workspace}/${identifier.repository}`);
+    logger.info(`Initial identifier: ${JSON.stringify(identifier, null, 2)}`);
 
     try {
       // Step 1: Find and get PR information
@@ -99,6 +100,8 @@ export class ContextGatherer {
         ...identifier,
         pullRequestId: pr.id,
       };
+      logger.debug(`PR details: id=${pr.id}, type=${typeof pr.id}`);
+      logger.debug(`Complete identifier: ${JSON.stringify(completeIdentifier, null, 2)}`);
 
       // Step 2: Gather project context (memory bank + clinerules)
       const projectContext = await this.gatherProjectContext(
@@ -201,7 +204,7 @@ export class ContextGatherer {
           logger.debug(
             `Getting PR details: ${identifier.workspace}/${identifier.repository}#${identifier.pullRequestId}`,
           );
-          return await this.bitbucketProvider.getPRDetails(identifier);
+          return await this.gitProvider.getPRDetails(identifier);
         },
         1800, // 30 minutes
       );
@@ -225,7 +228,7 @@ export class ContextGatherer {
           logger.debug(
             `Finding PR for branch: ${identifier.workspace}/${identifier.repository}@${identifier.branch}`,
           );
-          return await this.bitbucketProvider.findPRForBranch(identifier);
+          return await this.gitProvider.findPRForBranch(identifier);
         },
         3600, // 1 hour
       );
@@ -244,7 +247,7 @@ export class ContextGatherer {
       return cache.getOrSet(
         detailsCacheKey,
         async () => {
-          return await this.bitbucketProvider.getPRDetails({
+          return await this.gitProvider.getPRDetails({
             ...identifier,
             pullRequestId: prInfo.id,
           });
@@ -315,7 +318,7 @@ export class ContextGatherer {
           // Get .clinerules file
           let clinerules = "";
           try {
-            clinerules = await this.bitbucketProvider.getFileContent(
+            clinerules = await this.gitProvider.getFileContent(
               identifier.workspace,
               identifier.repository,
               ".clinerules",
@@ -559,7 +562,7 @@ Extract and summarize the content and return ONLY this JSON format:
     return cache.getOrSet(
       cacheKey,
       async () => {
-        return await this.bitbucketProvider.getPRDiff(
+        return await this.gitProvider.getPRDiff(
           identifier,
           contextLines,
           excludePatterns,
@@ -612,7 +615,7 @@ Extract and summarize the content and return ONLY this JSON format:
           fileCacheKey,
           async () => {
             // Use include_patterns to get diff for just this file
-            const fileDiff = await this.bitbucketProvider.getPRDiff(
+            const fileDiff = await this.gitProvider.getPRDiff(
               identifier,
               contextLines,
               excludePatterns,
@@ -742,9 +745,9 @@ Extract and summarize the content and return ONLY this JSON format:
 
 // Export factory function
 export function createContextGatherer(
-  bitbucketProvider: BitbucketProvider,
+  gitProvider: GitProvider,
   aiConfig: AIProviderConfig,
   memoryBankConfig: MemoryBankConfig,
 ): ContextGatherer {
-  return new ContextGatherer(bitbucketProvider, aiConfig, memoryBankConfig);
+  return new ContextGatherer(gitProvider, aiConfig, memoryBankConfig);
 }

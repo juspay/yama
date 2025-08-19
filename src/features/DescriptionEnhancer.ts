@@ -13,12 +13,12 @@ import {
   ProviderError,
 } from "../types/index.js";
 import { UnifiedContext } from "../core/ContextGatherer.js";
-import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
+import { GitProvider } from "../core/providers/GitProvider.js";
 import { logger } from "../utils/Logger.js";
 
 export class DescriptionEnhancer {
   private neurolink: any;
-  private bitbucketProvider: BitbucketProvider;
+  private gitProvider: GitProvider;
   private aiConfig: AIProviderConfig;
 
   private defaultRequiredSections: RequiredSection[] = [
@@ -36,10 +36,10 @@ export class DescriptionEnhancer {
   ];
 
   constructor(
-    bitbucketProvider: BitbucketProvider,
+    gitProvider: GitProvider,
     aiConfig: AIProviderConfig,
   ) {
-    this.bitbucketProvider = bitbucketProvider;
+    this.gitProvider = gitProvider;
     this.aiConfig = aiConfig;
   }
 
@@ -498,7 +498,7 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
     logger.debug(`Updating PR description for #${context.pr.id}...`);
 
     try {
-      await this.bitbucketProvider.updatePRDescription(
+      await this.gitProvider.updatePRDescription(
         context.identifier,
         enhancedDescription,
       );
@@ -611,8 +611,8 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
 }
 
 export function createDescriptionEnhancer(
-  bitbucketProvider: BitbucketProvider,
+  gitProvider: GitProvider,
   aiConfig: AIProviderConfig,
 ): DescriptionEnhancer {
-  return new DescriptionEnhancer(bitbucketProvider, aiConfig);
+  return new DescriptionEnhancer(gitProvider, aiConfig);
 }

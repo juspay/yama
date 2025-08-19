@@ -10,6 +10,7 @@ import {
   GitCredentials,
   ProviderError,
 } from "../../types/index.js";
+import { BaseGitProvider } from "./GitProvider.js";
 import { logger } from "../../utils/Logger.js";
 import { cache, Cache } from "../../utils/Cache.js";
 
@@ -19,19 +20,23 @@ export interface BitbucketMCPResponse {
   error?: string;
 }
 
-export class BitbucketProvider {
+export class BitbucketProvider extends BaseGitProvider {
   private apiClient: any;
   private branchHandlers: any;
   private pullRequestHandlers: any;
   private reviewHandlers: any;
   private fileHandlers: any;
-  private initialized = false;
-  private baseUrl: string;
-  private credentials: GitCredentials;
 
   constructor(credentials: GitCredentials) {
-    this.credentials = credentials;
-    this.baseUrl = credentials.baseUrl || "https://your-bitbucket-server.com";
+    super(credentials);
+  }
+
+  protected getDefaultBaseUrl(): string {
+    return "https://your-bitbucket-server.com";
+  }
+
+  protected getProviderName(): string {
+    return "Bitbucket";
   }
 
   /**

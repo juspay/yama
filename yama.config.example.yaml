@@ -16,9 +16,9 @@ providers:
   git:
     platform: "bitbucket" # Options: bitbucket, github, gitlab, azure-devops
     credentials:
-      username: "${BITBUCKET_USERNAME}" # Environment variable
-      token: "${BITBUCKET_TOKEN}" # Environment variable
-      baseUrl: "${BITBUCKET_BASE_URL}" # Your Bitbucket server URL
+      username: "${BITBUCKET_USERNAME}" # Environment variable (Options: GITHUB_USERNAME, GITLAB_USERNAME, AZURE_DEVOPS_USERNAME)
+      token: "${BITBUCKET_TOKEN}" # Environment variable (Options: GITHUB_PAT, GITLAB_TOKEN, AZURE_DEVOPS_TOKEN)
+      baseUrl: "${BITBUCKET_BASE_URL}" # Your Bitbucket server URL (Defaults to https://api.bitbucket.org for cloud or github/gitlab/azure-devops defaults)
 
 # Feature Configuration
 features:
@@ -145,8 +145,8 @@ monitoring:
 # Memory Bank Configuration
 memoryBank:
   enabled: true
-  path: "memory-bank"  # Primary path to look for memory bank files
-  fallbackPaths:       # Optional fallback paths if primary doesn't exist
+  path: "memory-bank" # Primary path to look for memory bank files
+  fallbackPaths: # Optional fallback paths if primary doesn't exist
     - "docs/memory-bank"
     - ".memory-bank"
     - "project-docs/context"
