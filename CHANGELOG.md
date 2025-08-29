@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/juspay/yama/compare/v1.1.1...v1.2.0) (2025-08-08)
+
+
+### Features
+
+* **Memory:** support memory bank path and maxToken from config file ([1bc69d5](https://github.com/juspay/yama/commit/1bc69d5bda3ac5868d7537b881007beaf6916476))
+
 ## [1.1.1](https://github.com/juspay/yama/compare/v1.1.0...v1.1.1) (2025-07-28)
 
 

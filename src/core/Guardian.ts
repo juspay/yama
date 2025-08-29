@@ -71,6 +71,11 @@ export class Guardian {
       this.contextGatherer = new ContextGatherer(
         this.bitbucketProvider,
         this.config.providers.ai,
+        this.config.memoryBank || {
+          enabled: true,
+          path: "memory-bank",
+          fallbackPaths: ["docs/memory-bank", ".memory-bank"],
+        },
       );
 
       this.codeReviewer = new CodeReviewer(

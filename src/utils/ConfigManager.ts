@@ -9,6 +9,7 @@ import yaml from "yaml";
 import { homedir } from "os";
 import { GuardianConfig, ConfigurationError } from "../types/index.js";
 import { logger } from "./Logger.js";
+import { validateProviderTokenLimit } from "./ProviderLimits.js";
 
 export class ConfigManager {
   private config: GuardianConfig | null = null;
@@ -27,7 +28,7 @@ export class ConfigManager {
         timeout: "10m",
         retryAttempts: 3,
         temperature: 0.3,
-        maxTokens: 1000000,
+        maxTokens: 65000,
       },
       git: {
         platform: "bitbucket",
@@ -153,6 +154,11 @@ export class ConfigManager {
       exportFormat: "json",
       interval: "5m",
     },
+    memoryBank: {
+      enabled: true,
+      path: "memory-bank",
+      fallbackPaths: ["docs/memory-bank", ".memory-bank"],
+    },
   };
 
   constructor() {
@@ -226,6 +232,9 @@ export class ConfigManager {
     // Override with environment variables
     config = this.applyEnvironmentOverrides(config);
 
+    // Apply provider-aware token limits
+    config = this.applyProviderTokenLimits(config);
+
     // Validate configuration
     this.validateConfig(config);
 
@@ -261,6 +270,24 @@ export class ConfigManager {
         `Failed to parse config file ${filePath}: ${(error as Error).message}`,
       );
     }
+  }
+
+  /**
+   * Apply provider-aware token limits using shared utility
+   */
+  private applyProviderTokenLimits(config: GuardianConfig): GuardianConfig {
+    const provider = config.providers.ai.provider || 'auto';
+    const configuredTokens = config.providers.ai.maxTokens;
+    
+    // Use the shared utility to validate and adjust token limits
+    const validatedTokens = validateProviderTokenLimit(
+      provider,
+      configuredTokens,
+      false // Use standard limits for configuration
+    );
+    
+    config.providers.ai.maxTokens = validatedTokens;
+    return config;
   }
 
   /**

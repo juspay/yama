@@ -477,7 +477,7 @@ await guardian.processPR({
 });
 ```
 
----
+----
 
 ## 📋 **Configurable Description Sections**
 

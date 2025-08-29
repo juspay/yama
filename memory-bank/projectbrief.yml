@@ -50,3 +50,9 @@ key_features:
     description: "Posts review comments directly on code lines"
   - name: "Description Preservation"
     description: "Never loses existing content when enhancing descriptions"
+  - name: "Provider-Aware Token Management"
+    description: "Intelligent AI token limit management preventing API failures"
+    configurable: true
+  - name: "Memory Bank Integration"
+    description: "Persistent project context and pattern learning across sessions"
+    configurable: true

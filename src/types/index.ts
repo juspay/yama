@@ -329,6 +329,7 @@ export interface GuardianConfig {
     securityScan?: SecurityScanConfig;
     analytics?: AnalyticsConfig;
   };
+  memoryBank?: MemoryBankConfig;
   cache?: CacheConfig;
   performance?: PerformanceConfig;
   rules?: CustomRulesConfig;
@@ -387,6 +388,12 @@ export interface AnalyticsConfig {
   enabled: boolean;
   trackMetrics: boolean;
   exportFormat: "json" | "csv" | "yaml";
+}
+
+export interface MemoryBankConfig {
+  enabled: boolean;
+  path: string;
+  fallbackPaths?: string[];
 }
 
 export interface CacheConfig {

@@ -11,10 +11,13 @@ import {
   AIProviderConfig,
   ProviderError,
   DiffStrategyConfig,
+  MemoryBankConfig,
 } from "../types/index.js";
 import { BitbucketProvider } from "./providers/BitbucketProvider.js";
 import { logger } from "../utils/Logger.js";
 import { cache, Cache } from "../utils/Cache.js";
+import { MemoryBankManager, createMemoryBankManager } from "../utils/MemoryBankManager.js";
+import { getProviderTokenLimit } from "../utils/ProviderLimits.js";
 
 export interface ProjectContext {
   memoryBank: {
@@ -51,14 +54,17 @@ export class ContextGatherer {
   private neurolink: any;
   private bitbucketProvider: BitbucketProvider;
   private aiConfig: AIProviderConfig;
+  private memoryBankManager: MemoryBankManager;
   private startTime = 0;
 
   constructor(
     bitbucketProvider: BitbucketProvider,
     aiConfig: AIProviderConfig,
+    memoryBankConfig: MemoryBankConfig,
   ) {
     this.bitbucketProvider = bitbucketProvider;
     this.aiConfig = aiConfig;
+    this.memoryBankManager = createMemoryBankManager(memoryBankConfig, bitbucketProvider);
   }
 
   /**
@@ -274,17 +280,14 @@ export class ContextGatherer {
       cacheKey,
       async () => {
         try {
-          // Get memory-bank directory listing
-          const memoryBankFiles =
-            await this.bitbucketProvider.listDirectoryContent(
-              identifier.workspace,
-              identifier.repository,
-              "memory-bank",
-              identifier.branch || "main",
-            );
+          // Use MemoryBankManager to get memory bank files
+          const memoryBankResult = await this.memoryBankManager.getMemoryBankFiles(
+            identifier,
+            forceRefresh,
+          );
 
-          if (!memoryBankFiles.length) {
-            logger.debug("No memory-bank directory found");
+          if (memoryBankResult.files.length === 0) {
+            logger.debug("No memory bank files found");
             return {
               memoryBank: {
                 summary: "No project context available",
@@ -297,26 +300,17 @@ export class ContextGatherer {
             };
           }
 
-          // Get content of each memory bank file
+          // Convert MemoryBankFile[] to Record<string, string> for AI processing
           const fileContents: Record<string, string> = {};
-          const files = memoryBankFiles.filter((f) => f.type === "file");
+          memoryBankResult.files.forEach((file) => {
+            fileContents[file.name] = file.content;
+          });
 
-          for (const file of files) {
-            try {
-              fileContents[file.name] =
-                await this.bitbucketProvider.getFileContent(
-                  identifier.workspace,
-                  identifier.repository,
-                  `memory-bank/${file.name}`,
-                  identifier.branch || "main",
-                );
-              logger.debug(`✓ Got content for: ${file.name}`);
-            } catch (error) {
-              logger.debug(
-                `Could not read file ${file.name}: ${(error as Error).message}`,
-              );
-            }
-          }
+          logger.debug(
+            `✓ Loaded ${memoryBankResult.files.length} memory bank files from ${memoryBankResult.resolvedPath}${
+              memoryBankResult.fallbackUsed ? " (fallback)" : ""
+            }`,
+          );
 
           // Get .clinerules file
           let clinerules = "";
@@ -350,7 +344,7 @@ Standards: ${contextData.standards}`,
               standards: contextData.standards,
             },
             clinerules,
-            filesProcessed: Object.keys(fileContents).length,
+            filesProcessed: memoryBankResult.filesProcessed,
           };
         } catch (error) {
           logger.debug(
@@ -370,6 +364,27 @@ Standards: ${contextData.standards}`,
       },
       7200, // 2 hours - project context changes less frequently
     );
+  }
+
+  /**
+   * Get safe token limit based on AI provider using shared utility
+   */
+  private getSafeTokenLimit(): number {
+    const provider = this.aiConfig.provider || "auto";
+    const configuredTokens = this.aiConfig.maxTokens;
+    
+    // Use conservative limits for ContextGatherer (safer for large context processing)
+    const providerLimit = getProviderTokenLimit(provider, true);
+    
+    // Use the smaller of configured tokens or provider limit
+    if (configuredTokens && configuredTokens > 0) {
+      const safeLimit = Math.min(configuredTokens, providerLimit);
+      logger.debug(`Token limit: configured=${configuredTokens}, provider=${providerLimit}, using=${safeLimit}`);
+      return safeLimit;
+    }
+
+    logger.debug(`Token limit: using provider default=${providerLimit} for ${provider}`);
+    return providerLimit;
   }
 
   /**
@@ -408,6 +423,13 @@ Extract and summarize the content and return ONLY this JSON format:
         analysisType: "memory-bank-synthesis",
       };
 
+      // Get safe token limit based on provider
+      const safeMaxTokens = this.getSafeTokenLimit();
+      
+      logger.debug(`Using AI provider: ${this.aiConfig.provider || "auto"}`);
+      logger.debug(`Configured maxTokens: ${this.aiConfig.maxTokens}`);
+      logger.debug(`Safe maxTokens limit: ${safeMaxTokens}`);
+
       const result = await this.neurolink.generate({
         input: { text: prompt },
         systemPrompt:
@@ -415,7 +437,7 @@ Extract and summarize the content and return ONLY this JSON format:
         provider: this.aiConfig.provider,
         model: this.aiConfig.model,
         temperature: 0.3,
-        maxTokens: Math.max(this.aiConfig.maxTokens || 0, 500000), // Quality first - always use higher limit
+        maxTokens: safeMaxTokens, // Use provider-aware safe token limit
         timeout: "10m", // Allow longer processing for quality
         context: aiContext,
         enableAnalytics: this.aiConfig.enableAnalytics || true,
@@ -722,6 +744,7 @@ Extract and summarize the content and return ONLY this JSON format:
 export function createContextGatherer(
   bitbucketProvider: BitbucketProvider,
   aiConfig: AIProviderConfig,
+  memoryBankConfig: MemoryBankConfig,
 ): ContextGatherer {
-  return new ContextGatherer(bitbucketProvider, aiConfig);
+  return new ContextGatherer(bitbucketProvider, aiConfig, memoryBankConfig);
 }
