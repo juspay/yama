@@ -51,6 +51,15 @@ features:
       - "Performance bottlenecks"
       - "Error handling"
       - "Code quality"
+    
+    # NEW: Batch Processing Configuration
+    batchProcessing:
+      enabled: true # Enable batch processing for large PRs
+      maxFilesPerBatch: 3 # Maximum files to process in each batch
+      prioritizeSecurityFiles: true # Process security-sensitive files first
+      parallelBatches: false # Process batches sequentially for reliability
+      batchDelayMs: 1000 # Delay between batches in milliseconds
+      singleRequestThreshold: 5 # Use single request for PRs with ≤5 files
 
   # Description Enhancement Configuration
   descriptionEnhancement:
@@ -141,3 +150,12 @@ monitoring:
   metrics: ["api_calls", "cache_hits", "processing_time"]
   exportFormat: "prometheus"
   interval: "1m"
+
+# Memory Bank Configuration
+memoryBank:
+  enabled: true
+  path: "memory-bank"  # Primary path to look for memory bank files
+  fallbackPaths:       # Optional fallback paths if primary doesn't exist
+    - "docs/memory-bank"
+    - ".memory-bank"
+    - "project-docs/context"
