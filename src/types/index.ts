@@ -210,6 +210,39 @@ export interface ReviewStatistics {
   majorCount: number;
   minorCount: number;
   suggestionCount: number;
+  batchCount?: number;
+  processingStrategy?: "single-request" | "batch-processing";
+  averageBatchSize?: number;
+  totalProcessingTime?: number;
+}
+
+export interface FileBatch {
+  files: string[];
+  priority: "high" | "medium" | "low";
+  estimatedTokens: number;
+  batchIndex: number;
+}
+
+export interface BatchResult {
+  batchIndex: number;
+  files: string[];
+  violations: Violation[];
+  processingTime: number;
+  tokenUsage?: {
+    input: number;
+    output: number;
+    total: number;
+  };
+  error?: string;
+}
+
+export type FilePriority = "high" | "medium" | "low";
+
+export interface PrioritizedFile {
+  path: string;
+  priority: FilePriority;
+  estimatedTokens: number;
+  diff?: string;
 }
 
 export interface ReviewOptions {
@@ -314,6 +347,16 @@ export interface CodeReviewConfig {
   systemPrompt?: string;
   analysisTemplate?: string;
   focusAreas?: string[];
+  batchProcessing?: BatchProcessingConfig;
+}
+
+export interface BatchProcessingConfig {
+  enabled: boolean;
+  maxFilesPerBatch: number;
+  prioritizeSecurityFiles: boolean;
+  parallelBatches: boolean;
+  batchDelayMs: number;
+  singleRequestThreshold: number; // Files count threshold for single request
 }
 
 export interface DescriptionEnhancementConfig {

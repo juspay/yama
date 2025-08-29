@@ -11,6 +11,11 @@ import {
   AIProviderConfig,
   CodeReviewConfig,
   ProviderError,
+  BatchProcessingConfig,
+  FileBatch,
+  BatchResult,
+  PrioritizedFile,
+  FilePriority,
 } from "../types/index.js";
 import { UnifiedContext } from "../core/ContextGatherer.js";
 import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
@@ -34,7 +39,7 @@ export class CodeReviewer {
   }
 
   /**
-   * Review code using pre-gathered unified context (OPTIMIZED)
+   * Review code using pre-gathered unified context (OPTIMIZED with Batch Processing)
    */
   async reviewCodeWithContext(
     context: UnifiedContext,
@@ -48,8 +53,25 @@ export class CodeReviewer {
         `Analyzing ${context.diffStrategy.fileCount} files using ${context.diffStrategy.strategy} strategy`,
       );
 
-      const analysisPrompt = this.buildAnalysisPrompt(context, options);
-      const violations = await this.analyzeWithAI(analysisPrompt, context);
+      // Determine if we should use batch processing
+      const batchConfig = this.getBatchProcessingConfig();
+      const shouldUseBatchProcessing = this.shouldUseBatchProcessing(context, batchConfig);
+
+      let violations: Violation[];
+      let processingStrategy: "single-request" | "batch-processing";
+
+      if (shouldUseBatchProcessing) {
+        logger.info("🔄 Using batch processing for large PR analysis");
+        const batchResult = await this.reviewWithBatchProcessing(context, options, batchConfig);
+        violations = batchResult.violations;
+        processingStrategy = "batch-processing";
+      } else {
+        logger.info("⚡ Using single-request analysis for small PR");
+        const analysisPrompt = this.buildAnalysisPrompt(context, options);
+        violations = await this.analyzeWithAI(analysisPrompt, context);
+        processingStrategy = "single-request";
+      }
+
       const validatedViolations = this.validateViolations(violations, context);
 
       if (!options.dryRun && validatedViolations.length > 0) {
@@ -61,10 +83,11 @@ export class CodeReviewer {
         validatedViolations,
         duration,
         context,
+        processingStrategy,
       );
 
       logger.success(
-        `Code review completed in ${duration}s: ${validatedViolations.length} violations found`,
+        `Code review completed in ${duration}s: ${validatedViolations.length} violations found (${processingStrategy})`,
       );
 
       return result;
@@ -768,31 +791,16 @@ Return ONLY valid JSON:
       comment += `\n\n**Impact**: ${violation.impact}`;
     }
 
+    // Add suggested fix section if suggestion is provided
     if (violation.suggestion) {
-      const fileExt = violation.file?.split(".").pop() || "text";
-      const langMap: Record<string, string> = {
-        js: "javascript",
-        jsx: "javascript",
-        ts: "typescript",
-        tsx: "typescript",
-        res: "rescript",
-        resi: "rescript",
-        py: "python",
-        java: "java",
-        go: "go",
-        rb: "ruby",
-        php: "php",
-        sql: "sql",
-        json: "json",
-      };
-      const language = langMap[fileExt] || "text";
-
-      // Use the escape method for code blocks
-      const escapedCodeBlock = this.escapeMarkdownCodeBlock(
-        violation.suggestion,
-        language,
-      );
-      comment += `\n\n**💡 Suggested Fix**:\n${escapedCodeBlock}`;
+      comment += `\n\n**Suggested Fix**:\n`;
+      
+      // Detect the language for syntax highlighting
+      const language = this.detectLanguageFromFile(violation.file || "");
+      
+      // Use proper markdown escaping for code blocks
+      const escapedCodeBlock = this.escapeMarkdownCodeBlock(violation.suggestion, language);
+      comment += escapedCodeBlock;
     }
 
     comment += `\n\n---\n*🛡️ Automated review by **Yama** • Powered by AI*`;
@@ -1139,6 +1147,7 @@ ${recommendation}
     violations: Violation[],
     _duration: number,
     _context: UnifiedContext,
+    processingStrategy?: "single-request" | "batch-processing",
   ): ReviewResult {
     const stats = this.calculateStats(violations);
 
@@ -1152,9 +1161,468 @@ ${recommendation}
         majorCount: stats.majorCount,
         minorCount: stats.minorCount,
         suggestionCount: stats.suggestionCount,
+        processingStrategy,
       },
       positiveObservations: [], // Could be extracted from AI response
     };
+  }
+
+  // ============================================================================
+  // BATCH PROCESSING METHODS
+  // ============================================================================
+
+  /**
+   * Get batch processing configuration with defaults
+   */
+  private getBatchProcessingConfig(): BatchProcessingConfig {
+    const defaultConfig: BatchProcessingConfig = {
+      enabled: true,
+      maxFilesPerBatch: 3,
+      prioritizeSecurityFiles: true,
+      parallelBatches: false, // Sequential for better reliability
+      batchDelayMs: 1000,
+      singleRequestThreshold: 5, // Use single request for ≤5 files
+    };
+
+    return {
+      ...defaultConfig,
+      ...this.reviewConfig.batchProcessing,
+    };
+  }
+
+  /**
+   * Determine if batch processing should be used
+   */
+  private shouldUseBatchProcessing(
+    context: UnifiedContext,
+    batchConfig: BatchProcessingConfig,
+  ): boolean {
+    if (!batchConfig.enabled) {
+      logger.debug("Batch processing disabled in config");
+      return false;
+    }
+
+    const fileCount = context.diffStrategy.fileCount;
+    
+    if (fileCount <= batchConfig.singleRequestThreshold) {
+      logger.debug(
+        `File count (${fileCount}) ≤ threshold (${batchConfig.singleRequestThreshold}), using single request`,
+      );
+      return false;
+    }
+
+    // Force batch processing for file-by-file strategy with many files
+    if (context.diffStrategy.strategy === "file-by-file" && fileCount > 10) {
+      logger.debug(
+        `File-by-file strategy with ${fileCount} files, forcing batch processing`,
+      );
+      return true;
+    }
+
+    logger.debug(
+      `File count (${fileCount}) > threshold (${batchConfig.singleRequestThreshold}), using batch processing`,
+    );
+    return true;
+  }
+
+  /**
+   * Main batch processing method
+   */
+  private async reviewWithBatchProcessing(
+    context: UnifiedContext,
+    options: ReviewOptions,
+    batchConfig: BatchProcessingConfig,
+  ): Promise<{ violations: Violation[]; batchResults: BatchResult[] }> {
+    const startTime = Date.now();
+
+    try {
+      // Step 1: Prioritize and organize files
+      const prioritizedFiles = await this.prioritizeFiles(context, batchConfig);
+      logger.info(
+        `📋 Prioritized ${prioritizedFiles.length} files: ${prioritizedFiles.filter(f => f.priority === "high").length} high, ${prioritizedFiles.filter(f => f.priority === "medium").length} medium, ${prioritizedFiles.filter(f => f.priority === "low").length} low priority`,
+      );
+
+      // Step 2: Create batches
+      const batches = this.createBatches(prioritizedFiles, batchConfig);
+      logger.info(
+        `📦 Created ${batches.length} batches (max ${batchConfig.maxFilesPerBatch} files per batch)`,
+      );
+
+      // Step 3: Process batches
+      const batchResults: BatchResult[] = [];
+      const allViolations: Violation[] = [];
+
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        logger.info(
+          `🔄 Processing batch ${i + 1}/${batches.length} (${batch.files.length} files, ${batch.priority} priority)`,
+        );
+
+        try {
+          const batchResult = await this.processBatch(batch, context, options);
+          batchResults.push(batchResult);
+          allViolations.push(...batchResult.violations);
+
+          logger.info(
+            `✅ Batch ${i + 1} completed: ${batchResult.violations.length} violations found in ${Math.round(batchResult.processingTime / 1000)}s`,
+          );
+
+          // Add delay between batches if configured
+          if (i < batches.length - 1 && batchConfig.batchDelayMs > 0) {
+            logger.debug(`⏳ Waiting ${batchConfig.batchDelayMs}ms before next batch`);
+            await new Promise(resolve => setTimeout(resolve, batchConfig.batchDelayMs));
+          }
+        } catch (error) {
+          logger.error(
+            `❌ Batch ${i + 1} failed: ${(error as Error).message}`,
+          );
+          
+          // Record failed batch
+          batchResults.push({
+            batchIndex: i,
+            files: batch.files,
+            violations: [],
+            processingTime: Date.now() - startTime,
+            error: (error as Error).message,
+          });
+        }
+      }
+
+      const totalTime = Date.now() - startTime;
+      const avgBatchSize = batches.reduce((sum, b) => sum + b.files.length, 0) / batches.length;
+
+      logger.success(
+        `🎯 Batch processing completed: ${allViolations.length} total violations from ${batches.length} batches in ${Math.round(totalTime / 1000)}s (avg ${avgBatchSize.toFixed(1)} files/batch)`,
+      );
+
+      return { violations: allViolations, batchResults };
+    } catch (error) {
+      logger.error(`Batch processing failed: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Prioritize files based on security importance and file type
+   */
+  private async prioritizeFiles(
+    context: UnifiedContext,
+    batchConfig: BatchProcessingConfig,
+  ): Promise<PrioritizedFile[]> {
+    const files = context.pr.fileChanges || [];
+    const prioritizedFiles: PrioritizedFile[] = [];
+
+    for (const filePath of files) {
+      const priority = this.calculateFilePriority(filePath, batchConfig);
+      const estimatedTokens = await this.estimateFileTokens(filePath, context);
+      
+      prioritizedFiles.push({
+        path: filePath,
+        priority,
+        estimatedTokens,
+        diff: context.fileDiffs?.get(filePath),
+      });
+    }
+
+    // Sort by priority (high -> medium -> low) then by estimated tokens (smaller first)
+    prioritizedFiles.sort((a, b) => {
+      const priorityOrder = { high: 0, medium: 1, low: 2 };
+      const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+      
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
+      
+      return a.estimatedTokens - b.estimatedTokens;
+    });
+
+    return prioritizedFiles;
+  }
+
+  /**
+   * Calculate file priority based on path and content
+   */
+  private calculateFilePriority(filePath: string, batchConfig: BatchProcessingConfig): FilePriority {
+    if (!batchConfig.prioritizeSecurityFiles) {
+      return "medium"; // All files same priority if not prioritizing
+    }
+
+    const path = filePath.toLowerCase();
+    
+    // High priority: Security-sensitive files
+    const highPriorityPatterns = [
+      /auth/i, /login/i, /password/i, /token/i, /jwt/i, /oauth/i,
+      /crypto/i, /encrypt/i, /decrypt/i, /hash/i, /security/i,
+      /payment/i, /billing/i, /transaction/i, /money/i, /wallet/i,
+      /admin/i, /privilege/i, /permission/i, /role/i, /access/i,
+      /config/i, /env/i, /secret/i, /key/i, /credential/i,
+      /api/i, /endpoint/i, /route/i, /controller/i, /middleware/i,
+    ];
+
+    if (highPriorityPatterns.some(pattern => pattern.test(path))) {
+      return "high";
+    }
+
+    // Low priority: Documentation, tests, config files
+    const lowPriorityPatterns = [
+      /\.md$/i, /\.txt$/i, /readme/i, /changelog/i, /license/i,
+      /test/i, /spec/i, /\.test\./i, /\.spec\./i, /__tests__/i,
+      /\.json$/i, /\.yaml$/i, /\.yml$/i, /\.toml$/i, /\.ini$/i,
+      /\.lock$/i, /package-lock/i, /yarn\.lock/i, /pnpm-lock/i,
+      /\.gitignore/i, /\.eslint/i, /\.prettier/i, /tsconfig/i,
+      /\.svg$/i, /\.png$/i, /\.jpg$/i, /\.jpeg$/i, /\.gif$/i,
+    ];
+
+    if (lowPriorityPatterns.some(pattern => pattern.test(path))) {
+      return "low";
+    }
+
+    // Medium priority: Everything else
+    return "medium";
+  }
+
+  /**
+   * Estimate token count for a file
+   */
+  private async estimateFileTokens(filePath: string, context: UnifiedContext): Promise<number> {
+    try {
+      let content = "";
+      
+      if (context.fileDiffs?.has(filePath)) {
+        content = context.fileDiffs.get(filePath) || "";
+      } else if (context.prDiff) {
+        // Extract file content from whole diff
+        const diffLines = context.prDiff.diff.split("\n");
+        let inFile = false;
+        
+        for (const line of diffLines) {
+          if (line.startsWith("diff --git") && line.includes(filePath)) {
+            inFile = true;
+            continue;
+          }
+          if (inFile && line.startsWith("diff --git")) {
+            break;
+          }
+          if (inFile) {
+            content += line + "\n";
+          }
+        }
+      }
+
+      // Rough estimation: ~4 characters per token
+      const estimatedTokens = Math.ceil(content.length / 4);
+      
+      // Add base overhead for context and prompts
+      const baseOverhead = 1000;
+      
+      return estimatedTokens + baseOverhead;
+    } catch (error) {
+      logger.debug(`Error estimating tokens for ${filePath}: ${(error as Error).message}`);
+      return 2000; // Default estimate
+    }
+  }
+
+  /**
+   * Create batches from prioritized files
+   */
+  private createBatches(
+    prioritizedFiles: PrioritizedFile[],
+    batchConfig: BatchProcessingConfig,
+  ): FileBatch[] {
+    const batches: FileBatch[] = [];
+    const maxTokensPerBatch = this.getSafeTokenLimit() * 0.7; // Use 70% of limit for safety
+    
+    let currentBatch: FileBatch = {
+      files: [],
+      priority: "medium",
+      estimatedTokens: 0,
+      batchIndex: 0,
+    };
+
+    for (const file of prioritizedFiles) {
+      const wouldExceedTokens = currentBatch.estimatedTokens + file.estimatedTokens > maxTokensPerBatch;
+      const wouldExceedFileCount = currentBatch.files.length >= batchConfig.maxFilesPerBatch;
+      
+      if ((wouldExceedTokens || wouldExceedFileCount) && currentBatch.files.length > 0) {
+        // Finalize current batch
+        batches.push(currentBatch);
+        
+        // Start new batch
+        currentBatch = {
+          files: [],
+          priority: file.priority,
+          estimatedTokens: 0,
+          batchIndex: batches.length,
+        };
+      }
+
+      // Add file to current batch
+      currentBatch.files.push(file.path);
+      currentBatch.estimatedTokens += file.estimatedTokens;
+      
+      // Update batch priority to highest priority file in batch
+      if (file.priority === "high" || 
+          (file.priority === "medium" && currentBatch.priority === "low")) {
+        currentBatch.priority = file.priority;
+      }
+    }
+
+    // Add final batch if it has files
+    if (currentBatch.files.length > 0) {
+      batches.push(currentBatch);
+    }
+
+    return batches;
+  }
+
+  /**
+   * Process a single batch of files
+   */
+  private async processBatch(
+    batch: FileBatch,
+    context: UnifiedContext,
+    options: ReviewOptions,
+  ): Promise<BatchResult> {
+    const startTime = Date.now();
+
+    try {
+      // Create batch-specific context
+      const batchContext = this.createBatchContext(batch, context);
+      
+      // Build batch-specific prompt
+      const batchPrompt = this.buildBatchAnalysisPrompt(batchContext, batch, options);
+      
+      // Analyze with AI
+      const violations = await this.analyzeWithAI(batchPrompt, batchContext);
+      
+      const processingTime = Date.now() - startTime;
+
+      return {
+        batchIndex: batch.batchIndex,
+        files: batch.files,
+        violations,
+        processingTime,
+      };
+    } catch (error) {
+      const processingTime = Date.now() - startTime;
+      
+      return {
+        batchIndex: batch.batchIndex,
+        files: batch.files,
+        violations: [],
+        processingTime,
+        error: (error as Error).message,
+      };
+    }
+  }
+
+  /**
+   * Create context for a specific batch
+   */
+  private createBatchContext(batch: FileBatch, originalContext: UnifiedContext): UnifiedContext {
+    // Create a filtered context containing only the files in this batch
+    const batchFileDiffs = new Map<string, string>();
+    
+    if (originalContext.fileDiffs) {
+      for (const filePath of batch.files) {
+        const diff = originalContext.fileDiffs.get(filePath);
+        if (diff) {
+          batchFileDiffs.set(filePath, diff);
+        }
+      }
+    }
+
+    return {
+      ...originalContext,
+      fileDiffs: batchFileDiffs,
+      diffStrategy: {
+        ...originalContext.diffStrategy,
+        fileCount: batch.files.length,
+        strategy: "file-by-file", // Always use file-by-file for batches
+        reason: `Batch processing ${batch.files.length} files`,
+      },
+      pr: {
+        ...originalContext.pr,
+        fileChanges: batch.files,
+      },
+    };
+  }
+
+  /**
+   * Build analysis prompt for a specific batch
+   */
+  private buildBatchAnalysisPrompt(
+    batchContext: UnifiedContext,
+    batch: FileBatch,
+    options: ReviewOptions,
+  ): string {
+    const diffContent = this.extractDiffContent(batchContext);
+
+    return `Conduct a focused security and quality analysis of this batch of ${batch.files.length} files (${batch.priority} priority).
+
+## BATCH CONTEXT:
+**Batch**: ${batch.batchIndex + 1}
+**Files**: ${batch.files.length}
+**Priority**: ${batch.priority}
+**Files in batch**: ${batch.files.join(", ")}
+
+## PR CONTEXT:
+**Title**: ${batchContext.pr.title}
+**Author**: ${batchContext.pr.author}
+**Repository**: ${batchContext.identifier.workspace}/${batchContext.identifier.repository}
+
+## PROJECT CONTEXT:
+${batchContext.projectContext.memoryBank.projectContext || batchContext.projectContext.memoryBank.summary}
+
+## PROJECT RULES & STANDARDS:
+${batchContext.projectContext.clinerules || "No specific rules defined"}
+
+## BATCH CODE CHANGES:
+${diffContent}
+
+## CRITICAL INSTRUCTIONS FOR CODE SNIPPETS:
+
+When you identify an issue in the code, you MUST:
+1. Copy the EXACT line from the diff above, including the diff prefix (+, -, or space at the beginning)
+2. Do NOT modify, clean, or reformat the line
+3. Include the complete line as it appears in the diff
+4. If the issue spans multiple lines, choose the most relevant single line
+
+## ANALYSIS REQUIREMENTS:
+
+${this.getAnalysisRequirements()}
+
+### 📋 OUTPUT FORMAT
+Return ONLY valid JSON:
+{
+  "violations": [
+    {
+      "type": "inline",
+      "file": "exact/file/path.ext",
+      "code_snippet": "EXACT line from diff INCLUDING the +/- prefix",
+      "search_context": {
+        "before": ["line before from diff with prefix"],
+        "after": ["line after from diff with prefix"]
+      },
+      "severity": "CRITICAL|MAJOR|MINOR|SUGGESTION",
+      "category": "security|performance|maintainability|functionality",
+      "issue": "Brief issue title",
+      "message": "Detailed explanation",
+      "impact": "Potential impact description",
+      "suggestion": "Clean, executable code fix (no diff symbols)"
+    }
+  ],
+  "summary": "Batch analysis summary",
+  "positiveObservations": ["Good practices found"],
+  "statistics": {
+    "filesReviewed": ${batch.files.length},
+    "totalIssues": 0,
+    "criticalCount": 0,
+    "majorCount": 0,
+    "minorCount": 0,
+    "suggestionCount": 0
+  }
+}`;
   }
 
   /**
@@ -1281,6 +1749,47 @@ ${recommendation}
 
     return null;
   }
+
+  /**
+   * Detect programming language from file extension
+   */
+  private detectLanguageFromFile(filePath: string): string {
+    const ext = filePath.split(".").pop()?.toLowerCase();
+    
+    const languageMap: Record<string, string> = {
+      js: "javascript",
+      jsx: "javascript",
+      ts: "typescript",
+      tsx: "typescript",
+      py: "python",
+      java: "java",
+      cpp: "cpp",
+      c: "c",
+      cs: "csharp",
+      php: "php",
+      rb: "ruby",
+      go: "go",
+      rs: "rust",
+      res: "rescript",
+      kt: "kotlin",
+      swift: "swift",
+      scala: "scala",
+      sh: "bash",
+      sql: "sql",
+      json: "json",
+      yaml: "yaml",
+      yml: "yaml",
+      xml: "xml",
+      html: "html",
+      css: "css",
+      scss: "scss",
+      sass: "sass",
+      md: "markdown",
+    };
+
+    return languageMap[ext || ""] || "text";
+  }
+
 
   /**
    * Generate all possible path variations for a file
