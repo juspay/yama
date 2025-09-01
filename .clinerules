@@ -27,6 +27,8 @@
   - With/without a/ and b/ prefixes
   - With/without app/ prefix
   - Partial path matching as fallback
+- Generate comprehensive path variations for robust matching
+- Support nested directory structures and partial matches
 
 ### AI Prompt Engineering
 - When generating prompts for code review:
@@ -35,6 +37,8 @@
   - Include the full diff content without truncation
   - Provide clear instructions about preserving diff symbols
   - Use structured JSON output format
+  - Include comprehensive project context and coding standards
+  - Use quality-first configuration (2M+ tokens, 15min timeout)
 
 ### Error Handling Patterns
 - For comment posting failures:
@@ -43,12 +47,50 @@
   - Log detailed error information for debugging
   - Use try-catch blocks around individual comment posts
   - Prioritize line numbers over snippet matching (more reliable)
+- For batch processing failures:
+  - Isolate errors to individual batches
+  - Continue processing remaining batches
+  - Provide detailed error reporting in final summary
 
 ### Known Limitations
 - Bitbucket API may have its own behavior for line positioning
 - Complex diff structures can make line number extraction challenging
 - Some comments may still appear at incorrect lines despite best efforts
 - Need to monitor and adjust based on real-world usage patterns
+- Very large individual files may still challenge token limits even with batching
+
+## Batch Processing for Large PRs
+
+### When to Use Batch Processing
+- Automatically enabled for PRs with >5 files (configurable threshold)
+- Essential for enterprise PRs with 50+ files
+- Prevents AI token limit violations and service timeouts
+- Maintains review quality by avoiding context truncation
+
+### File Prioritization Strategy
+- **High Priority**: Security-sensitive files (auth, payment, crypto, admin, config)
+- **Medium Priority**: Business logic and core functionality
+- **Low Priority**: Documentation, tests, configuration files
+- Process high-priority files in early batches for faster security feedback
+
+### Token Management
+- Use 70% of AI provider's token limit as safety margin
+- Estimate file tokens using 4 characters per token ratio
+- Add 1000 token overhead for context and prompts
+- Dynamically adjust batch sizes based on token budget
+
+### Batch Configuration Best Practices
+- Default: 3 files per batch for optimal balance
+- Enable security file prioritization by default
+- Use 1000ms delay between batches to avoid rate limits
+- Process batches sequentially for better error isolation
+- Monitor batch performance and adjust thresholds as needed
+
+### Error Recovery
+- Individual batch failures don't stop the entire review
+- Failed batches are reported in the final summary
+- Retry logic can be added for transient failures
+- Graceful degradation ensures partial results are still valuable
 
 ## Project Structure
 

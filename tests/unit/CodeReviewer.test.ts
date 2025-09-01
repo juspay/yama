@@ -213,6 +213,7 @@ index 1234567..abcdefg 100644
           majorCount: 1,
           minorCount: 1,
           suggestionCount: 0,
+          processingStrategy: "single-request",
         },
       });
 
@@ -337,6 +338,7 @@ index 1234567..abcdefg 100644
         majorCount: 1,
         minorCount: 1,
         suggestionCount: 1,
+        processingStrategy: "single-request",
       });
     });
   });

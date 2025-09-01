@@ -80,6 +80,145 @@ design_patterns:
     related_patterns:
       - "Configuration Pattern"
 
+  - name: "Batch Processing Pattern"
+    category: "scalability"
+    description: "Process large PRs in small, manageable batches to prevent token limit issues"
+    usage: "Automatically handles PRs with many files by breaking them into prioritized batches"
+    implementation:
+      - "File prioritization based on security importance (auth, payment, crypto files get high priority)"
+      - "Token-aware batch creation (70% of provider limit per batch)"
+      - "Sequential batch processing with configurable delays"
+      - "Graceful error handling for individual batch failures"
+      - "Comprehensive logging and progress tracking"
+      - "Provider-aware token limit detection and safety margins"
+      - "Security-first file classification and prioritization"
+      - "Batch result aggregation with comprehensive reporting"
+    example_files:
+      - "src/features/CodeReviewer.ts"
+    configuration:
+      - "batchProcessing.enabled: Enable/disable batch processing (default: true)"
+      - "batchProcessing.maxFilesPerBatch: Maximum files per batch (default: 3)"
+      - "batchProcessing.singleRequestThreshold: File count threshold for single request (default: 5)"
+      - "batchProcessing.prioritizeSecurityFiles: Prioritize security-sensitive files (default: true)"
+      - "batchProcessing.batchDelayMs: Delay between batches in milliseconds (default: 1000)"
+      - "batchProcessing.parallelBatches: Enable parallel batch processing (default: false)"
+    benefits:
+      - "Handles PRs with 100+ files without token truncation"
+      - "Ensures complete coverage of all changed files"
+      - "Maintains review quality by avoiding AI context limits"
+      - "Prioritizes critical security files for early review"
+      - "Adapts to different AI provider capabilities and limits"
+      - "Provides detailed progress tracking and error reporting"
+    related_patterns:
+      - "Provider-Aware Token Management"
+      - "Smart Diff Strategy"
+      - "Security-First File Prioritization"
+
+  - name: "Provider-Aware Token Management"
+    category: "performance"
+    description: "Dynamic token limit calculation based on AI provider capabilities and safety margins"
+    usage: "Ensures optimal AI analysis quality while respecting provider-specific constraints"
+    implementation:
+      - "Detect AI provider capabilities and token limits"
+      - "Apply safety margins (typically 70% of max limit)"
+      - "Estimate content token requirements using character-to-token ratios"
+      - "Dynamically adjust batch sizes based on available token budget"
+      - "Monitor and log token usage for optimization"
+    example_files:
+      - "src/features/CodeReviewer.ts"
+    benefits:
+      - "Prevents API limit violations and service interruptions"
+      - "Maximizes analysis depth within provider constraints"
+      - "Adapts automatically to different AI provider capabilities"
+      - "Enables quality-first approach with optimal resource utilization"
+    related_patterns:
+      - "Batch Processing Pattern"
+      - "Quality-First AI Configuration"
+
+  - name: "Security-First File Prioritization"
+    category: "security"
+    description: "Intelligent file prioritization that ensures security-sensitive files are reviewed first"
+    usage: "When processing large changesets where not all files can be analyzed simultaneously"
+    implementation:
+      - "Classify files based on path patterns and security importance"
+      - "Assign priority levels: high (auth/payment/crypto), medium (business logic), low (docs/tests)"
+      - "Sort files by priority then by estimated token complexity"
+      - "Process high-priority files in early batches"
+      - "Use configurable pattern matching for security file detection"
+    example_files:
+      - "src/features/CodeReviewer.ts"
+    security_patterns:
+      - "auth, login, password, token, jwt, oauth patterns"
+      - "crypto, encrypt, decrypt, hash, security patterns"
+      - "payment, billing, transaction, money, wallet patterns"
+      - "admin, privilege, permission, role, access patterns"
+      - "config, env, secret, key, credential patterns"
+    benefits:
+      - "Critical security issues are detected early in the review process"
+      - "Review quality is maintained even under resource constraints"
+      - "Provides actionable feedback on most important changes first"
+      - "Reduces security risk by prioritizing sensitive code paths"
+    related_patterns:
+      - "Batch Processing Pattern"
+      - "Provider-Aware Token Management"
+
+  - name: "Quality-First AI Configuration"
+    category: "quality"
+    description: "AI provider configuration optimized for analysis quality over speed"
+    usage: "Ensures comprehensive code review by maximizing AI capabilities within constraints"
+    implementation:
+      - "Use maximum available token limits (2M+ tokens when available)"
+      - "Extended timeout periods (15+ minutes) for thorough analysis"
+      - "Auto-provider selection for best available model capabilities"
+      - "Comprehensive context passing including project patterns and standards"
+      - "Disable evaluation warnings to reduce noise in responses"
+      - "Temperature optimization for consistent, focused analysis"
+    example_files:
+      - "src/features/CodeReviewer.ts"
+    configuration_values:
+      - "maxTokens: 2000000+ (quality-first override)"
+      - "timeout: '15m' (extended for thoroughness)"
+      - "temperature: 0.3 (focused analysis)"
+      - "provider: 'auto' (best available)"
+      - "enableAnalytics: true (performance monitoring)"
+      - "enableEvaluation: false (reduce noise)"
+    benefits:
+      - "Ensures highest quality code reviews with comprehensive analysis"
+      - "Reduces false positives through better AI understanding"
+      - "Provides detailed, actionable feedback with proper context"
+      - "Adapts to project-specific patterns and coding standards"
+    related_patterns:
+      - "Provider-Aware Token Management"
+      - "Context-Rich AI Prompting"
+
+  - name: "Provider-Aware Token Management"
+    category: "reliability"
+    description: "Intelligent token limit management based on AI provider capabilities"
+    usage: "Prevents API failures by respecting provider-specific token limits"
+    implementation:
+      - "Provider-specific token limits (Vertex: 65536, OpenAI: 120000, etc.)"
+      - "Conservative defaults for auto-selection mode"
+      - "Runtime validation and adjustment of configured limits"
+      - "Graceful fallback to safe limits when configured limits exceed provider capacity"
+    example_files:
+      - "src/utils/ConfigManager.ts"
+      - "src/features/CodeReviewer.ts"
+    related_patterns:
+      - "Configuration Pattern"
+
+  - name: "Memory Bank Integration"
+    category: "context_management"
+    description: "Integration with Cline's memory bank system for persistent context"
+    usage: "Maintains project context and patterns across sessions"
+    implementation:
+      - "Configurable memory bank path with fallback options"
+      - "YAML-based memory bank files for better merge handling"
+      - "Automatic memory bank discovery and loading"
+    example_files:
+      - "src/utils/ConfigManager.ts"
+    related_patterns:
+      - "Configuration Pattern"
+
 caching_strategies:
   - name: "Hierarchical Cache Keys"
     description: "Structured cache keys for easy invalidation"

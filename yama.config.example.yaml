@@ -51,6 +51,15 @@ features:
       - "Performance bottlenecks"
       - "Error handling"
       - "Code quality"
+    
+    # NEW: Batch Processing Configuration
+    batchProcessing:
+      enabled: true # Enable batch processing for large PRs
+      maxFilesPerBatch: 3 # Maximum files to process in each batch
+      prioritizeSecurityFiles: true # Process security-sensitive files first
+      parallelBatches: false # Process batches sequentially for reliability
+      batchDelayMs: 1000 # Delay between batches in milliseconds
+      singleRequestThreshold: 5 # Use single request for PRs with ≤5 files
 
   # Description Enhancement Configuration
   descriptionEnhancement:
