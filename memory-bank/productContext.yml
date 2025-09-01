@@ -8,7 +8,7 @@ problem_statement:
     - "Missing test documentation"
 
 solution_overview:
-  product_name: "Yama (PR Guardian)"
+  product_name: "Yama"
   value_proposition: "AI-powered automated PR analysis that ensures consistent quality"
   key_benefits:
     - "80% reduction in manual review time"

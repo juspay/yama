@@ -1,0 +1,218 @@
+{
+  "version": "1.0",
+  "name": "Yama Copilot PR Review Configuration",
+  "description": "GitHub Copilot PR review settings for Yama enterprise automation toolkit",
+
+  "review_settings": {
+    "auto_review": true,
+    "review_on_push": true,
+    "review_on_pr_open": true,
+    "comment_on_changes_only": true,
+    "max_files_per_review": 50,
+    "max_lines_per_file": 1000,
+    "timeout_minutes": 10
+  },
+
+  "focus_areas": [
+    {
+      "name": "Security",
+      "priority": "critical",
+      "description": "API key leaks, vulnerabilities, unsafe patterns",
+      "patterns": [
+        "process.env.*_KEY",
+        "api.*key",
+        "secret",
+        "token",
+        "password",
+        "eval(",
+        "innerHTML",
+        "dangerouslySetInnerHTML"
+      ]
+    },
+    {
+      "name": "TypeScript Type Safety",
+      "priority": "high",
+      "description": "Proper typing, avoid any types, null safety",
+      "patterns": [
+        ": any",
+        "as any",
+        "// @ts-ignore",
+        "// @ts-nocheck",
+        "undefined!",
+        "null!"
+      ]
+    },
+    {
+      "name": "PR Automation Quality",
+      "priority": "high",
+      "description": "Proper API integration, error handling for external services",
+      "patterns": [
+        "fetch(",
+        "axios.",
+        "request(",
+        ".then(",
+        ".catch(",
+        "try {",
+        "throw new"
+      ]
+    },
+    {
+      "name": "Code Quality",
+      "priority": "medium",
+      "description": "Best practices, patterns, maintainability",
+      "patterns": [
+        "console.log",
+        "console.debug",
+        "TODO:",
+        "FIXME:",
+        "hack",
+        "temporary"
+      ]
+    },
+    {
+      "name": "Performance",
+      "priority": "medium",
+      "description": "Performance bottlenecks, inefficient code",
+      "patterns": ["for.*in", "while.*true", "setInterval", "setTimeout.*0"]
+    },
+    {
+      "name": "Testing",
+      "priority": "high",
+      "description": "Test coverage, test quality",
+      "file_patterns": [
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/test/**",
+        "**/tests/**"
+      ]
+    }
+  ],
+
+  "code_standards": {
+    "typescript": {
+      "strict_mode": true,
+      "no_any_types": true,
+      "explicit_return_types": false,
+      "no_unused_vars": true,
+      "prefer_const": true
+    },
+    "security": {
+      "no_hardcoded_secrets": true,
+      "no_eval": true,
+      "no_dangerous_html": true,
+      "validate_input": true,
+      "secure_api_calls": true
+    },
+    "performance": {
+      "avoid_blocking_operations": true,
+      "efficient_algorithms": true,
+      "memory_usage": true
+    },
+    "documentation": {
+      "jsdoc_required": false,
+      "inline_comments": true,
+      "readme_updates": true
+    }
+  },
+
+  "file_patterns": {
+    "include": [
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "src/**/*.js",
+      "src/**/*.jsx",
+      "tests/**/*.ts",
+      "tests/**/*.tsx",
+      "scripts/**/*.js",
+      "scripts/**/*.cjs",
+      ".github/workflows/*.yml",
+      "*.md",
+      "package.json",
+      "tsconfig.json",
+      "eslint.config.js"
+    ],
+    "exclude": [
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      "coverage/**",
+      "*.min.js",
+      "*.bundle.js",
+      ".git/**",
+      "docs/**/*.json",
+      "memory-bank/**",
+      "examples/**"
+    ]
+  },
+
+  "review_templates": {
+    "security_issue": {
+      "title": "🔒 Security Concern",
+      "severity": "high",
+      "template": "**Security Issue Detected**\n\n{description}\n\n**Recommendation:**\n{suggestion}\n\n**References:**\n- [OWASP Guidelines](https://owasp.org/)\n- [Yama Security Standards](docs/security.md)"
+    },
+    "type_safety": {
+      "title": "🔧 TypeScript Type Safety",
+      "severity": "medium",
+      "template": "**Type Safety Improvement**\n\n{description}\n\n**Suggested Fix:**\n```typescript\n{suggestion}\n```\n\n**Why this matters:**\nProper typing improves code reliability and developer experience."
+    },
+    "api_integration": {
+      "title": "🔗 API Integration Enhancement",
+      "severity": "medium",
+      "template": "**API Integration Improvement**\n\n{description}\n\n**Suggested Enhancement:**\n{suggestion}\n\n**Impact:**\nImproves reliability of PR automation features."
+    },
+    "performance": {
+      "title": "⚡ Performance Optimization",
+      "severity": "low",
+      "template": "**Performance Consideration**\n\n{description}\n\n**Optimization Suggestion:**\n{suggestion}\n\n**Impact:**\n{impact_description}"
+    },
+    "code_quality": {
+      "title": "✨ Code Quality Enhancement",
+      "severity": "low",
+      "template": "**Code Quality Suggestion**\n\n{description}\n\n**Improvement:**\n{suggestion}\n\n**Benefits:**\n- Improved readability\n- Better maintainability\n- Follows Yama standards"
+    }
+  },
+
+  "ai_instructions": {
+    "persona": "You are a senior software engineer reviewing code for Yama, an enterprise-grade Pull Request automation toolkit that values security, performance, and maintainability.",
+
+    "context": "Yama is a multi-platform PR automation tool supporting Bitbucket, GitHub, and GitLab. It has AI-powered code review capabilities, strict quality standards including comprehensive build rule enforcement, TypeScript strict mode, and enterprise security requirements.",
+
+    "review_style": "Be constructive, educational, and specific. Provide code examples where helpful. Focus on security, type safety, API integration reliability, and maintainability. Consider the enterprise context and production requirements.",
+
+    "priorities": [
+      "Security vulnerabilities and API key leaks (CRITICAL)",
+      "TypeScript type safety and null safety (HIGH)",
+      "API integration reliability and error handling (HIGH)",
+      "Performance implications for production use (HIGH)",
+      "Code quality and maintainability (MEDIUM)",
+      "Test coverage and documentation (MEDIUM)",
+      "ESLint and formatting compliance (LOW)"
+    ],
+
+    "custom_rules": [
+      "Flag any console.log statements in production code - suggest using logger instead",
+      "Ensure all environment variables are documented in .env.example",
+      "Check that commit messages follow semantic format: type(scope): description",
+      "Verify proper error handling for external API interactions (Bitbucket, GitHub, GitLab)",
+      "Suggest performance optimizations for large-scale PR operations",
+      "Recommend tests for new PR automation features",
+      "Check for proper handling of sensitive PR data and user information"
+    ]
+  },
+
+  "integration": {
+    "github_actions": true,
+    "pre_commit_hooks": false,
+    "status_checks": true,
+    "auto_merge_prevention": true,
+    "comment_resolution": true
+  },
+
+  "notifications": {
+    "review_completed": true,
+    "critical_issues_found": true,
+    "all_checks_passed": true,
+    "mention_maintainers": ["@juspay/yama-team"]
+  }
+}

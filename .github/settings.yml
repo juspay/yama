@@ -1,0 +1,203 @@
+# Repository settings for Yama (Yama)
+# See https://github.com/repository-settings/app for details
+
+repository:
+  name: yama
+  description: "Enterprise-grade Pull Request automation toolkit with AI-powered code review and description enhancement"
+  homepage: https://github.com/juspay/yama
+  topics:
+    - pr
+    - pull-request
+    - code-review
+    - ai
+    - automation
+    - bitbucket
+    - github
+    - gitlab
+    - security
+    - quality
+    - typescript
+    - cli
+    - enterprise
+    - devops
+    - juspay
+
+  private: false
+  has_issues: true
+  has_projects: true
+  has_wiki: false
+  has_downloads: true
+  default_branch: main
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: true
+  delete_branch_on_merge: true
+  enable_automated_security_fixes: true
+  enable_vulnerability_alerts: true
+
+# Labels for issue and PR management
+labels:
+  # Type labels
+  - name: "type: bug"
+    color: "d73a4a"
+    description: "Something isn't working"
+
+  - name: "type: feature"
+    color: "0075ca"
+    description: "New feature or request"
+
+  - name: "type: enhancement"
+    color: "a2eeef"
+    description: "Enhancement to existing functionality"
+
+  - name: "type: documentation"
+    color: "0052cc"
+    description: "Improvements or additions to documentation"
+
+  - name: "type: refactor"
+    color: "5319e7"
+    description: "Code refactoring"
+
+  - name: "type: performance"
+    color: "fbca04"
+    description: "Performance improvements"
+
+  - name: "type: security"
+    color: "b60205"
+    description: "Security-related changes"
+
+  # Priority labels
+  - name: "priority: critical"
+    color: "b60205"
+    description: "Critical priority"
+
+  - name: "priority: high"
+    color: "d93f0b"
+    description: "High priority"
+
+  - name: "priority: medium"
+    color: "fbca04"
+    description: "Medium priority"
+
+  - name: "priority: low"
+    color: "0e8a16"
+    description: "Low priority"
+
+  # Status labels
+  - name: "status: triage"
+    color: "ededed"
+    description: "Needs triage"
+
+  - name: "status: in-progress"
+    color: "c5def5"
+    description: "Currently being worked on"
+
+  - name: "status: blocked"
+    color: "b60205"
+    description: "Blocked by external dependency"
+
+  - name: "status: needs-review"
+    color: "fbca04"
+    description: "Needs code review"
+
+  - name: "status: ready-to-merge"
+    color: "0e8a16"
+    description: "Ready for merge"
+
+  # Component labels
+  - name: "component: cli"
+    color: "1d76db"
+    description: "Related to CLI functionality"
+
+  - name: "component: core"
+    color: "1d76db"
+    description: "Related to core engine functionality"
+
+  - name: "component: api"
+    color: "1d76db"
+    description: "Related to API integration"
+
+  - name: "component: ai"
+    color: "1d76db"
+    description: "Related to AI features"
+
+  - name: "component: security"
+    color: "1d76db"
+    description: "Related to security features"
+
+  - name: "component: config"
+    color: "1d76db"
+    description: "Related to configuration"
+
+  - name: "component: docs"
+    color: "1d76db"
+    description: "Related to documentation"
+
+  - name: "component: tests"
+    color: "1d76db"
+    description: "Related to testing"
+
+  # Platform-specific labels
+  - name: "platform: bitbucket"
+    color: "0e8a16"
+    description: "Bitbucket platform specific"
+
+  - name: "platform: github"
+    color: "0e8a16"
+    description: "GitHub platform specific"
+
+  - name: "platform: gitlab"
+    color: "0e8a16"
+    description: "GitLab platform specific"
+
+  # AI Provider labels
+  - name: "ai: openai"
+    color: "0e8a16"
+    description: "OpenAI provider specific"
+
+  - name: "ai: anthropic"
+    color: "0e8a16"
+    description: "Anthropic provider specific"
+
+  - name: "ai: google"
+    color: "0e8a16"
+    description: "Google AI provider specific"
+
+  - name: "good first issue"
+    color: "7057ff"
+    description: "Good for newcomers"
+
+  - name: "help wanted"
+    color: "008672"
+    description: "Extra attention is needed"
+
+  - name: "dependencies"
+    color: "0366d6"
+    description: "Pull requests that update a dependency file"
+
+  - name: "automated"
+    color: "7057ff"
+    description: "Automated changes"
+
+# Branch protection rules
+branches:
+  - name: main
+    protection:
+      required_status_checks:
+        strict: true
+        contexts:
+          - "🔒 Single Commit Policy Validation"
+          - "🛡️ Code Quality & Security Gate"
+          - "🤖 GitHub Copilot PR Review"
+          - "test (18)"
+          - "test (20)"
+          - "build-check"
+      enforce_admins: false
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: true
+      restrictions: null
+      allow_force_pushes: false
+      allow_deletions: false
+      required_linear_history: true

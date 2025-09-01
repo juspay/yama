@@ -1,0 +1,58 @@
+{
+  "timestamp": "2025-09-01T06:51:53.036Z",
+  "project": "yama",
+  "version": "1.0.0",
+  "metrics": {
+    "eslint": {
+      "files": 13,
+      "errors": 0,
+      "warnings": 104,
+      "fixableErrors": 0,
+      "fixableWarnings": 0,
+      "status": "success"
+    },
+    "typescript": {
+      "strictMode": true,
+      "compilationSuccess": true,
+      "errors": 0,
+      "status": "success",
+      "message": "No type errors"
+    },
+    "tests": {
+      "testsRun": 0,
+      "testsPassed": 0,
+      "testsFailed": 0,
+      "coverage": {
+        "lines": 0,
+        "functions": 0,
+        "branches": 0,
+        "statements": 0
+      },
+      "status": "failed"
+    },
+    "build": {
+      "success": true,
+      "buildTime": 1341,
+      "buildSize": 1119952,
+      "fileCount": 98,
+      "status": "success",
+      "error": null
+    },
+    "security": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 4,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 4
+      },
+      "auditSuccess": true,
+      "status": "safe"
+    }
+  },
+  "summary": {
+    "overallScore": 60,
+    "recommendations": ["Reduce ESLint warnings", "Add test coverage"]
+  }
+}
