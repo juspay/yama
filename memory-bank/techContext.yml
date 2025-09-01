@@ -50,7 +50,7 @@ technical_patterns:
   - name: "Dynamic Import Pattern"
     description: "Handle ESM modules in CommonJS environment"
     implementation: |
-      const dynamicImport = eval('(specifier) => import(specifier)');
+      const dynamicImport = new Function('specifier', 'return import(specifier)');
       const { Module } = await dynamicImport('@module/name');
     rationale: "Bypasses TypeScript compilation issues with ESM"
 

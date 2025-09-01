@@ -179,7 +179,9 @@ export class Cache implements ICache {
    */
   invalidateTag(tag: string): number {
     const keys = this.tags.get(tag);
-    if (!keys) {return 0;}
+    if (!keys) {
+      return 0;
+    }
 
     let deleted = 0;
     keys.forEach((key) => {
@@ -303,7 +305,9 @@ export class Cache implements ICache {
 
     // Clean up tag associations for deleted keys
     this.tags.forEach((keys, tag) => {
-      const validKeys = new Set([...keys].filter((key) => this.cache.has(key)));
+      const validKeys = new Set(
+        Array.from(keys).filter((key) => this.cache.has(key)),
+      );
       if (validKeys.size !== keys.size) {
         this.tags.set(tag, validKeys);
       }

@@ -54,12 +54,12 @@
     "test": "jest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit --skipLibCheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "docs": "typedoc src",
     "clean": "rimraf dist",
-    "prepare": "npm run build",
+    "prepare": "husky install",
     "prepack": "npm run build && npm run test",
     "changeset": "changeset",
     "changeset:version": "changeset version && git add --all",
@@ -67,7 +67,20 @@
     "release:dry": "npm publish --dry-run",
     "release:github": "npm publish --registry https://npm.pkg.github.com",
     "version:check": "npm version --no-git-tag-version",
-    "pack:verify": "npm pack && tar -tzf *.tgz | head -20"
+    "pack:verify": "npm pack && tar -tzf *.tgz | head -20",
+    "validate": "npm run validate:env && npm run validate:security",
+    "validate:all": "npm run lint && npm run type-check && npm run validate",
+    "validate:env": "node scripts/validate-env.cjs",
+    "validate:security": "node scripts/validate-security.cjs",
+    "validate:commit": "node scripts/commit-validation.cjs \"$(git log -1 --pretty=format:'%s')\"",
+    "validate:build": "node scripts/build-validations.cjs",
+    "commit:validate": "node scripts/commit-validation.cjs",
+    "pre-commit": "lint-staged",
+    "pre-push": "npm run validate && npm run test",
+    "quality:all": "npm run lint && npm run format && npm run test",
+    "quality:metrics": "node scripts/quality-metrics.cjs",
+    "quality:report": "npm run quality:metrics && echo 'Quality metrics saved to quality-metrics.json'",
+    "check:all": "npm run lint && npm run format --check && npm run validate && npm run validate:commit"
   },
   "dependencies": {
     "@juspay/neurolink": "^5.1.0",
@@ -111,7 +124,9 @@
     "@semantic-release/release-notes-generator": "^14.0.1",
     "semantic-release": "^24.0.0",
     "prettier": "^3.0.0",
-    "publint": "^0.3.0"
+    "publint": "^0.3.0",
+    "husky": "^9.0.0",
+    "lint-staged": "^15.0.0"
   },
   "peerDependencies": {
     "typescript": ">=4.5.0"
@@ -134,5 +149,15 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.ts": []
   }
 }

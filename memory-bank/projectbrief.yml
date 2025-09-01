@@ -1,5 +1,5 @@
 project_overview:
-  name: "Yama (PR Guardian)"
+  name: "Yama"
   description: "AI-powered pull request analysis tool for automated code review and description enhancement"
   version: "1.0.0"
   repository: "https://github.com/juspay/yama"

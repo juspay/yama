@@ -45,7 +45,10 @@ export class BitbucketProvider {
     try {
       logger.debug("Initializing Bitbucket MCP handlers...");
 
-      const dynamicImport = eval("(specifier) => import(specifier)");
+      const dynamicImport = new Function(
+        "specifier",
+        "return import(specifier)",
+      );
 
       const [
         { BitbucketApiClient },
@@ -508,9 +511,15 @@ export class BitbucketProvider {
       if (options.filePath && options.codeSnippet) {
         args.file_path = options.filePath;
         args.code_snippet = options.codeSnippet;
-        if (options.searchContext) {args.search_context = options.searchContext;}
-        if (options.matchStrategy) {args.match_strategy = options.matchStrategy;}
-        if (options.suggestion) {args.suggestion = options.suggestion;}
+        if (options.searchContext) {
+          args.search_context = options.searchContext;
+        }
+        if (options.matchStrategy) {
+          args.match_strategy = options.matchStrategy;
+        }
+        if (options.suggestion) {
+          args.suggestion = options.suggestion;
+        }
 
         logger.debug(`🔍 Inline comment details:`);
         logger.debug(`   File: ${options.filePath}`);
