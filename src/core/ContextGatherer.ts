@@ -12,6 +12,7 @@ import {
   ProviderError,
   DiffStrategyConfig,
   MemoryBankConfig,
+  WIPDetectionConfig,
 } from "../types/index.js";
 import { BitbucketProvider } from "./providers/BitbucketProvider.js";
 import { logger } from "../utils/Logger.js";
@@ -78,6 +79,7 @@ export class ContextGatherer {
       forceRefresh?: boolean;
       includeDiff?: boolean;
       diffStrategyConfig?: DiffStrategyConfig;
+      skipProjectContext?: boolean; // New option for fast WIP checks
     } = {},
   ): Promise<UnifiedContext> {
     this.startTime = Date.now();
@@ -88,7 +90,7 @@ export class ContextGatherer {
     logger.info(`Target: ${identifier.workspace}/${identifier.repository}`);
 
     try {
-      // Step 1: Find and get PR information
+      // Step 1: Find and get PR information (always fast)
       const pr = await this.findAndGetPR(
         identifier,
         cacheHits,
@@ -100,21 +102,39 @@ export class ContextGatherer {
         pullRequestId: pr.id,
       };
 
-      // Step 2: Gather project context (memory bank + clinerules)
-      const projectContext = await this.gatherProjectContext(
-        completeIdentifier,
-        cacheHits,
-        options.forceRefresh,
-      );
+      // Step 2: Gather project context (skip for fast WIP checks)
+      let projectContext: ProjectContext;
+      if (options.skipProjectContext) {
+        // Fast fallback for WIP checks - no AI processing
+        projectContext = {
+          memoryBank: {
+            summary: "Skipped for WIP check",
+            projectContext: "Skipped for WIP check",
+            patterns: "Skipped for WIP check",
+            standards: "Skipped for WIP check",
+          },
+          clinerules: "",
+          filesProcessed: 0,
+        };
+      } else {
+        projectContext = await this.gatherProjectContext(
+          completeIdentifier,
+          cacheHits,
+          options.forceRefresh,
+        );
+      }
 
       // Step 3: Determine diff strategy based on file count and config
       const diffStrategy = this.determineDiffStrategy(
         pr.fileChanges || [],
         options.diffStrategyConfig,
       );
-      logger.info(
-        `Diff strategy: ${diffStrategy.strategy} (${diffStrategy.reason})`,
-      );
+      
+      if (!options.skipProjectContext) {
+        logger.info(
+          `Diff strategy: ${diffStrategy.strategy} (${diffStrategy.reason})`,
+        );
+      }
 
       // Step 4: Get diff data based on strategy (if requested)
       let prDiff: PRDiff | undefined;
@@ -156,13 +176,21 @@ export class ContextGatherer {
         gatheringDuration,
       };
 
-      logger.success(
-        `Context gathered in ${Math.round(gatheringDuration / 1000)}s ` +
-          `(${cacheHits.length} cache hits, ${diffStrategy.fileCount} files, ${diffStrategy.estimatedSize})`,
-      );
+      if (options.skipProjectContext) {
+        logger.success(
+          `Fast context gathered in ${Math.round(gatheringDuration / 1000)}s (WIP check mode)`,
+        );
+      } else {
+        logger.success(
+          `Context gathered in ${Math.round(gatheringDuration / 1000)}s ` +
+            `(${cacheHits.length} cache hits, ${diffStrategy.fileCount} files, ${diffStrategy.estimatedSize})`,
+        );
+      }
 
-      // Cache the complete context for reuse
-      this.cacheContext(context);
+      // Only cache complete context (not fast WIP context)
+      if (!options.skipProjectContext) {
+        this.cacheContext(context);
+      }
 
       return context;
     } catch (error) {
@@ -702,6 +730,31 @@ Extract and summarize the content and return ONLY this JSON format:
       .toString("base64")
       .replace(/[+/=]/g, "")
       .substring(0, 16);
+  }
+
+  /**
+   * Check if PR title contains WIP indicators
+   */
+  detectWIP(pr: PRInfo, config?: WIPDetectionConfig): boolean {
+    if (!config?.enabled) {
+      return false;
+    }
+
+    const patterns = config.patterns || [
+      "WIP",
+      "[WIP]",
+      "Work in Progress",
+      "DRAFT",
+      "[DRAFT]",
+      "🚧"
+    ];
+
+    const title = config.caseSensitive ? pr.title : pr.title.toLowerCase();
+
+    return patterns.some(pattern => {
+      const searchPattern = config.caseSensitive ? pattern : pattern.toLowerCase();
+      return title.includes(searchPattern);
+    });
   }
 
   /**

@@ -317,6 +317,15 @@ export interface EnhancementResult {
 // Configuration Types
 // ============================================================================
 
+export interface WIPDetectionConfig {
+  enabled: boolean;
+  patterns: string[];
+  caseSensitive: boolean;
+  action: "skip" | "warn";
+  allowForce: boolean;
+  allowedOperationsForWIP?: OperationType[]; // Allow specific operations for WIP PRs
+}
+
 export interface GuardianConfig {
   providers: {
     ai: AIProviderConfig;
@@ -325,6 +334,7 @@ export interface GuardianConfig {
   features: {
     codeReview: CodeReviewConfig;
     descriptionEnhancement: DescriptionEnhancementConfig;
+    wipDetection?: WIPDetectionConfig;
     diffStrategy?: DiffStrategyConfig;
     securityScan?: SecurityScanConfig;
     analytics?: AnalyticsConfig;
