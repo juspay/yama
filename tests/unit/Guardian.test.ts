@@ -421,6 +421,17 @@ describe("Guardian", () => {
     });
 
     it("should use cached context when available", async () => {
+      // First, mock the lightweight context for WIP check
+      const lightweightContext = {
+        pr: globalThis.testUtils.createMockPR({ id: 12345, title: "Test PR" }),
+        identifier: {
+          workspace: "test-workspace",
+          repository: "test-repo",
+          pullRequestId: 12345,
+        },
+      };
+      
+      // Then mock the full cached context
       const fullMockContext = {
         ...mockContext,
         pr: globalThis.testUtils.createMockPR({ id: 12345, title: "Test PR" }),
@@ -432,9 +443,11 @@ describe("Guardian", () => {
           filesProcessed: 1,
         },
       };
-      mockContextGatherer.getCachedContext.mockResolvedValue(
-        fullMockContext as any,
-      );
+      
+      // Mock the sequence: lightweight context first, then cached context
+      mockContextGatherer.gatherContext.mockResolvedValueOnce(lightweightContext as any);
+      mockContextGatherer.getCachedContext.mockResolvedValue(fullMockContext as any);
+      
       mockCodeReviewer.reviewCodeWithContext.mockResolvedValue({
         violations: [],
         summary: "No issues found",
@@ -455,8 +468,7 @@ describe("Guardian", () => {
       });
 
       expect(mockContextGatherer.getCachedContext).toHaveBeenCalled();
-      expect(mockContextGatherer.gatherContext).not.toHaveBeenCalled();
-      expect(logger.debug).toHaveBeenCalledWith("✓ Using cached context");
+      expect(logger.debug).toHaveBeenCalledWith("✓ Using cached context (WIP check passed)");
     });
 
     it("should handle operation failures gracefully", async () => {
@@ -661,7 +673,8 @@ describe("Guardian", () => {
     });
 
     it("should handle streaming processing failures", async () => {
-      mockContextGatherer.getCachedContext.mockRejectedValue(
+      // Mock the lightweight context to fail, which will cause gatherUnifiedContext to fail
+      mockContextGatherer.gatherContext.mockRejectedValue(
         new Error("Context failed"),
       );
 
@@ -1055,6 +1068,357 @@ describe("Guardian", () => {
 
       const stats = guardianInstance.getStats();
       expect(stats.initialized).toBe(false);
+    });
+  });
+
+  describe("WIP Detection", () => {
+    beforeEach(async () => {
+      // Setup config with WIP detection enabled
+      const wipConfig = {
+        ...mockConfig,
+        features: {
+          ...mockConfig.features,
+          wipDetection: {
+            enabled: true,
+            patterns: ["WIP", "[WIP]", "Work in Progress", "DRAFT", "[DRAFT]", "🚧"],
+            caseSensitive: false,
+            action: "skip" as const,
+            allowForce: true,
+            allowedOperationsForWIP: ["enhance-description" as const],
+          },
+        },
+      };
+      (configManager.loadConfig as jest.Mock).mockResolvedValue(wipConfig);
+      mockBitbucketProvider.initialize.mockResolvedValue();
+      await guardianInstance.initialize();
+    });
+
+    it("should skip all operations for WIP PR when no operations are allowed", async () => {
+      const wipPR = globalThis.testUtils.createMockPR({
+        id: 12345,
+        title: "WIP: Adding new feature",
+      });
+      
+      const mockContext = {
+        pr: wipPR,
+        identifier: {
+          workspace: "test-workspace",
+          repository: "test-repo",
+          pullRequestId: 12345,
+        },
+        diffStrategy: { strategy: "whole", fileCount: 3 },
+      };
+
+      // Mock WIP detection
+      mockContextGatherer.detectWIP = jest.fn().mockReturnValue(true);
+      mockContextGatherer.gatherContext.mockResolvedValue(mockContext as any);
+
+      const options: OperationOptions = {
+        workspace: "test-workspace",
+        repository: "test-repo",
+        operations: ["review"],
+        dryRun: false,
+      };
+
+      const result = await guardianInstance.processPR(options);
+
+      expect(result.operations[0].status).toBe("skipped");
+      expect(result.operations[0].data.reason).toBe("WIP detected in PR title");
+      expect(result.summary.skippedCount).toBe(1);
+    });
+
+    it("should allow description enhancement for WIP PR when configured", async () => {
+      const wipPR = globalThis.testUtils.createMockPR({
+        id: 12345,
+        title: "[WIP] Adding new feature",
+      });
+      
+      const mockContext = {
+        pr: wipPR,
+        identifier: {
+          workspace: "test-workspace",
+          repository: "test-repo",
+          pullRequestId: 12345,
+        },
+        diffStrategy: { strategy: "whole", fileCount: 3 },
+      };
+
+      // Mock WIP detection
+      mockContextGatherer.detectWIP = jest.fn().mockReturnValue(true);
+      mockContextGatherer.gatherContext.mockResolvedValue(mockContext as any);
+      mockDescriptionEnhancer.enhanceWithContext.mockResolvedValue({
+        originalDescription: "WIP description",
+        enhancedDescription: "Enhanced WIP description",
+        sectionsAdded: ["Changelog"],
+        sectionsEnhanced: [],
+        preservedItems: { media: 0, files: 0, links: 0 },
+        statistics: {
+          originalLength: 15,
+          enhancedLength: 25,
+          completedSections: 1,
+          totalSections: 1,
+        },
+      });
+
+      const options: OperationOptions = {
+        workspace: "test-workspace",
+        repository: "test-repo",
+        operations: ["enhance-description"],
+        dryRun: false,
+      };
+
+      const result = await guardianInstance.processPR(options);
+
+      expect(result.operations[0].status).toBe("success");
+      expect(result.operations[0].operation).toBe("enhance-description");
+      expect(result.summary.successCount).toBe(1);
+    });
+
+    it("should skip review but allow description enhancement for WIP PR", async () => {
+      const wipPR = globalThis.testUtils.createMockPR({
+        id: 12345,
+        title: "🚧 Work in Progress - New feature",
+      });
+      
+      const mockContext = {
+        pr: wipPR,
+        identifier: {
+          workspace: "test-workspace",
+          repository: "test-repo",
+          pullRequestId: 12345,
+        },
+        diffStrategy: { strategy: "whole", fileCount: 3 },
+      };
+
+      // Mock WIP detection
+      mockContextGatherer.detectWIP = jest.fn().mockReturnValue(true);
+      mockContextGatherer.gatherContext.mockResolvedValue(mockContext as any);
+      mockDescriptionEnhancer.enhanceWithContext.mockResolvedValue({
+        originalDescription: "WIP description",
+        enhancedDescription: "Enhanced WIP description",
+        sectionsAdded: ["Changelog"],
+        sectionsEnhanced: [],
+        preservedItems: { media: 0, files: 0, links: 0 },
+        statistics: {
+          originalLength: 15,
+          enhancedLength: 25,
+          completedSections: 1,
+          totalSections: 1,
+        },
+      });
+
+      const options: OperationOptions = {
+        workspace: "test-workspace",
+        repository: "test-repo",
+        operations: ["review", "enhance-description"],
+        dryRun: false,
+      };
+
+      const result = await guardianInstance.processPR(options);
+
+      expect(result.operations).toHaveLength(2);
+      expect(result.operations[0].operation).toBe("review");
+      expect(result.operations[0].status).toBe("skipped");
+      expect(result.operations[1].operation).toBe("enhance-description");
+      expect(result.operations[1].status).toBe("success");
+      expect(result.summary.successCount).toBe(1);
+      expect(result.summary.skippedCount).toBe(1);
+    });
+
+    it("should handle standalone review for WIP PR", async () => {
+      const wipPR = globalThis.testUtils.createMockPR({
+        id: 12345,
+        title: "DRAFT: New feature implementation",
+      });
+      
+      const mockContext = {
+        pr: wipPR,
+        identifier: {
+          workspace: "test-workspace",
+          repository: "test-repo",
+          pullRequestId: 12345,
+        },
+      };
+
+      // Mock WIP detection
+      mockContextGatherer.detectWIP = jest.fn().mockReturnValue(true);
+      mockContextGatherer.gatherContext.mockResolvedValue(mockContext as any);
+
+      const reviewOptions: ReviewOptions = {
+        workspace: "test-workspace",
+        repository: "test-repo",
+        pullRequestId: 12345,
+        dryRun: false,
+        verbose: false,
+      };
+
+      const result = await guardianInstance.reviewCode(reviewOptions);
+
+      expect(result.skipped).toBe(true);
+      expect(result.reason).toBe("WIP detected in PR title");
+      expect(result.wipDetails).toBeDefined();
+      expect(result.statistics.filesReviewed).toBe(0);
+    });
+
+    it("should handle standalone description enhancement for WIP PR", async () => {
+      const wipPR = globalThis.testUtils.createMockPR({
+        id: 12345,
+        title: "[DRAFT] New feature implementation",
+      });
+      
+      const mockContext = {
+        pr: wipPR,
+        identifier: {
+          workspace: "test-workspace",
+          repository: "test-repo",
+          pullRequestId: 12345,
+        },
+      };
+
+      // Mock WIP detection
+      mockContextGatherer.detectWIP = jest.fn().mockReturnValue(true);
+      mockContextGatherer.gatherContext.mockResolvedValue(mockContext as any);
+      mockDescriptionEnhancer.enhanceWithContext.mockResolvedValue({
+        originalDescription: "Draft description",
+        enhancedDescription: "Enhanced draft description",
+        sectionsAdded: ["Changelog"],
+        sectionsEnhanced: [],
+        preservedItems: { media: 0, files: 0, links: 0 },
+        statistics: {
+          originalLength: 17,
+          enhancedLength: 27,
+          completedSections: 1,
+          totalSections: 1,
+        },
+      });
+
+      const enhancementOptions: EnhancementOptions = {
+        workspace: "test-workspace",
+        repository: "test-repo",
+        pullRequestId: 12345,
+        dryRun: false,
+        verbose: false,
+      };
+
+      const result = await guardianInstance.enhanceDescription(enhancementOptions);
+
+      expect(result.originalDescription).toBe("Draft description");
+      expect(result.enhancedDescription).toBe("Enhanced draft description");
+      expect(result.sectionsAdded).toEqual(["Changelog"]);
+    });
+
+    it("should process non-WIP PR normally", async () => {
+      const normalPR = globalThis.testUtils.createMockPR({
+        id: 12345,
+        title: "Add new feature implementation",
+      });
+      
+      const mockContext = {
+        pr: normalPR,
+        identifier: {
+          workspace: "test-workspace",
+          repository: "test-repo",
+          pullRequestId: 12345,
+        },
+        diffStrategy: { strategy: "whole", fileCount: 3 },
+      };
+
+      // Mock WIP detection - return false for normal PR
+      mockContextGatherer.detectWIP = jest.fn().mockReturnValue(false);
+      mockContextGatherer.gatherContext.mockResolvedValue(mockContext as any);
+      mockCodeReviewer.reviewCodeWithContext.mockResolvedValue({
+        violations: [],
+        summary: "No issues found",
+        positiveObservations: [],
+        statistics: {
+          filesReviewed: 3,
+          totalIssues: 0,
+          criticalCount: 0,
+          majorCount: 0,
+          minorCount: 0,
+          suggestionCount: 0,
+        },
+      });
+
+      const options: OperationOptions = {
+        workspace: "test-workspace",
+        repository: "test-repo",
+        operations: ["review"],
+        dryRun: false,
+      };
+
+      const result = await guardianInstance.processPR(options);
+
+      expect(result.operations[0].status).toBe("success");
+      expect(result.operations[0].operation).toBe("review");
+      expect(result.summary.successCount).toBe(1);
+      expect(mockContextGatherer.detectWIP).toHaveBeenCalledWith(normalPR, expect.any(Object));
+    });
+
+    it("should handle WIP detection disabled", async () => {
+      // Setup config with WIP detection disabled
+      const disabledWipConfig = {
+        ...mockConfig,
+        features: {
+          ...mockConfig.features,
+          wipDetection: {
+            enabled: false,
+            patterns: ["WIP"],
+            caseSensitive: false,
+            action: "skip" as const,
+            allowForce: true,
+          },
+        },
+      };
+      (configManager.loadConfig as jest.Mock).mockResolvedValue(disabledWipConfig);
+      
+      const newGuardian = new Guardian();
+      mockBitbucketProvider.initialize.mockResolvedValue();
+      await newGuardian.initialize();
+
+      const wipPR = globalThis.testUtils.createMockPR({
+        id: 12345,
+        title: "WIP: Adding new feature",
+      });
+      
+      const mockContext = {
+        pr: wipPR,
+        identifier: {
+          workspace: "test-workspace",
+          repository: "test-repo",
+          pullRequestId: 12345,
+        },
+        diffStrategy: { strategy: "whole", fileCount: 3 },
+      };
+
+      mockContextGatherer.gatherContext.mockResolvedValue(mockContext as any);
+      mockCodeReviewer.reviewCodeWithContext.mockResolvedValue({
+        violations: [],
+        summary: "No issues found",
+        positiveObservations: [],
+        statistics: {
+          filesReviewed: 3,
+          totalIssues: 0,
+          criticalCount: 0,
+          majorCount: 0,
+          minorCount: 0,
+          suggestionCount: 0,
+        },
+      });
+
+      const options: OperationOptions = {
+        workspace: "test-workspace",
+        repository: "test-repo",
+        operations: ["review"],
+        dryRun: false,
+      };
+
+      const result = await newGuardian.processPR(options);
+
+      // Should process normally even with WIP title when detection is disabled
+      expect(result.operations[0].status).toBe("success");
+      expect(result.operations[0].operation).toBe("review");
+      expect(result.summary.successCount).toBe(1);
     });
   });
 

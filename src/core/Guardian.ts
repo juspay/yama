@@ -15,6 +15,7 @@ import {
   ReviewOptions,
   EnhancementOptions,
   GuardianError,
+  WIPDetectionConfig,
 } from "../types/index.js";
 
 import { BitbucketProvider } from "./providers/BitbucketProvider.js";
@@ -28,6 +29,7 @@ import { cache } from "../utils/Cache.js";
 
 export class Guardian {
   private config: GuardianConfig;
+  private partialConfig?: Partial<GuardianConfig>;
   private bitbucketProvider!: BitbucketProvider;
   private contextGatherer!: ContextGatherer;
   private codeReviewer!: CodeReviewer;
@@ -37,9 +39,7 @@ export class Guardian {
 
   constructor(config?: Partial<GuardianConfig>) {
     this.config = {} as GuardianConfig;
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
+    this.partialConfig = config; // Store partial config for later merging
   }
 
   /**
@@ -54,8 +54,16 @@ export class Guardian {
       logger.badge();
       logger.phase("🚀 Initializing Yama...");
 
-      // Load configuration
-      this.config = await configManager.loadConfig(configPath);
+      // Load configuration and merge with constructor config
+      const loadedConfig = await configManager.loadConfig(configPath);
+      
+      // If we have a partial config from constructor, merge it with loaded config
+      if (this.partialConfig) {
+        // Deep merge the configs, with constructor config taking precedence
+        this.config = this.mergeConfigs(loadedConfig, this.partialConfig);
+      } else {
+        this.config = loadedConfig;
+      }
 
       // Initialize providers
       this.bitbucketProvider = new BitbucketProvider(
@@ -178,6 +186,59 @@ export class Guardian {
 
       return result;
     } catch (error) {
+      // Handle WIP detection specially
+      if (error instanceof GuardianError && error.code === "WIP_DETECTED") {
+        logger.operation("PR Processing", "completed");
+        
+        // Create skipped operations for all requested operations
+        const skippedOperations: OperationResult[] = options.operations.map(op => ({
+          operation: op,
+          status: "skipped" as const,
+          data: { 
+            skipped: true, 
+            reason: "WIP detected in PR title",
+            wipDetails: error.context
+          },
+          duration: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        }));
+
+        // Create a dummy PR info for the result since we might not have full context
+        const dummyPR = error.context?.prId ? {
+          id: error.context.prId,
+          title: error.context.prTitle || "WIP PR",
+          description: "",
+          author: "",
+          state: "OPEN" as const,
+          sourceRef: "",
+          targetRef: "",
+          createdDate: "",
+          updatedDate: "",
+        } : {
+          id: "unknown",
+          title: "WIP PR",
+          description: "",
+          author: "",
+          state: "OPEN" as const,
+          sourceRef: "",
+          targetRef: "",
+          createdDate: "",
+          updatedDate: "",
+        };
+
+        return {
+          pullRequest: dummyPR,
+          operations: skippedOperations,
+          summary: {
+            totalOperations: skippedOperations.length,
+            successCount: 0,
+            errorCount: 0,
+            skippedCount: skippedOperations.length,
+            totalDuration: Date.now() - startTime,
+          },
+        };
+      }
+
       logger.operation("PR Processing", "failed");
       logger.error(`Processing failed: ${(error as Error).message}`);
       throw error;
@@ -304,11 +365,27 @@ export class Guardian {
       pullRequestId: options.pullRequestId,
     };
 
-    // Check if we have cached context first
+    // Phase 1: Always get PR info first (fast) to check WIP before using any cache
+    const lightweightContext = await this.contextGatherer.gatherContext(identifier, {
+      excludePatterns: this.config.features.codeReview.excludePatterns,
+      contextLines: this.config.features.codeReview.contextLines,
+      forceRefresh: false,
+      includeDiff: false, // Fast PR info only
+      skipProjectContext: true, // Skip expensive AI processing for WIP check
+      diffStrategyConfig: this.config.features.diffStrategy,
+    });
+    
+    // Early WIP check - before any expensive operations or cache usage
+    // Only check WIP if we have PR info and if ALL operations would be blocked
+    if (lightweightContext?.pr) {
+      await this.checkWIPForAllOperations(lightweightContext.pr, options);
+    }
+    
+    // Now check if we have cached FULL context (only if WIP check passed)
     const cachedContext =
       await this.contextGatherer.getCachedContext(identifier);
     if (cachedContext && options.config?.cache?.enabled !== false) {
-      logger.debug("✓ Using cached context");
+      logger.debug("✓ Using cached context (WIP check passed)");
       return cachedContext;
     }
 
@@ -325,7 +402,14 @@ export class Guardian {
       diffStrategyConfig: this.config.features.diffStrategy,
     };
 
-    return await this.contextGatherer.gatherContext(identifier, contextOptions);
+    // Phase 2: fetch diffs only if really needed (WIP check already passed)
+    if (needsDiff) {
+      const contextWithDiff = await this.contextGatherer.gatherContext(identifier, contextOptions);
+      return contextWithDiff;
+    }
+    
+    // Return the lightweight context if no diffs needed
+    return lightweightContext;
   }
 
   /**
@@ -339,6 +423,32 @@ export class Guardian {
     const startTime = Date.now();
 
     try {
+      // Check WIP for this specific operation
+      const isWIPBlocked = await this.checkWIPForOperation(context.pr, options, operation);
+      
+      if (isWIPBlocked) {
+        logger.info(`🚧 Operation '${operation}' skipped - WIP detected`);
+        const wipConfig = this.config.features.wipDetection;
+        return {
+          operation,
+          status: "skipped",
+          data: { 
+            skipped: true, 
+            reason: "WIP detected in PR title",
+            wipDetails: {
+              prId: context.pr.id,
+              prTitle: context.pr.title,
+              matchedPattern: wipConfig ? this.findMatchingWIPPattern(context.pr.title, wipConfig) : "Unknown",
+              action: wipConfig?.action,
+              allowedOperations: wipConfig?.allowedOperationsForWIP || [],
+              currentOperation: operation,
+            }
+          },
+          duration: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
       let data: any;
 
       switch (operation) {
@@ -469,15 +579,64 @@ export class Guardian {
     logger.operation("Code Review", "started");
 
     try {
-      // Gather context specifically for code review
-      const context = await this.contextGatherer.gatherContext(identifier, {
+      // Phase 1: gather without diffs to get PR title fast
+      const contextNoDiff = await this.contextGatherer.gatherContext(identifier, {
+        excludePatterns: options.excludePatterns,
+        contextLines: options.contextLines,
+        includeDiff: false,
+        skipProjectContext: true, // Skip expensive AI processing for WIP check
+      });
+
+      // Check for WIP in standalone review as well
+      const mockOperationOptions = {
+        workspace: options.workspace,
+        repository: options.repository,
+        branch: options.branch,
+        pullRequestId: options.pullRequestId,
+        operations: ["review" as const],
+        dryRun: options.dryRun,
+        verbose: options.verbose,
+      };
+      
+      const isWIPBlocked = await this.checkWIPForOperation(contextNoDiff.pr, mockOperationOptions, "review");
+      
+      if (isWIPBlocked) {
+        logger.operation("Code Review", "completed");
+        const wipConfig = this.config.features.wipDetection;
+        return {
+          violations: [],
+          summary: `Review skipped - WIP detected in PR title: "${contextNoDiff.pr.title}"`,
+          positiveObservations: [],
+          statistics: {
+            filesReviewed: 0,
+            totalIssues: 0,
+            criticalCount: 0,
+            majorCount: 0,
+            minorCount: 0,
+            suggestionCount: 0,
+          },
+          skipped: true,
+          reason: "WIP detected in PR title",
+          wipDetails: {
+            prId: contextNoDiff.pr.id,
+            prTitle: contextNoDiff.pr.title,
+            matchedPattern: wipConfig ? this.findMatchingWIPPattern(contextNoDiff.pr.title, wipConfig) : "Unknown",
+            action: wipConfig?.action,
+            allowedOperations: wipConfig?.allowedOperationsForWIP || [],
+            currentOperation: "review",
+          },
+        };
+      }
+
+      // Phase 2: fetch diffs only if WIP check passed (this line only reached if no WIP)
+      const contextWithDiff = await this.contextGatherer.gatherContext(identifier, {
         excludePatterns: options.excludePatterns,
         contextLines: options.contextLines,
         includeDiff: true,
       });
 
       const result = await this.codeReviewer.reviewCodeWithContext(
-        context,
+        contextWithDiff,
         options,
       );
 
@@ -505,7 +664,54 @@ export class Guardian {
     logger.operation("Description Enhancement", "started");
 
     try {
-      // Gather context specifically for description enhancement
+      // Phase 1: gather without diffs for a quick WIP check
+      const contextNoDiff = await this.contextGatherer.gatherContext(identifier, {
+        includeDiff: false,
+        skipProjectContext: true, // Fast WIP check
+      });
+
+      // Check for WIP in standalone description enhancement as well
+      const mockOperationOptions = {
+        workspace: options.workspace,
+        repository: options.repository,
+        branch: options.branch,
+        pullRequestId: options.pullRequestId,
+        operations: ["enhance-description" as const],
+        dryRun: options.dryRun,
+        verbose: options.verbose,
+      };
+      
+      const isWIPBlocked = await this.checkWIPForOperation(contextNoDiff.pr, mockOperationOptions, "enhance-description");
+      
+      if (isWIPBlocked) {
+        logger.operation("Description Enhancement", "completed");
+        const wipConfig = this.config.features.wipDetection;
+        return {
+          originalDescription: "",
+          enhancedDescription: "",
+          sectionsAdded: [],
+          sectionsEnhanced: [],
+          preservedItems: { media: 0, files: 0, links: 0 },
+          statistics: {
+            originalLength: 0,
+            enhancedLength: 0,
+            completedSections: 0,
+            totalSections: 0,
+          },
+          skipped: true,
+          reason: "WIP detected in PR title",
+          wipDetails: {
+            prId: contextNoDiff.pr.id,
+            prTitle: contextNoDiff.pr.title,
+            matchedPattern: wipConfig ? this.findMatchingWIPPattern(contextNoDiff.pr.title, wipConfig) : "Unknown",
+            action: wipConfig?.action,
+            allowedOperations: wipConfig?.allowedOperationsForWIP || [],
+            currentOperation: "enhance-description",
+          },
+        };
+      }
+
+      // Phase 2: fetch diffs only if WIP check passed
       const context = await this.contextGatherer.gatherContext(identifier, {
         includeDiff: true, // Description enhancement may need to see changes
       });
@@ -589,6 +795,195 @@ export class Guardian {
     cache.clear();
     this.bitbucketProvider?.clearCache();
     logger.info("All caches cleared");
+  }
+
+  /**
+   * Check if ALL operations would be blocked by WIP detection
+   * Only throws if no operations are allowed to proceed
+   */
+  private async checkWIPForAllOperations(
+    pr: any,
+    options: OperationOptions,
+  ): Promise<void> {
+    const wipConfig = this.config.features.wipDetection;
+    
+    if (!wipConfig?.enabled) {
+      return; // WIP detection is disabled
+    }
+
+    const isWIP = this.contextGatherer.detectWIP(pr, wipConfig);
+    
+    if (isWIP) {
+      const wipPattern = this.findMatchingWIPPattern(pr.title, wipConfig);
+      
+      logger.warn(`🚧 WIP detected in PR title: "${pr.title}"`);
+      logger.info(`Matched pattern: "${wipPattern}"`);
+      
+      if (wipConfig.action === "warn") {
+        logger.warn("🚧 WIP detected but continuing with operations (warn mode)");
+        return; // Continue processing but log the warning
+      }
+      
+      if (wipConfig.action === "skip") {
+        // Check if ANY of the requested operations are allowed for WIP PRs
+        const allowedOperations = wipConfig.allowedOperationsForWIP || [];
+        const requestedOperations = options.operations.includes("all") 
+          ? ["review", "enhance-description"] 
+          : options.operations;
+        
+        const hasAllowedOperation = requestedOperations.some(op => 
+          allowedOperations.includes(op as any)
+        );
+        
+        if (hasAllowedOperation) {
+          logger.info("🚧 WIP detected but some operations are allowed for WIP PRs");
+          return; // Allow processing to continue, individual operations will be checked
+        }
+        
+        // No operations are allowed, throw error to skip all
+        logger.info("🚧 All operations skipped - WIP detected in title");
+        
+        const wipError = new GuardianError(
+          "WIP_DETECTED",
+          `All operations skipped - WIP detected in title: "${pr.title}"`,
+          {
+            prId: pr.id,
+            prTitle: pr.title,
+            matchedPattern: wipPattern,
+            action: wipConfig.action,
+            allowedOperations,
+            requestedOperations,
+          }
+        );
+        
+        throw wipError;
+      }
+    }
+  }
+
+  /**
+   * Check if a specific operation should be blocked by WIP detection
+   * Returns true if the operation should be skipped, false if it should proceed
+   */
+  private async checkWIPForOperation(
+    pr: any,
+    options: OperationOptions,
+    currentOperation: OperationType,
+  ): Promise<boolean> {
+    const wipConfig = this.config.features.wipDetection;
+    
+    if (!wipConfig?.enabled) {
+      return false; // WIP detection is disabled
+    }
+
+    const isWIP = this.contextGatherer.detectWIP(pr, wipConfig);
+    
+    if (!isWIP) {
+      return false; // Not a WIP PR
+    }
+    
+    if (wipConfig.action === "warn") {
+      return false; // Warn mode allows all operations
+    }
+    
+    if (wipConfig.action === "skip") {
+      // Check if current operation is allowed for WIP PRs
+      const allowedOperations = wipConfig.allowedOperationsForWIP || [];
+      const isOperationAllowed = allowedOperations.includes(currentOperation);
+      
+      if (isOperationAllowed) {
+        logger.info(`🚧 WIP detected but operation '${currentOperation}' is allowed for WIP PRs`);
+        return false; // Allow this operation to proceed
+      }
+      
+      return true; // Block this operation
+    }
+    
+    return false; // Default to allowing operation
+  }
+
+  /**
+   * Find which WIP pattern matched the PR title
+   */
+  private findMatchingWIPPattern(title: string, config: WIPDetectionConfig | undefined): string {
+    if (!config) {
+      return "Unknown";
+    }
+
+    const patterns = config.patterns || [
+      "WIP",
+      "[WIP]", 
+      "Work in Progress",
+      "DRAFT",
+      "[DRAFT]",
+      "🚧"
+    ];
+
+    const searchTitle = config.caseSensitive ? title : title.toLowerCase();
+
+    for (const pattern of patterns) {
+      const searchPattern = config.caseSensitive ? pattern : pattern.toLowerCase();
+      if (searchTitle.includes(searchPattern)) {
+        return pattern;
+      }
+    }
+
+    return "Unknown"; // Fallback, shouldn't happen if detectWIP returned true
+  }
+
+  /**
+   * Deep merge two configurations, with override taking precedence
+   */
+  private mergeConfigs(base: GuardianConfig, override: Partial<GuardianConfig>): GuardianConfig {
+    const merged = { ...base };
+    
+    // Deep merge features
+    if (override.features) {
+      merged.features = { ...base.features };
+      
+      // Merge each feature section
+      Object.keys(override.features).forEach(key => {
+        const featureKey = key as keyof typeof override.features;
+        if (override.features![featureKey]) {
+          merged.features[featureKey] = {
+            ...base.features[featureKey],
+            ...override.features![featureKey]
+          } as any;
+        }
+      });
+    }
+    
+    // Deep merge providers
+    if (override.providers) {
+      merged.providers = { ...base.providers };
+      
+      if (override.providers.ai) {
+        merged.providers.ai = { ...base.providers.ai, ...override.providers.ai };
+      }
+      
+      if (override.providers.git) {
+        merged.providers.git = { ...base.providers.git, ...override.providers.git };
+        
+        if (override.providers.git.credentials) {
+          merged.providers.git.credentials = {
+            ...base.providers.git.credentials,
+            ...override.providers.git.credentials
+          };
+        }
+      }
+    }
+    
+    // Merge other top-level properties
+    Object.keys(override).forEach(key => {
+      if (key !== 'features' && key !== 'providers') {
+        const configKey = key as keyof GuardianConfig;
+        if (override[configKey] !== undefined) {
+          (merged as any)[configKey] = override[configKey];
+        }
+      }
+    });
+    
+    return merged;
   }
 
   /**

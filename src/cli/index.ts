@@ -213,6 +213,7 @@ function setupEnhanceCommand(): void {
     .option("-b, --branch <branch>", "Branch name")
     .option("-p, --pr <id>", "Pull request ID")
     .option("--no-preserve", "Disable content preservation")
+    .option("--allow-wip", "Allow enhancement for WIP PRs")
     .action(async (options) => {
       try {
         await handleGlobalOptions(options);
@@ -228,7 +229,21 @@ function setupEnhanceCommand(): void {
           ensureRequiredSections: true,
         };
 
-        const guardian = new Guardian();
+        // Create Guardian with WIP override if --allow-wip flag is used
+        const guardianConfig = options.allowWip ? {
+          features: {
+            wipDetection: {
+              enabled: true,
+              patterns: ["WIP", "[WIP]", "Work in Progress", "DRAFT", "[DRAFT]", "🚧"],
+              caseSensitive: false,
+              action: "skip" as const,
+              allowForce: true,
+              allowedOperationsForWIP: ["enhance-description" as const]
+            }
+          }
+        } as Partial<any> : undefined;
+
+        const guardian = new Guardian(guardianConfig);
         await guardian.initialize(options.config);
 
         const spinner = ora("Enhancing PR description...").start();

@@ -52,7 +52,7 @@ features:
       - "Error handling"
       - "Code quality"
     
-    # NEW: Batch Processing Configuration
+    # Batch Processing Configuration
     batchProcessing:
       enabled: true # Enable batch processing for large PRs
       maxFilesPerBatch: 3 # Maximum files to process in each batch
@@ -76,6 +76,22 @@ features:
       - key: "config_changes"
         name: "CAC Config Or Service Config Changes"
         required: true
+
+  # NEW: WIP Detection Configuration
+  wipDetection:
+    enabled: true # Enable WIP detection in PR titles
+    patterns: # Patterns to detect WIP PRs
+      - "WIP"
+      - "[WIP]"
+      - "Work in Progress"
+      - "DRAFT"
+      - "[DRAFT]"
+      - "🚧"
+    caseSensitive: false # Case-insensitive matching
+    action: "skip" # Options: skip (abort review), warn (continue with warning)
+    allowForce: true # Allow forcing review despite WIP (future feature)
+    allowedOperationsForWIP: # Operations that can run even for WIP PRs
+      - "enhance-description" # Allow description enhancement for WIP PRs
 
   # NEW: Diff Strategy Configuration
   diffStrategy:
