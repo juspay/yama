@@ -16,6 +16,9 @@ import {
   BatchResult,
   PrioritizedFile,
   FilePriority,
+  DuplicateDetectionResult,
+  PRComment,
+  IncrementalState,
 } from "../types/index.js";
 import { UnifiedContext } from "../core/ContextGatherer.js";
 import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
@@ -39,7 +42,7 @@ export class CodeReviewer {
   }
 
   /**
-   * Review code using pre-gathered unified context (OPTIMIZED with Batch Processing)
+   * Enhanced review method with AI duplicate detection and incremental analysis
    */
   async reviewCodeWithContext(
     context: UnifiedContext,
@@ -49,14 +52,23 @@ export class CodeReviewer {
 
     try {
       logger.phase("🧪 Conducting AI-powered code analysis...");
-      logger.info(
-        `Analyzing ${context.diffStrategy.fileCount} files using ${context.diffStrategy.strategy} strategy`,
-      );
 
-      // Determine if we should use batch processing
+      // Enhanced logging for incremental vs full analysis
+      if (context.diffStrategy.reason.includes("Incremental")) {
+        logger.success("⚡ INCREMENTAL ANALYSIS MODE");
+        logger.info(`📁 Analyzing ${context.diffStrategy.fileCount} changed files`);
+        logger.info(`🎯 Strategy: ${context.diffStrategy.reason}`);
+      } else {
+        logger.info(
+          `📁 Analyzing ${context.diffStrategy.fileCount} files using ${context.diffStrategy.strategy} strategy`,
+        );
+      }
+
+      // Step 1: Determine if we should use batch processing
       const batchConfig = this.getBatchProcessingConfig();
       const shouldUseBatchProcessing = this.shouldUseBatchProcessing(context, batchConfig);
 
+      // Step 2: Get violations (either full or incremental)
       let violations: Violation[];
       let processingStrategy: "single-request" | "batch-processing";
 
@@ -72,9 +84,15 @@ export class CodeReviewer {
         processingStrategy = "single-request";
       }
 
-      const validatedViolations = this.validateViolations(violations, context);
+      // Step 3: AI duplicate detection (always enabled)
+      const uniqueViolations = await this.filterDuplicatesWithAI(violations, context);
 
+      // Step 4: Validate violations to ensure code snippets exist in diff
+      const validatedViolations = this.validateViolations(uniqueViolations, context);
+
+      // Step 5: Post comments if not dry run (for both single-request and batch processing)
       if (!options.dryRun && validatedViolations.length > 0) {
+        logger.info(`📝 Posting ${validatedViolations.length} comments after ${processingStrategy} analysis`);
         await this.postComments(context, validatedViolations, options);
       }
 
@@ -86,8 +104,15 @@ export class CodeReviewer {
         processingStrategy,
       );
 
+      // Log duplicate detection results
+      const duplicatesFiltered = violations.length - uniqueViolations.length;
+      if (duplicatesFiltered > 0) {
+        logger.info(`🔍 Filtered ${duplicatesFiltered} duplicate violations`);
+      }
+
       logger.success(
-        `Code review completed in ${duration}s: ${validatedViolations.length} violations found (${processingStrategy})`,
+        `Code review completed in ${duration}s: ${validatedViolations.length} violations found ` +
+        `(${duplicatesFiltered} duplicates filtered, ${processingStrategy})`,
       );
 
       return result;
@@ -97,6 +122,19 @@ export class CodeReviewer {
         `Code review failed: ${(error as Error).message}`,
       );
     }
+  }
+
+  /**
+   * Review code using pre-gathered unified context (OPTIMIZED with Batch Processing)
+   * @deprecated Use reviewCodeWithContext instead - this method is kept for compatibility
+   */
+  async reviewCodeWithContextLegacy(
+    context: UnifiedContext,
+    options: ReviewOptions,
+  ): Promise<ReviewResult> {
+    // Delegate to new enhanced method but disable duplicate detection for legacy compatibility
+    const enhancedOptions = { ...options, enableDuplicateDetection: false };
+    return this.reviewCodeWithContext(context, enhancedOptions);
   }
 
   /**
@@ -356,6 +394,7 @@ CRITICAL INSTRUCTION: When identifying issues, you MUST copy the EXACT line from
    */
   private buildCoreAnalysisPrompt(context: UnifiedContext): string {
     const diffContent = this.extractDiffContent(context);
+    const existingIssuesSummary = this.formatExistingIssuesForAI(context.pr.comments || []);
 
     return `Conduct a comprehensive security and quality analysis of this ${context.diffStrategy.strategy === "whole" ? "pull request" : "code changeset"}.
 
@@ -364,9 +403,11 @@ CRITICAL INSTRUCTION: When identifying issues, you MUST copy the EXACT line from
 **Author**: ${context.pr.author}  
 **Description**: ${context.pr.description}
 **Files Changed**: ${context.pr.fileChanges?.length || 0}
-**Existing Comments**: ${JSON.stringify(context.pr.comments || [], null, 2)}
 **Branch**: ${context.identifier.branch}
 **Repository**: ${context.identifier.workspace}/${context.identifier.repository}
+
+## ALREADY REPORTED ISSUES (DO NOT DUPLICATE):
+${existingIssuesSummary}
 
 ## DIFF STRATEGY (${context.diffStrategy.strategy.toUpperCase()}):
 **Reason**: ${context.diffStrategy.reason}
@@ -571,8 +612,24 @@ Return ONLY valid JSON:
       // Simplified, focused prompt without context pollution
       const corePrompt = this.buildCoreAnalysisPrompt(context);
 
+      // Log AI input data for debugging
+      console.log("AI Analysis Prompt -----> ", corePrompt);
+      console.log("AI System Prompt -----> ", this.getSecurityReviewSystemPrompt());
+      console.log("AI Context Data -----> ", aiContext);
+
       // Get safe token limit based on provider
       const safeMaxTokens = this.getSafeTokenLimit();
+      
+      // Log AI configuration for debugging
+      console.log("AI Config -----> ", {
+        provider: this.aiConfig.provider || "auto",
+        model: this.aiConfig.model || "best",
+        temperature: this.aiConfig.temperature || 0.3,
+        maxTokens: safeMaxTokens,
+        timeout: "15m",
+        enableAnalytics: this.aiConfig.enableAnalytics || true,
+        enableEvaluation: false
+      });
       
       logger.debug(`Using AI provider: ${this.aiConfig.provider || "auto"}`);
       logger.debug(`Configured maxTokens: ${this.aiConfig.maxTokens}`);
@@ -600,8 +657,14 @@ Return ONLY valid JSON:
 
       logger.debug("AI analysis completed, parsing response...");
 
+      // Log raw AI response for debugging
+      console.log("Raw AI Response -----> ", result);
+
       // Modern NeuroLink returns { content: string }
       const analysisData = this.parseAIResponse(result);
+
+      // Log parsed analysis data for debugging
+      console.log("Parsed Analysis Data -----> ", analysisData);
 
       // Display AI response for debugging
       if (logger.getConfig().verbose) {
@@ -1790,6 +1853,459 @@ Return ONLY valid JSON:
     return languageMap[ext || ""] || "text";
   }
 
+  /**
+   * Format existing issues for AI to avoid duplicates
+   */
+  private formatExistingIssuesForAI(comments: any[]): string {
+    if (!comments || comments.length === 0) {
+      return "No existing issues reported on this PR.";
+    }
+
+    // Filter to only Yama comments
+    const yamaComments = comments.filter(comment => this.isYamaComment(comment));
+
+    if (yamaComments.length === 0) {
+      return "No existing Yama-generated issues found. This is a fresh analysis.";
+    }
+
+    // Extract issues from Yama comments with improved parsing
+    const existingIssues = this.extractYamaIssuesFromComments(yamaComments);
+
+    if (existingIssues.length === 0) {
+      return "Found Yama comments but could not extract specific issues. Proceed with caution to avoid duplicates.";
+    }
+
+    // Clean and validate extracted issues
+    const cleanedIssues = this.cleanAndValidateExtractedIssues(existingIssues);
+
+    if (cleanedIssues.length === 0) {
+      return "Found Yama comments but extracted issues were malformed. Proceed with caution to avoid duplicates.";
+    }
+
+    // Group issues by category for better AI understanding
+    const issuesByCategory = this.groupIssuesByCategory(cleanedIssues);
+
+    // Format for AI consumption with clear, clean structure
+    let summary = `Found ${cleanedIssues.length} existing issues that have already been reported. DO NOT report similar issues:\n\n`;
+    
+    // Add category-based summary with clean formatting
+    summary += `## ISSUES BY CATEGORY:\n`;
+    Object.entries(issuesByCategory).forEach(([category, issues]) => {
+      summary += `### ${category.toUpperCase()} (${issues.length} issues):\n`;
+      issues.forEach((issue, index) => {
+        // Clean title and ensure it's meaningful
+        const cleanTitle = this.cleanIssueTitle(issue.title);
+        if (!cleanTitle || cleanTitle.length < 5) {
+          return; // Skip malformed issues
+        }
+
+        summary += `${index + 1}. **${cleanTitle}**`;
+        if (issue.file && issue.file !== 'general' && !issue.file.includes('╭')) {
+          summary += ` in \`${issue.file}\``;
+        }
+        summary += ` (${issue.severity}) - ${category}\n`;
+        
+        if (issue.description && issue.description !== cleanTitle) {
+          const cleanDescription = this.cleanIssueDescription(issue.description);
+          if (cleanDescription && cleanDescription.length > 10) {
+            summary += `   Description: ${cleanDescription}\n`;
+          }
+        }
+        
+        if (issue.codeSnippet) {
+          const cleanCode = issue.codeSnippet
+            .replace(/[╭╮╯╰─│┌┐└┘├┤┬┴┼]/g, '') // Remove box drawing characters
+            .replace(/^\s*[+\-\s]/, '') // Remove diff prefixes
+            .trim();
+          if (cleanCode && cleanCode.length > 5) {
+            summary += `   Code: \`${cleanCode.substring(0, 80)}${cleanCode.length > 80 ? '...' : ''}\`\n`;
+          }
+        }
+      });
+      summary += '\n';
+    });
+
+    summary += `**CRITICAL: Do NOT report any violations that are semantically similar to the above existing issues. Focus on genuinely new problems.**\n`;
+
+    return summary;
+  }
+
+  /**
+   * Extract structured issues from Yama comments with improved parsing
+   */
+  private extractYamaIssuesFromComments(yamaComments: any[]): Array<{
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  }> {
+    const issues: Array<{
+      title: string;
+      description: string;
+      file?: string;
+      severity: string;
+      category: string;
+      codeSnippet?: string;
+    }> = [];
+
+    for (const comment of yamaComments) {
+      try {
+        const text = comment.text || comment.content || '';
+        
+        // Skip if text contains malformed Unicode artifacts
+        if (this.containsUnicodeArtifacts(text)) {
+          logger.debug("Skipping comment with Unicode artifacts");
+          continue;
+        }
+
+        // Try multiple parsing strategies
+        const extractedIssue = this.parseYamaCommentMultiStrategy(text, comment);
+        
+        if (extractedIssue) {
+          issues.push(extractedIssue);
+        }
+      } catch (error) {
+        logger.debug(`Error parsing Yama comment: ${(error as Error).message}`);
+        continue;
+      }
+    }
+
+    logger.debug(`Extracted ${issues.length} issues from ${yamaComments.length} Yama comments`);
+    return issues;
+  }
+
+  /**
+   * Group issues by category for better AI understanding
+   */
+  private groupIssuesByCategory(issues: Array<{
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  }>): Record<string, Array<{
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  }>> {
+    const grouped: Record<string, Array<{
+      title: string;
+      description: string;
+      file?: string;
+      severity: string;
+      category: string;
+      codeSnippet?: string;
+    }>> = {};
+
+    for (const issue of issues) {
+      const category = issue.category || 'general';
+      if (!grouped[category]) {
+        grouped[category] = [];
+      }
+      grouped[category].push(issue);
+    }
+
+    return grouped;
+  }
+
+  /**
+   * Check if text contains Unicode artifacts that indicate parsing issues
+   */
+  private containsUnicodeArtifacts(text: string): boolean {
+    // Check for box drawing characters and other artifacts
+    const unicodeArtifacts = /[╭╮╯╰─│┌┐└┘├┤┬┴┼]/;
+    return unicodeArtifacts.test(text);
+  }
+
+  /**
+   * Parse Yama comment using multiple strategies
+   */
+  private parseYamaCommentMultiStrategy(text: string, comment: any): {
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  } | null {
+    // Strategy 1: Use BitbucketProvider's analyzeComment method
+    try {
+      const analysis = this.bitbucketProvider.analyzeComment(comment);
+      
+      if (analysis.issueDescription && analysis.violationType) {
+        return {
+          title: analysis.issueDescription,
+          description: analysis.issueDescription,
+          file: analysis.filePath,
+          severity: this.extractSeverityFromComment(text),
+          category: analysis.violationType,
+          codeSnippet: this.extractCodeSnippetFromComment(text),
+        };
+      }
+    } catch (error) {
+      // Continue to next strategy
+    }
+
+    // Strategy 2: Parse structured Yama comment format
+    const structuredIssue = this.parseStructuredYamaComment(text);
+    if (structuredIssue) {
+      return structuredIssue;
+    }
+
+    // Strategy 3: Extract from markdown headers
+    const headerIssue = this.parseMarkdownHeaderIssue(text);
+    if (headerIssue) {
+      return headerIssue;
+    }
+
+    // Strategy 4: Simple pattern matching fallback
+    return this.parseSimplePatternIssue(text);
+  }
+
+  /**
+   * Parse structured Yama comment format
+   */
+  private parseStructuredYamaComment(text: string): {
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  } | null {
+    // Look for the standard Yama format
+    const issueMatch = text.match(/\*\*Issue\*\*:\s*([^\n]+)/i);
+    const categoryMatch = text.match(/\*\*Category\*\*:\s*([^\n]+)/i);
+    
+    if (issueMatch) {
+      return {
+        title: issueMatch[1].trim(),
+        description: issueMatch[1].trim(),
+        severity: this.extractSeverityFromComment(text),
+        category: categoryMatch ? this.cleanCategoryName(categoryMatch[1].trim()) : 'general',
+        codeSnippet: this.extractCodeSnippetFromComment(text),
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Parse markdown header-based issue format
+   */
+  private parseMarkdownHeaderIssue(text: string): {
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  } | null {
+    // Look for markdown headers with issue titles
+    const headerMatch = text.match(/\*\*([^*]+)\*\*/);
+    
+    if (headerMatch) {
+      const title = headerMatch[1].trim();
+      
+      // Skip if title contains artifacts
+      if (this.containsUnicodeArtifacts(title) || title.length < 5) {
+        return null;
+      }
+
+      return {
+        title,
+        description: title,
+        severity: this.extractSeverityFromComment(text),
+        category: this.inferCategoryFromText(text),
+        codeSnippet: this.extractCodeSnippetFromComment(text),
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Simple pattern matching fallback
+   */
+  private parseSimplePatternIssue(text: string): {
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  } | null {
+    // Extract first meaningful line as title
+    const lines = text.split('\n').filter(line => {
+      const trimmed = line.trim();
+      return trimmed && 
+             !trimmed.includes('🛡️') && 
+             !trimmed.includes('---') &&
+             !trimmed.includes('**Category**') &&
+             !this.containsUnicodeArtifacts(trimmed) &&
+             trimmed.length > 10;
+    });
+    
+    if (lines.length > 0) {
+      const title = lines[0].trim().replace(/^\*+|\*+$/g, ''); // Remove markdown asterisks
+      
+      return {
+        title,
+        description: title,
+        severity: this.extractSeverityFromComment(text),
+        category: this.inferCategoryFromText(text),
+        codeSnippet: this.extractCodeSnippetFromComment(text),
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Clean and validate extracted issues
+   */
+  private cleanAndValidateExtractedIssues(issues: Array<{
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  }>): Array<{
+    title: string;
+    description: string;
+    file?: string;
+    severity: string;
+    category: string;
+    codeSnippet?: string;
+  }> {
+    return issues.filter(issue => {
+      // Filter out issues with malformed titles
+      if (!issue.title || issue.title.length < 5) {
+        return false;
+      }
+
+      // Filter out issues with Unicode artifacts
+      if (this.containsUnicodeArtifacts(issue.title)) {
+        return false;
+      }
+
+      // Filter out issues with generic/meaningless titles
+      const genericTitles = ['issue', 'problem', 'error', 'warning', 'suggestion'];
+      if (genericTitles.includes(issue.title.toLowerCase())) {
+        return false;
+      }
+
+      return true;
+    }).map(issue => ({
+      ...issue,
+      title: this.cleanIssueTitle(issue.title),
+      description: this.cleanIssueDescription(issue.description),
+      category: this.cleanCategoryName(issue.category),
+    }));
+  }
+
+  /**
+   * Clean issue title by removing artifacts and formatting
+   */
+  private cleanIssueTitle(title: string): string {
+    return title
+      .replace(/[╭╮╯╰─│┌┐└┘├┤┬┴┼]/g, '') // Remove box drawing characters
+      .replace(/^\*+|\*+$/g, '') // Remove markdown asterisks
+      .replace(/^#+\s*/, '') // Remove markdown headers
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+  }
+
+  /**
+   * Clean issue description
+   */
+  private cleanIssueDescription(description: string): string {
+    return description
+      .replace(/[╭╮╯╰─│┌┐└┘├┤┬┴┼]/g, '') // Remove box drawing characters
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+  }
+
+  /**
+   * Clean category name
+   */
+  private cleanCategoryName(category: string): string {
+    return category
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '') // Keep only alphanumeric and underscore
+      .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+      .trim() || 'general';
+  }
+
+
+  /**
+   * Infer category from text content
+   */
+  private inferCategoryFromText(text: string): string {
+    const lowerText = text.toLowerCase();
+    
+    if (lowerText.includes('security') || lowerText.includes('🔒') || 
+        lowerText.includes('vulnerability') || lowerText.includes('injection')) {
+      return 'security';
+    }
+    
+    if (lowerText.includes('performance') || lowerText.includes('⚡') ||
+        lowerText.includes('optimization') || lowerText.includes('slow')) {
+      return 'performance';
+    }
+    
+    if (lowerText.includes('maintainability') || lowerText.includes('🏗️') ||
+        lowerText.includes('refactor') || lowerText.includes('clean')) {
+      return 'maintainability';
+    }
+    
+    if (lowerText.includes('functionality') || lowerText.includes('⚙️') ||
+        lowerText.includes('bug') || lowerText.includes('error')) {
+      return 'functionality';
+    }
+    
+    return 'general';
+  }
+
+  /**
+   * Extract severity from comment text
+   */
+  private extractSeverityFromComment(text: string): string {
+    const severityMatch = text.match(/(CRITICAL|MAJOR|MINOR|SUGGESTION)/i);
+    return severityMatch ? severityMatch[1].toUpperCase() : 'UNKNOWN';
+  }
+
+  /**
+   * Extract code snippet from comment text
+   */
+  private extractCodeSnippetFromComment(text: string): string | undefined {
+    // Look for code blocks in markdown
+    const codeBlockMatch = text.match(/```[\s\S]*?\n([\s\S]*?)\n```/);
+    if (codeBlockMatch) {
+      return codeBlockMatch[1]
+        .replace(/[╭╮╯╰─│┌┐└┘├┤┬┴┼]/g, '') // Remove box drawing characters
+        .replace(/^\s*[+\-\s]/, '') // Remove diff prefixes
+        .trim();
+    }
+
+    // Look for inline code
+    const inlineCodeMatch = text.match(/`([^`]+)`/);
+    if (inlineCodeMatch) {
+      return inlineCodeMatch[1]
+        .replace(/[╭╮╯╰─│┌┐└┘├┤┬┴┼]/g, '') // Remove box drawing characters
+        .replace(/^\s*[+\-\s]/, '') // Remove diff prefixes
+        .trim();
+    }
+
+    return undefined;
+  }
 
   /**
    * Generate all possible path variations for a file
@@ -1838,6 +2354,467 @@ Return ONLY valid JSON:
     }
 
     return Array.from(variations);
+  }
+
+  // ============================================================================
+  // AI DUPLICATE DETECTION METHODS
+  // ============================================================================
+
+  /**
+   * Filter duplicate violations using AI-powered semantic analysis
+   */
+  private async filterDuplicatesWithAI(
+    newViolations: Violation[],
+    context: UnifiedContext,
+  ): Promise<Violation[]> {
+    if (newViolations.length === 0) {
+      return newViolations;
+    }
+
+    try {
+      // Log input data for debugging
+      console.log("New Violations Input -----> ", newViolations);
+
+      // Step 1: Filter duplicates against existing comments
+      const existingComments = context.pr.comments || [];
+      
+      // Log existing comments for debugging
+      console.log("Existing Comments -----> ", existingComments);
+      
+      logger.info(`🔍 Found ${existingComments.length} existing comments on PR #${context.pr.id}`);
+      
+      let uniqueVsExisting = newViolations;
+      
+      if (existingComments.length > 0) {
+        // Filter to only Yama comments for duplicate detection
+        const yamaComments = existingComments.filter(comment => 
+          this.isYamaComment(comment)
+        );
+
+        logger.info(`🤖 Identified ${yamaComments.length} Yama comments for duplicate detection`);
+        
+        if (yamaComments.length > 0) {
+          // Log details about existing Yama comments
+          logger.debug("📋 Existing Yama comments:");
+          yamaComments.forEach((comment, index) => {
+            const analysis = this.bitbucketProvider.analyzeComment(comment);
+            logger.debug(`   ${index + 1}. ${analysis.issueDescription} (${analysis.violationType}) in ${analysis.filePath || 'general'}`);
+          });
+
+          logger.info(`🔄 Checking ${newViolations.length} new violations against existing comments...`);
+
+          // Use AI to detect duplicates against existing comments
+          const deduplicationPrompt = this.buildDuplicateDetectionPrompt(newViolations, yamaComments);
+          
+          // Log duplicate detection input for debugging
+          console.log("Duplicate Detection Prompt -----> ", deduplicationPrompt);
+          console.log("Existing Comments for AI -----> ", yamaComments);
+          console.log("New Violations for AI -----> ", newViolations);
+          
+          const result = await this.analyzeWithAI(deduplicationPrompt, context);
+
+          // Log duplicate detection AI response for debugging
+          console.log("Duplicate Detection AI Response -----> ", result);
+
+          // Parse the duplicate detection result
+          uniqueVsExisting = this.parseDuplicateDetectionResult(result, newViolations);
+
+          // Log unique violations after existing filter for debugging
+          console.log("Unique Violations After Existing Filter -----> ", uniqueVsExisting);
+
+          const duplicatesVsExisting = newViolations.length - uniqueVsExisting.length;
+          
+          if (duplicatesVsExisting > 0) {
+            logger.info(`🚫 Filtered ${duplicatesVsExisting} violations duplicate with existing comments`);
+          }
+        }
+      }
+
+      // Step 2: Filter intra-batch duplicates (new violations against each other)
+      logger.info(`🔄 Checking for duplicates within ${uniqueVsExisting.length} new violations...`);
+      
+      const finalUniqueViolations = await this.filterIntraBatchDuplicates(uniqueVsExisting, context);
+      
+      // Log final unique violations for debugging
+      console.log("Final Unique Violations -----> ", finalUniqueViolations);
+      
+      const intraBatchDuplicates = uniqueVsExisting.length - finalUniqueViolations.length;
+      
+      if (intraBatchDuplicates > 0) {
+        logger.info(`🚫 Filtered ${intraBatchDuplicates} intra-batch duplicate violations`);
+      }
+
+      // Final summary
+      const totalFiltered = newViolations.length - finalUniqueViolations.length;
+      
+      if (totalFiltered > 0) {
+        logger.info(`🚫 Total filtered: ${totalFiltered} duplicate violations`);
+        logger.success(`✅ Posting ${finalUniqueViolations.length} unique violations`);
+      } else {
+        logger.success(`✅ All ${newViolations.length} violations are unique, posting all`);
+      }
+
+      return finalUniqueViolations;
+    } catch (error) {
+      logger.warn(`⚠️ Duplicate detection failed, proceeding with all violations: ${(error as Error).message}`);
+      return newViolations;
+    }
+  }
+
+  /**
+   * Check if a comment is generated by Yama
+   */
+  private isYamaComment(comment: any): boolean {
+    const text = comment.text || comment.content || '';
+    const author = comment.author?.name || comment.author?.displayName || '';
+    
+    return text.includes('🛡️ Automated review by **Yama**') ||
+           text.includes('Powered by Yama AI') ||
+           author.toLowerCase().includes('yama') ||
+           text.includes('⚔️ **YAMA REVIEW REPORT**');
+  }
+
+  /**
+   * Build AI prompt for duplicate detection
+   */
+  private buildDuplicateDetectionPrompt(
+    newViolations: Violation[],
+    existingComments: any[]
+  ): string {
+    return `TASK: Identify and remove duplicate code review violations.
+
+EXISTING YAMA COMMENTS ON THIS PR:
+${JSON.stringify(existingComments, null, 2)}
+
+NEW VIOLATIONS TO CHECK:
+${JSON.stringify(newViolations, null, 2)}
+
+DUPLICATE DETECTION RULES:
+1. Remove violations that address the same underlying issue as existing Yama comments
+2. Consider violations duplicate if they:
+   - Target the same security/quality concern in the same file
+   - Have the same violation type with similar description
+   - Address the same code pattern issue
+   - Report the same underlying problem with different wording
+3. Keep violations that are genuinely new or different
+4. When in doubt, keep the violation (better to have a potential duplicate than miss a real issue)
+
+IMPORTANT: Only compare against Yama-generated comments, not human comments.
+
+Return ONLY the non-duplicate violations in this JSON format:
+{
+  "uniqueViolations": [
+    /* Only violations that are NOT duplicates */
+  ],
+  "duplicatesFound": [
+    {
+      "violationIndex": 0,
+      "matchedCommentId": "comment-123",
+      "reason": "Same SQL injection vulnerability already reported",
+      "confidence": 0.95
+    }
+  ]
+}`;
+  }
+
+  /**
+   * Parse duplicate detection result from AI response
+   */
+  private parseDuplicateDetectionResult(
+    aiResult: any,
+    originalViolations: Violation[]
+  ): Violation[] {
+    try {
+      // The AI result should already be parsed by analyzeWithAI
+      if (aiResult && aiResult.uniqueViolations && Array.isArray(aiResult.uniqueViolations)) {
+        return aiResult.uniqueViolations;
+      }
+
+      // Fallback: if AI response doesn't have the expected format, return all violations
+      logger.debug("AI duplicate detection response format unexpected, returning all violations");
+      return originalViolations;
+    } catch (error) {
+      logger.debug(`Error parsing duplicate detection result: ${(error as Error).message}`);
+      return originalViolations;
+    }
+  }
+
+  /**
+   * Filter intra-batch duplicates (new violations against each other)
+   */
+  private async filterIntraBatchDuplicates(
+    violations: Violation[],
+    context: UnifiedContext,
+  ): Promise<Violation[]> {
+    if (violations.length <= 1) {
+      return violations; // No duplicates possible with 0 or 1 violations
+    }
+
+    try {
+      // Log violations for intra-batch analysis for debugging
+      console.log("Violations for Intra-Batch Analysis -----> ", violations);
+
+      // Group violations by issue pattern for efficient duplicate detection
+      const violationGroups = this.groupViolationsByPattern(violations);
+      
+      // Log violation groups for debugging
+      console.log("Violation Groups -----> ", violationGroups);
+      
+      // If all violations are in different groups, no duplicates possible
+      if (Object.keys(violationGroups).length === violations.length) {
+        logger.debug("All violations have unique patterns, no intra-batch duplicates");
+        return violations;
+      }
+
+      // Find groups with multiple violations (potential duplicates)
+      const duplicateGroups = Object.entries(violationGroups).filter(
+        ([_, groupViolations]) => groupViolations.length > 1
+      );
+
+      if (duplicateGroups.length === 0) {
+        logger.debug("No violation groups with multiple items, no intra-batch duplicates");
+        return violations;
+      }
+
+      logger.debug(`Found ${duplicateGroups.length} groups with potential duplicates`);
+
+      // Use AI to analyze each group for semantic duplicates
+      const uniqueViolations: Violation[] = [];
+      
+      for (const [pattern, groupViolations] of Object.entries(violationGroups)) {
+        if (groupViolations.length === 1) {
+          // Single violation in group, definitely unique
+          uniqueViolations.push(groupViolations[0]);
+        } else {
+          // Multiple violations in group, use AI to deduplicate
+          logger.debug(`Analyzing ${groupViolations.length} violations with pattern: ${pattern}`);
+          
+          // Log intra-batch prompt input for debugging
+          console.log("Intra-Batch Prompt -----> ", this.buildIntraBatchDeduplicationPrompt(groupViolations));
+          console.log("Group Violations for AI -----> ", groupViolations);
+          
+          const deduplicatedGroup = await this.deduplicateViolationGroup(
+            groupViolations,
+            context
+          );
+          
+          uniqueViolations.push(...deduplicatedGroup);
+          
+          const filtered = groupViolations.length - deduplicatedGroup.length;
+          if (filtered > 0) {
+            logger.debug(`   Filtered ${filtered} duplicates from group: ${pattern}`);
+          }
+        }
+      }
+
+      // Log unique violations after intra-batch filter for debugging
+      console.log("Unique Violations After Intra-Batch Filter -----> ", uniqueViolations);
+
+      return uniqueViolations;
+    } catch (error) {
+      logger.warn(`Intra-batch duplicate detection failed: ${(error as Error).message}`);
+      return violations;
+    }
+  }
+
+  /**
+   * Group violations by issue pattern for duplicate detection
+   */
+  private groupViolationsByPattern(violations: Violation[]): Record<string, Violation[]> {
+    const groups: Record<string, Violation[]> = {};
+
+    for (const violation of violations) {
+      // Create a pattern key based on issue type and category
+      const pattern = this.createViolationPattern(violation);
+      
+      if (!groups[pattern]) {
+        groups[pattern] = [];
+      }
+      
+      groups[pattern].push(violation);
+    }
+
+    return groups;
+  }
+
+  /**
+   * Create a pattern key for violation grouping
+   */
+  private createViolationPattern(violation: Violation): string {
+    // More aggressive normalization for better duplicate detection
+    const normalizedIssue = violation.issue
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '') // Remove special characters
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/\b(introduces?|causes?|leads?\s+to|results?\s+in|creates?)\b/g, '') // Remove action words
+      .replace(/\b(data|code|security|integrity|risk|issue|problem|vulnerability)\b/g, '') // Remove common words
+      .replace(/\s+/g, ' ') // Normalize whitespace again
+      .trim();
+
+    // Also normalize the message for better pattern matching
+    const normalizedMessage = violation.message
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 100); // First 100 chars for pattern matching
+
+    // Create more comprehensive pattern
+    return `${violation.category}:${normalizedIssue}:${normalizedMessage}`;
+  }
+
+  /**
+   * Deduplicate a group of violations using AI
+   */
+  private async deduplicateViolationGroup(
+    groupViolations: Violation[],
+    context: UnifiedContext,
+  ): Promise<Violation[]> {
+    try {
+      // Log group violations input for debugging
+      console.log("Group Violations Input -----> ", groupViolations);
+
+      const intraBatchPrompt = this.buildIntraBatchDeduplicationPrompt(groupViolations);
+      
+      // Use a special AI analysis method for intra-batch deduplication
+      const result = await this.analyzeIntraBatchWithAI(intraBatchPrompt, context);
+
+      // Log intra-batch AI response for debugging
+      console.log("Intra-Batch AI Response -----> ", result);
+
+      // Parse the result
+      if (result && result.uniqueViolations && Array.isArray(result.uniqueViolations)) {
+        // Log deduplicated group result for debugging
+        console.log("Deduplicated Group Result -----> ", result.uniqueViolations);
+        return result.uniqueViolations;
+      }
+
+      // Fallback: if AI analysis fails, use simple deduplication
+      const simpleResult = this.simpleDeduplicateGroup(groupViolations);
+      console.log("Simple Deduplication Fallback Result -----> ", simpleResult);
+      return simpleResult;
+    } catch (error) {
+      logger.debug(`AI group deduplication failed: ${(error as Error).message}`);
+      return this.simpleDeduplicateGroup(groupViolations);
+    }
+  }
+
+  /**
+   * Build AI prompt for intra-batch duplicate detection
+   */
+  private buildIntraBatchDeduplicationPrompt(violations: Violation[]): string {
+    return `TASK: Remove duplicate violations within this group of similar issues.
+
+VIOLATIONS TO ANALYZE:
+${JSON.stringify(violations, null, 2)}
+
+INTRA-BATCH DEDUPLICATION RULES:
+1. These violations all have similar issue patterns
+2. Remove violations that report the EXACT same issue in the SAME file at the SAME location
+3. Keep violations that are in different files (even if same issue type)
+4. Keep violations that are in different locations within the same file
+5. For truly identical violations (same file, same location, same issue), keep only the most detailed one
+6. When in doubt, keep the violation (better to have a potential duplicate than miss a real issue)
+
+EXAMPLES OF DUPLICATES TO REMOVE:
+- Same "SQL injection" issue at line 45 in login.js (keep most detailed)
+- Same "hardcoded password" at line 12 in config.js (keep most detailed)
+
+EXAMPLES OF NON-DUPLICATES TO KEEP:
+- "SQL injection" in login.js AND "SQL injection" in register.js (different files)
+- "SQL injection" at line 45 AND "SQL injection" at line 67 (different locations)
+
+Return ONLY the unique violations in this JSON format:
+{
+  "uniqueViolations": [
+    /* Only violations that are truly unique */
+  ],
+  "duplicatesRemoved": [
+    {
+      "reason": "Identical SQL injection issue at same location",
+      "keptViolation": "Most detailed version",
+      "removedCount": 2
+    }
+  ]
+}`;
+  }
+
+  /**
+   * Simple deduplication fallback when AI fails
+   */
+  private simpleDeduplicateGroup(violations: Violation[]): Violation[] {
+    const uniqueViolations: Violation[] = [];
+    const seen = new Set<string>();
+
+    for (const violation of violations) {
+      // Create a simple key for exact duplicate detection
+      const key = `${violation.file}:${violation.issue}:${violation.code_snippet}`;
+      
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueViolations.push(violation);
+      }
+    }
+
+    const filtered = violations.length - uniqueViolations.length;
+    if (filtered > 0) {
+      logger.debug(`Simple deduplication removed ${filtered} exact duplicates`);
+    }
+
+    return uniqueViolations;
+  }
+
+  /**
+   * Specialized AI analysis for intra-batch deduplication
+   */
+  private async analyzeIntraBatchWithAI(
+    prompt: string,
+    context: UnifiedContext,
+  ): Promise<any> {
+    try {
+      // Initialize NeuroLink if not already done
+      if (!this.neurolink) {
+        const { NeuroLink } = await import("@juspay/neurolink");
+        this.neurolink = new NeuroLink();
+      }
+
+      // Use a simpler context for intra-batch analysis
+      const aiContext = {
+        operation: "intra-batch-deduplication",
+        repository: `${context.identifier.workspace}/${context.identifier.repository}`,
+        prId: context.identifier.pullRequestId,
+      };
+
+      // Get safe token limit
+      const safeMaxTokens = this.getSafeTokenLimit();
+
+      const result = await this.neurolink.generate({
+        input: { text: prompt },
+        systemPrompt: "You are an expert at identifying duplicate code review violations. Focus on semantic similarity and avoid false positives.",
+        provider: this.aiConfig.provider || "auto",
+        model: this.aiConfig.model || "best",
+        temperature: 0.1, // Very low temperature for consistent deduplication
+        maxTokens: Math.min(safeMaxTokens, 4000), // Smaller limit for deduplication
+        timeout: "5m", // Shorter timeout for deduplication
+        context: aiContext,
+        enableAnalytics: false,
+        enableEvaluation: false,
+      });
+
+      // Log intra-batch AI raw response for debugging
+      console.log("Intra-Batch AI Raw Response -----> ", result);
+
+      // Parse the response
+      const parsedResult = this.parseAIResponse(result);
+
+      // Log intra-batch parsed response for debugging
+      console.log("Intra-Batch Parsed Response -----> ", parsedResult);
+
+      return parsedResult;
+    } catch (error) {
+      logger.debug(`Intra-batch AI analysis failed: ${(error as Error).message}`);
+      throw error;
+    }
   }
 }
 

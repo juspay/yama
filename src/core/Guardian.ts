@@ -459,7 +459,7 @@ export class Guardian {
   async reviewCode(options: ReviewOptions): Promise<any> {
     await this.ensureInitialized();
 
-    const identifier: PRIdentifier = {
+    let identifier: PRIdentifier = {
       workspace: options.workspace,
       repository: options.repository,
       branch: options.branch,
@@ -469,17 +469,70 @@ export class Guardian {
     logger.operation("Code Review", "started");
 
     try {
-      // Gather context specifically for code review
-      const context = await this.contextGatherer.gatherContext(identifier, {
+      // If no PR ID is provided but branch is provided, find the PR first
+      if (!identifier.pullRequestId && identifier.branch) {
+        logger.debug(`Resolving branch ${identifier.branch} to PR ID...`);
+        const prInfo = await this.bitbucketProvider.findPRForBranch(identifier);
+        identifier = {
+          ...identifier,
+          pullRequestId: prInfo.id,
+        };
+        logger.debug(`✅ Resolved to PR #${prInfo.id}: "${prInfo.title}"`);
+      }
+
+      // Use enhanced context gathering with incremental analysis support
+      const contextResult = await this.contextGatherer.gatherContextWithIncremental(identifier, {
         excludePatterns: options.excludePatterns,
         contextLines: options.contextLines,
         includeDiff: true,
+        enableIncrementalAnalysis: options.enableIncrementalAnalysis || false,
       });
+
+      const { context, incrementalState, isIncremental } = contextResult;
+
+      // Enhanced logging for incremental analysis
+      console.log("value of contextResult : ", contextResult);
+      
+      if (isIncremental && incrementalState) {
+        logger.success("🎯 Incremental review mode activated");
+        logger.info(`⚡ Analyzing only changed files since last review`);
+        
+        const totalChanged = incrementalState.newFiles.length + incrementalState.modifiedFiles.length;
+        
+        if (totalChanged === 0) {
+          logger.info("✨ No file changes detected - skipping analysis");
+          return {
+            violations: [],
+            summary: "No changes detected since last review",
+            statistics: {
+              filesReviewed: 0,
+              totalIssues: 0,
+              criticalCount: 0,
+              majorCount: 0,
+              minorCount: 0,
+              suggestionCount: 0,
+              processingStrategy: "incremental-no-changes"
+            }
+          };
+        }
+        
+        logger.info(
+          `📊 Incremental changes: ${incrementalState.newFiles.length} new, ` +
+          `${incrementalState.modifiedFiles.length} modified files (${totalChanged} total to analyze)`
+        );
+      } else {
+        logger.info("🔍 Full review mode - analyzing all files in PR checking");
+      }
 
       const result = await this.codeReviewer.reviewCodeWithContext(
         context,
         options,
       );
+
+      // Update incremental state after successful review
+      if (isIncremental && incrementalState) {
+        await this.contextGatherer.updateIncrementalState(identifier);
+      }
 
       logger.operation("Code Review", "completed");
       return result;

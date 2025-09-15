@@ -255,6 +255,68 @@ export interface ReviewOptions {
   excludePatterns?: string[];
   customRules?: string;
   contextLines?: number;
+  enableIncrementalAnalysis?: boolean;
+  enableDuplicateDetection?: boolean;
+}
+
+// ============================================================================
+// Incremental Analysis Types
+// ============================================================================
+
+export interface IncrementalState {
+  lastAnalyzedCommit: string;
+  lastAnalyzedAt: string;
+  analyzedFiles: string[];
+  useIncremental: boolean;
+  newFiles: string[];
+  modifiedFiles: string[];
+  unchangedFiles: string[];
+}
+
+export interface CommitRangeDiff {
+  fromCommit: string;
+  toCommit: string;
+  newFiles: string[];
+  modifiedFiles: string[];
+  deletedFiles: string[];
+  unchangedFiles: string[];
+  diff: string;
+}
+
+export interface IncrementalAnalysisResult {
+  useIncremental: boolean;
+  filesAnalyzed: number;
+  newFilesCount: number;
+  modifiedFilesCount: number;
+  skippedFilesCount: number;
+  analysisType: "full" | "incremental";
+}
+
+// ============================================================================
+// Duplicate Detection Types
+// ============================================================================
+
+export interface DuplicateDetectionResult {
+  uniqueViolations: Violation[];
+  duplicatesFound: DuplicateMatch[];
+  totalViolations: number;
+  duplicatesFiltered: number;
+}
+
+export interface DuplicateMatch {
+  violationIndex: number;
+  matchedCommentId: string | number;
+  reason: string;
+  confidence: number;
+  matchType: "exact" | "semantic" | "similar";
+}
+
+export interface CommentAnalysis {
+  isYamaComment: boolean;
+  violationType?: ViolationCategory;
+  filePath?: string;
+  lineNumber?: number;
+  issueDescription?: string;
 }
 
 // ============================================================================

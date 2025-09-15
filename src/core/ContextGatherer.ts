@@ -12,6 +12,9 @@ import {
   ProviderError,
   DiffStrategyConfig,
   MemoryBankConfig,
+  IncrementalState,
+  CommitRangeDiff,
+  PRComment,
 } from "../types/index.js";
 import { BitbucketProvider } from "./providers/BitbucketProvider.js";
 import { logger } from "../utils/Logger.js";
@@ -726,6 +729,293 @@ Extract and summarize the content and return ONLY this JSON format:
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
+  }
+
+  /**
+   * Get incremental analysis information for a PR
+   */
+  async getIncrementalAnalysisInfo(identifier: PRIdentifier): Promise<IncrementalState> {
+    const currentCommit = await this.bitbucketProvider.getCurrentCommitSHA(identifier);
+    const lastAnalyzedCommit = this.bitbucketProvider.getLastAnalyzedCommit(identifier);
+    
+    if (!lastAnalyzedCommit || lastAnalyzedCommit === currentCommit) {
+      // First run or no new changes - do full analysis
+      const prInfo = await this.bitbucketProvider.getPRDetails(identifier);
+      
+      return {
+        lastAnalyzedCommit: currentCommit,
+        lastAnalyzedAt: new Date().toISOString(),
+        analyzedFiles: prInfo.fileChanges || [],
+        useIncremental: false,
+        newFiles: prInfo.fileChanges || [],
+        modifiedFiles: [],
+        unchangedFiles: []
+      };
+    }
+    
+    // Get incremental changes
+    try {
+      const incrementalDiff = await this.bitbucketProvider.getCommitRangeDiff(
+        identifier,
+        lastAnalyzedCommit,
+        currentCommit
+      );
+      
+      return {
+        lastAnalyzedCommit,
+        lastAnalyzedAt: new Date().toISOString(),
+        analyzedFiles: [
+          ...incrementalDiff.newFiles,
+          ...incrementalDiff.modifiedFiles,
+          ...incrementalDiff.unchangedFiles
+        ],
+        useIncremental: true,
+        newFiles: incrementalDiff.newFiles,
+        modifiedFiles: incrementalDiff.modifiedFiles,
+        unchangedFiles: incrementalDiff.unchangedFiles
+      };
+    } catch (error) {
+      logger.debug(`Incremental diff failed, falling back to full analysis: ${(error as Error).message}`);
+      
+      // Fallback to full analysis
+      const prInfo = await this.bitbucketProvider.getPRDetails(identifier);
+      
+      return {
+        lastAnalyzedCommit: currentCommit,
+        lastAnalyzedAt: new Date().toISOString(),
+        analyzedFiles: prInfo.fileChanges || [],
+        useIncremental: false,
+        newFiles: prInfo.fileChanges || [],
+        modifiedFiles: [],
+        unchangedFiles: []
+      };
+    }
+  }
+
+  /**
+   * Update incremental analysis state after successful review
+   */
+  async updateIncrementalState(identifier: PRIdentifier): Promise<void> {
+    const currentCommit = await this.bitbucketProvider.getCurrentCommitSHA(identifier);
+    this.bitbucketProvider.updateLastAnalyzedCommit(identifier, currentCommit);
+    
+    logger.debug(`Updated incremental state for PR ${identifier.pullRequestId}: commit ${currentCommit}`);
+  }
+
+  /**
+   * Get all PR comments with enhanced filtering for duplicate detection
+   */
+  async getPRComments(
+    identifier: PRIdentifier,
+    options: {
+      includeYamaComments?: boolean;
+      includeResolved?: boolean;
+      sinceDate?: string;
+    } = {}
+  ): Promise<PRComment[]> {
+    return await this.bitbucketProvider.getPRComments(identifier, options);
+  }
+
+  /**
+   * Create incremental context for analyzing only changed files
+   */
+  async createIncrementalContext(
+    baseContext: UnifiedContext,
+    incrementalState: IncrementalState
+  ): Promise<UnifiedContext> {
+    const filesToAnalyze = [
+      ...incrementalState.newFiles,
+      ...incrementalState.modifiedFiles
+    ];
+
+    if (filesToAnalyze.length === 0) {
+      // No files to analyze, return minimal context
+      return {
+        ...baseContext,
+        diffStrategy: {
+          strategy: "file-by-file",
+          reason: "No new or modified files to analyze",
+          fileCount: 0,
+          estimatedSize: "0 KB"
+        },
+        fileDiffs: new Map(),
+        pr: {
+          ...baseContext.pr,
+          fileChanges: []
+        }
+      };
+    }
+
+    // Get diffs only for changed files
+    const incrementalFileDiffs = new Map<string, string>();
+    
+    logger.debug(`Creating incremental context for ${filesToAnalyze.length} files`);
+    
+    // Process files in batches
+    const batchSize = 5;
+    for (let i = 0; i < filesToAnalyze.length; i += batchSize) {
+      const batch = filesToAnalyze.slice(i, i + batchSize);
+      
+      const batchPromises = batch.map(async (file) => {
+        try {
+          const fileDiff = await this.bitbucketProvider.getPRDiff(
+            baseContext.identifier,
+            3, // context lines
+            ["*.lock", "*.svg"], // exclude patterns
+            [file] // include only this file
+          );
+          return { file, diff: fileDiff.diff };
+        } catch (error) {
+          logger.debug(`Failed to get diff for ${file}: ${(error as Error).message}`);
+          return { file, diff: '' };
+        }
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      
+      batchResults.forEach(({ file, diff }) => {
+        if (diff) {
+          incrementalFileDiffs.set(file, diff);
+        }
+      });
+      
+      // Small delay between batches
+      if (i + batchSize < filesToAnalyze.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+
+    return {
+      ...baseContext,
+      diffStrategy: {
+        strategy: "file-by-file",
+        reason: `Incremental analysis: ${incrementalState.newFiles.length} new, ${incrementalState.modifiedFiles.length} modified files`,
+        fileCount: filesToAnalyze.length,
+        estimatedSize: this.estimateDiffSize(filesToAnalyze.length)
+      },
+      fileDiffs: incrementalFileDiffs,
+      pr: {
+        ...baseContext.pr,
+        fileChanges: filesToAnalyze
+      }
+    };
+  }
+
+  /**
+   * Enhanced context gathering with incremental analysis support
+   */
+  async gatherContextWithIncremental(
+    identifier: PRIdentifier,
+    options: {
+      excludePatterns?: string[];
+      contextLines?: number;
+      forceRefresh?: boolean;
+      includeDiff?: boolean;
+      diffStrategyConfig?: DiffStrategyConfig;
+      enableIncrementalAnalysis?: boolean;
+    } = {}
+  ): Promise<{
+    context: UnifiedContext;
+    incrementalState?: IncrementalState;
+    isIncremental: boolean;
+  }> {
+    // First gather base context
+    const baseContext = await this.gatherContext(identifier, options);
+    
+    console.log("value of options.enableIncrementalAnalysis: ", options.enableIncrementalAnalysis);
+    
+    if (!options.enableIncrementalAnalysis) {
+      logger.info("🔍 FULL REVIEW MODE - Incremental analysis disabled");
+      return {
+        context: baseContext,
+        isIncremental: false
+      };
+    }
+
+    // Start incremental analysis evaluation
+    logger.phase("🔄 Starting incremental analysis evaluation...");
+
+    // Get incremental analysis info
+    const incrementalState = await this.getIncrementalAnalysisInfo(identifier);
+    
+    if (!incrementalState.useIncremental) {
+      logger.phase("🔍 FULL REVIEW STARTED");
+      logger.info(`📊 Full Analysis Details:`);
+      logger.info(`   • Reason: ${incrementalState.lastAnalyzedCommit ? 'No new changes detected' : 'First run or no previous state'}`);
+      logger.info(`   • Total files in PR: ${baseContext.pr.fileChanges?.length || 0}`);
+      
+      return {
+        context: baseContext,
+        incrementalState,
+        isIncremental: false
+      };
+    }
+
+    // Get current commit for logging
+    const currentCommit = await this.bitbucketProvider.getCurrentCommitSHA(identifier);
+    
+    // Log incremental review start with detailed information
+    logger.phase("⚡ INCREMENTAL REVIEW STARTED");
+    logger.info(`📊 Incremental Analysis Details:`);
+    logger.info(`   • Last analyzed commit: ${incrementalState.lastAnalyzedCommit?.substring(0, 8)}...`);
+    logger.info(`   • Current commit: ${currentCommit.substring(0, 8)}...`);
+    logger.info(`   • New files: ${incrementalState.newFiles.length}`);
+    logger.info(`   • Modified files: ${incrementalState.modifiedFiles.length}`);
+    logger.info(`   • Unchanged files: ${incrementalState.unchangedFiles.length}`);
+    
+    const totalFilesToAnalyze = incrementalState.newFiles.length + incrementalState.modifiedFiles.length;
+    logger.info(`   • Total files to analyze: ${totalFilesToAnalyze}`);
+
+    // Check for no-change scenario
+    if (totalFilesToAnalyze === 0) {
+      logger.success("✨ No file changes detected since last review");
+      logger.info("🎯 Skipping analysis - no new violations expected");
+      
+      // Return minimal context for no-change scenario
+      const noChangeContext = {
+        ...baseContext,
+        diffStrategy: {
+          strategy: "file-by-file" as const,
+          reason: "No new or modified files to analyze",
+          fileCount: 0,
+          estimatedSize: "0 KB"
+        },
+        fileDiffs: new Map(),
+        pr: {
+          ...baseContext.pr,
+          fileChanges: []
+        }
+      };
+
+      return {
+        context: noChangeContext,
+        incrementalState,
+        isIncremental: true
+      };
+    }
+
+    // Create incremental context
+    logger.info(`🔄 Creating incremental context for ${totalFilesToAnalyze} changed files...`);
+    const incrementalContext = await this.createIncrementalContext(
+      baseContext,
+      incrementalState
+    );
+
+    // Log file details if in debug mode
+    if (incrementalState.newFiles.length > 0) {
+      logger.debug(`📁 New files: ${incrementalState.newFiles.join(', ')}`);
+    }
+    if (incrementalState.modifiedFiles.length > 0) {
+      logger.debug(`📝 Modified files: ${incrementalState.modifiedFiles.join(', ')}`);
+    }
+
+    logger.success(`🎯 Incremental context ready - analyzing ${totalFilesToAnalyze} changed files`);
+
+    return {
+      context: incrementalContext,
+      incrementalState,
+      isIncremental: true
+    };
   }
 
   /**

@@ -9,6 +9,9 @@ import {
   PRDiff,
   GitCredentials,
   ProviderError,
+  PRComment,
+  CommitRangeDiff,
+  CommentAnalysis,
 } from "../../types/index.js";
 import { logger } from "../../utils/Logger.js";
 import { cache, Cache } from "../../utils/Cache.js";
@@ -133,7 +136,7 @@ export class BitbucketProvider {
   }
 
   /**
-   * Find PR for branch with intelligent caching
+   * Find PR for branch with intelligent caching and enhanced error handling
    */
   async findPRForBranch(identifier: PRIdentifier): Promise<PRInfo> {
     await this.initialize();
@@ -148,51 +151,86 @@ export class BitbucketProvider {
     return cache.getOrSet(
       cacheKey,
       async () => {
-        logger.debug(
-          `Finding PR for branch: ${workspace}/${repository}@${branch}`,
+        logger.info(
+          `🔍 Finding PR for branch: ${workspace}/${repository}@${branch}`,
         );
 
-        const rawBranchData = await this.branchHandlers.handleGetBranch({
-          workspace,
-          repository,
-          branch_name: branch,
-          include_merged_prs: false,
-        });
+        try {
+          const rawBranchData = await this.branchHandlers.handleGetBranch({
+            workspace,
+            repository,
+            branch_name: branch,
+            include_merged_prs: false,
+          });
 
-        const branchData = this.parseMCPResponse(rawBranchData);
+          const branchData = this.parseMCPResponse(rawBranchData);
 
-        // Direct data extraction
-        if (
-          (branchData as any).open_pull_requests &&
-          (branchData as any).open_pull_requests.length > 0
-        ) {
-          const firstPR = (branchData as any).open_pull_requests[0];
-          // Debug author data structure
-          logger.debug(
-            `Author data structure: ${JSON.stringify(firstPR.author, null, 2)}`,
+          // Enhanced logging for debugging
+          logger.debug(`Branch data keys: ${Object.keys(branchData as any).join(", ")}`);
+          
+          if ((branchData as any).open_pull_requests) {
+            logger.info(`📋 Found ${(branchData as any).open_pull_requests.length} open PRs for branch ${branch}`);
+          } else {
+            logger.warn(`⚠️ No 'open_pull_requests' field in branch data for ${branch}`);
+            logger.debug(`Available fields: ${Object.keys(branchData as any).join(", ")}`);
+          }
+
+          // Direct data extraction
+          if (
+            (branchData as any).open_pull_requests &&
+            (branchData as any).open_pull_requests.length > 0
+          ) {
+            const firstPR = (branchData as any).open_pull_requests[0];
+            
+            logger.success(`✅ Found PR #${firstPR.id}: "${firstPR.title}"`);
+            logger.debug(`PR author: ${JSON.stringify(firstPR.author, null, 2)}`);
+            logger.debug(`PR keys: ${Object.keys(firstPR).join(", ")}`);
+
+            return {
+              id: firstPR.id,
+              title: firstPR.title,
+              description: firstPR.description || "",
+              author:
+                firstPR.author?.displayName ||
+                firstPR.author?.name ||
+                firstPR.author ||
+                "Unknown",
+              state: "OPEN",
+              sourceRef: branch,
+              targetRef: firstPR.destination?.branch?.name || "main",
+              createdDate: firstPR.createdDate || new Date().toISOString(),
+              updatedDate: firstPR.updatedDate || new Date().toISOString(),
+              reviewers: firstPR.reviewers || [],
+              fileChanges: firstPR.file_changes || [],
+            } as PRInfo;
+          }
+
+          // Enhanced error message with suggestions
+          const errorMsg = `No open PR found for branch: ${branch}`;
+          const suggestions = [
+            `• Verify the branch name is correct: "${branch}"`,
+            `• Check if the PR exists in workspace: "${workspace}"`,
+            `• Ensure the PR is in OPEN state (not merged/declined)`,
+            `• Try specifying the PR ID directly with --pr <id>`,
+          ];
+          
+          logger.error(`❌ ${errorMsg}`);
+          logger.info(`💡 Troubleshooting suggestions:`);
+          suggestions.forEach(suggestion => logger.info(`   ${suggestion}`));
+
+          throw new ProviderError(`${errorMsg}\n\nSuggestions:\n${suggestions.join('\n')}`);
+        } catch (error) {
+          if (error instanceof ProviderError) {
+            throw error; // Re-throw our enhanced error
+          }
+          
+          // Handle API errors
+          logger.error(`❌ API error while finding PR for branch ${branch}: ${(error as Error).message}`);
+          throw new ProviderError(
+            `Failed to find PR for branch "${branch}": ${(error as Error).message}. ` +
+            `Please verify the branch exists and has an open PR, or specify the PR ID directly with --pr <id>.`
           );
-          logger.debug(`Raw firstPR keys: ${Object.keys(firstPR).join(", ")}`);
-
-          return {
-            id: firstPR.id,
-            title: firstPR.title,
-            description: firstPR.description || "",
-            author:
-              firstPR.author?.displayName ||
-              firstPR.author?.name ||
-              firstPR.author ||
-              "Unknown",
-            state: "OPEN",
-            sourceRef: branch,
-            targetRef: firstPR.destination?.branch?.name || "main",
-            createdDate: firstPR.createdDate || new Date().toISOString(),
-            updatedDate: firstPR.updatedDate || new Date().toISOString(),
-            reviewers: firstPR.reviewers || [],
-            fileChanges: firstPR.file_changes || [],
-          } as PRInfo;
         }
-
-        throw new ProviderError(`No open PR found for branch: ${branch}`);
       },
       3600, // Cache for 1 hour
     );
@@ -662,6 +700,263 @@ export class BitbucketProvider {
       cacheStats: cache.stats(),
       cacheHitRatio: cache.getHitRatio(),
     };
+  }
+
+  /**
+   * Get all PR comments with filtering options for duplicate detection
+   */
+  async getPRComments(
+    identifier: PRIdentifier,
+    options: {
+      includeYamaComments?: boolean;
+      includeResolved?: boolean;
+      sinceDate?: string;
+    } = {},
+  ): Promise<PRComment[]> {
+    await this.initialize();
+
+    const { workspace, repository, pullRequestId } = identifier;
+    if (!pullRequestId) {
+      throw new ProviderError("Pull request ID is required");
+    }
+
+    const cacheKey = `pr-comments:${workspace}:${repository}:${pullRequestId}`;
+
+    return cache.getOrSet(
+      cacheKey,
+      async () => {
+        logger.debug(
+          `Getting PR comments: ${workspace}/${repository}#${pullRequestId}`,
+        );
+
+        const result = await this.pullRequestHandlers.handleGetComments({
+          workspace,
+          repository,
+          pull_request_id: pullRequestId,
+        });
+
+        let allComments = this.parseMCPResponse<PRComment[]>(result);
+
+        // Filter Yama comments if requested
+        if (options.includeYamaComments) {
+          allComments = allComments.filter(comment =>
+            this.isYamaComment(comment)
+          );
+        }
+
+        // Filter resolved comments if requested
+        if (!options.includeResolved) {
+          allComments = allComments.filter(comment =>
+            !this.isCommentResolved(comment)
+          );
+        }
+
+        // Filter by date if requested
+        if (options.sinceDate) {
+          const sinceTime = new Date(options.sinceDate).getTime();
+          allComments = allComments.filter(comment => {
+            const commentTime = new Date(comment.createdDate).getTime();
+            return commentTime >= sinceTime;
+          });
+        }
+
+        logger.debug(`Retrieved ${allComments.length} comments`);
+        return allComments;
+      },
+      900, // Cache for 15 minutes (comments change frequently)
+    );
+  }
+
+  /**
+   * Check if a comment is generated by Yama
+   */
+  private isYamaComment(comment: PRComment): boolean {
+    const text = comment.text || '';
+    const author = comment.author?.name || comment.author?.displayName || '';
+    
+    return text.includes('🛡️ Automated review by **Yama**') ||
+           text.includes('Powered by Yama AI') ||
+           author.toLowerCase().includes('yama') ||
+           text.includes('⚔️ **YAMA REVIEW REPORT**');
+  }
+
+  /**
+   * Check if a comment is resolved/inactive
+   */
+  private isCommentResolved(comment: PRComment): boolean {
+    // This would depend on Bitbucket's comment structure
+    // For now, assume all retrieved comments are active
+    return false;
+  }
+
+  /**
+   * Analyze comment to extract violation information
+   */
+  analyzeComment(comment: PRComment): CommentAnalysis {
+    const isYama = this.isYamaComment(comment);
+    
+    if (!isYama) {
+      return { isYamaComment: false };
+    }
+
+    // Extract violation type from comment text
+    let violationType: any = 'general';
+    const text = comment.text.toLowerCase();
+    
+    if (text.includes('security') || text.includes('🔒')) {
+      violationType = 'security';
+    } else if (text.includes('performance') || text.includes('⚡')) {
+      violationType = 'performance';
+    } else if (text.includes('maintainability') || text.includes('🏗️')) {
+      violationType = 'maintainability';
+    } else if (text.includes('functionality') || text.includes('⚙️')) {
+      violationType = 'functionality';
+    }
+
+    return {
+      isYamaComment: true,
+      violationType,
+      filePath: comment.anchor?.filePath,
+      lineNumber: comment.anchor?.lineFrom,
+      issueDescription: this.extractIssueDescription(comment.text),
+    };
+  }
+
+  /**
+   * Extract issue description from comment text
+   */
+  private extractIssueDescription(text: string): string {
+    // Extract the main issue description from Yama comment format
+    const issueMatch = text.match(/\*\*Issue\*\*:\s*([^\n]+)/);
+    if (issueMatch) {
+      return issueMatch[1].trim();
+    }
+
+    // Fallback: extract first meaningful line
+    const lines = text.split('\n').filter(line => 
+      line.trim() && 
+      !line.includes('🛡️') && 
+      !line.includes('---') &&
+      !line.includes('**Category**')
+    );
+    
+    return lines[0]?.trim() || 'Unknown issue';
+  }
+
+  /**
+   * Get commit range diff for incremental analysis
+   */
+  async getCommitRangeDiff(
+    identifier: PRIdentifier,
+    fromCommit: string,
+    toCommit: string,
+  ): Promise<CommitRangeDiff> {
+    await this.initialize();
+
+    const { workspace, repository } = identifier;
+    const cacheKey = `commit-range-diff:${workspace}:${repository}:${fromCommit}:${toCommit}`;
+
+    return cache.getOrSet(
+      cacheKey,
+      async () => {
+        logger.debug(
+          `Getting commit range diff: ${workspace}/${repository} ${fromCommit}..${toCommit}`,
+        );
+
+        try {
+          // Try to use commit range diff if available
+          const result = await this.reviewHandlers.handleGetCommitRangeDiff({
+            workspace,
+            repository,
+            from_commit: fromCommit,
+            to_commit: toCommit,
+            context_lines: 3,
+          });
+
+          const diffData = this.parseMCPResponse(result);
+          
+          return {
+            fromCommit,
+            toCommit,
+            newFiles: (diffData as any).new_files || [],
+            modifiedFiles: (diffData as any).modified_files || [],
+            deletedFiles: (diffData as any).deleted_files || [],
+            unchangedFiles: (diffData as any).unchanged_files || [],
+            diff: (diffData as any).diff || '',
+          } as CommitRangeDiff;
+        } catch (error) {
+          logger.debug(`Commit range diff not available, using fallback: ${(error as Error).message}`);
+          
+          // Fallback: compare current PR state with cached state
+          return this.getIncrementalDiffFallback(identifier, fromCommit, toCommit);
+        }
+      },
+      1800, // Cache for 30 minutes
+    );
+  }
+
+  /**
+   * Fallback method for incremental diff when commit range diff is not available
+   */
+  private async getIncrementalDiffFallback(
+    identifier: PRIdentifier,
+    fromCommit: string,
+    toCommit: string,
+  ): Promise<CommitRangeDiff> {
+    // For now, return empty diff - this would need more sophisticated implementation
+    // based on available Bitbucket API capabilities
+    logger.debug("Using fallback incremental diff (limited functionality)");
+    
+    const prInfo = await this.getPRDetails(identifier);
+    
+    return {
+      fromCommit,
+      toCommit,
+      newFiles: [],
+      modifiedFiles: prInfo.fileChanges || [],
+      deletedFiles: [],
+      unchangedFiles: [],
+      diff: '',
+    };
+  }
+
+  /**
+   * Get current commit SHA for a PR
+   */
+  async getCurrentCommitSHA(identifier: PRIdentifier): Promise<string> {
+    const prDetails = await this.getPRDetails(identifier);
+    
+    // Try to extract commit SHA from PR data
+    // This might need adjustment based on actual Bitbucket response structure
+    return (prDetails as any).sourceCommit || 
+           (prDetails as any).source?.commit?.hash ||
+           prDetails.sourceRef ||
+           'unknown';
+  }
+
+  /**
+   * Get the last analyzed commit from cache
+   */
+  getLastAnalyzedCommit(identifier: PRIdentifier): string | null {
+    const cacheKey = `last-analyzed:${identifier.workspace}:${identifier.repository}:${identifier.pullRequestId}`;
+    const cached = cache.get<{commit: string, analyzedAt: string}>(cacheKey);
+    return cached?.commit || null;
+  }
+
+  /**
+   * Update the last analyzed commit in cache
+   */
+  updateLastAnalyzedCommit(identifier: PRIdentifier, commitSHA: string): void {
+    const cacheKey = `last-analyzed:${identifier.workspace}:${identifier.repository}:${identifier.pullRequestId}`;
+    const data = {
+      commit: commitSHA,
+      analyzedAt: new Date().toISOString(),
+    };
+    
+    // Cache for 7 days (longer than typical PR lifecycle)
+    cache.set(cacheKey, data, 7 * 24 * 3600);
+    
+    logger.debug(`Updated last analyzed commit: ${commitSHA}`);
   }
 
   /**

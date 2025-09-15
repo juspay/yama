@@ -175,6 +175,8 @@ function setupReviewCommand(): void {
             ?.split(",")
             .map((p: string) => p.trim()),
           contextLines: parseInt(options.contextLines),
+          enableIncrementalAnalysis: true,  // Enable by default
+          enableDuplicateDetection: true,   // Enable by default
         };
 
         const guardian = new Guardian();
