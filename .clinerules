@@ -180,6 +180,18 @@
 - Issue: Cannot analyze binary files
 - Workaround: Skip them in analysis
 
+### Similarity Threshold Standardization (RESOLVED)
+- Issue: Inconsistent similarity scales (0-1 vs 0-100) across different features
+- Root cause: multiInstance.deduplication.similarityThreshold used 0.4 (0-1 scale) while semanticDeduplication.similarityThreshold used 70 (0-100 scale)
+- Resolution: Standardized all similarity thresholds to 0-100 percentage scale
+- Changes made:
+  - Updated yama.config.example.yaml: multiInstance.deduplication.similarityThreshold from 0.4 to 40
+  - Updated yama.config.yaml: multiInstance.deduplication.similarityThreshold from 0.4 to 40
+  - Updated type definitions to clarify "0-100 percentage scale" in comments
+  - All validation logic already expected 0-100 scale
+  - All tests already used 0-100 scale
+- Pattern: Always use 0-100 percentage scale for similarity thresholds to avoid misconfiguration
+
 ## Development Workflow
 
 ### Building
@@ -247,6 +259,28 @@ node dist/index.js guardian --branch <branch-name> --review --enhance
 - Automatic memory bank discovery and loading
 - Persistent project context and pattern learning across sessions
 - Document patterns discovered during development
+
+## Array Mutation Prevention Patterns
+
+### Map-Based Deduplication (RESOLVED)
+- Issue: Array mutation during iteration in `removeSameLineDuplicates` method
+- Root cause: Direct array index manipulation (`unique[existingIndex] = violation`) was fragile and error-prone
+- Resolution: Implemented Map-based approach using unique keys (`${file}_${originalIndex}`)
+- Benefits:
+  - No array mutation during processing
+  - Deterministic unique keys prevent reference-based errors
+  - O(1) Map operations vs O(n) array operations
+  - Safer updates through atomic Map operations
+  - Clearer intent and more maintainable code
+- Pattern: Always use Map for managing unique collections during complex processing
+- Tests added: Multiple severity upgrades, complex duplicate resolution scenarios
+
+### Safe Collection Management Patterns
+- Use Map with deterministic keys instead of array mutation
+- Avoid `findIndex` and direct array assignment during iteration
+- Prefer atomic operations (Map.set/delete) over array manipulation
+- Generate unique keys using stable identifiers (file + originalIndex)
+- Process collections immutably when possible
 
 ## Future Considerations
 

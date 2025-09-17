@@ -211,7 +211,7 @@ export interface ReviewStatistics {
   minorCount: number;
   suggestionCount: number;
   batchCount?: number;
-  processingStrategy?: "single-request" | "batch-processing";
+  processingStrategy?: "single-request" | "batch-processing" | "multi-instance";
   averageBatchSize?: number;
   totalProcessingTime?: number;
 }
@@ -348,15 +348,127 @@ export interface CodeReviewConfig {
   analysisTemplate?: string;
   focusAreas?: string[];
   batchProcessing?: BatchProcessingConfig;
+  multiInstance?: MultiInstanceConfig;
+  semanticDeduplication?: SemanticDeduplicationConfig;
+}
+
+export interface SemanticDeduplicationConfig {
+  enabled: boolean;
+  similarityThreshold: number; // 0-100 percentage scale
+  batchSize: number;
+  timeout: string;
+  fallbackOnError: boolean;
+  logMatches: boolean;
 }
 
 export interface BatchProcessingConfig {
   enabled: boolean;
   maxFilesPerBatch: number;
   prioritizeSecurityFiles: boolean;
-  parallelBatches: boolean;
+  parallelBatches: boolean; // Keep for backward compatibility
   batchDelayMs: number;
   singleRequestThreshold: number; // Files count threshold for single request
+
+  // NEW: Parallel processing configuration
+  parallel?: {
+    enabled: boolean;
+    maxConcurrentBatches: number; // Default: 3
+    rateLimitStrategy: "fixed" | "adaptive";
+    tokenBudgetDistribution: "equal" | "weighted";
+    failureHandling: "stop-all" | "continue";
+  };
+}
+
+// ============================================================================
+// Multi-Instance Processing Types
+// ============================================================================
+
+export interface MultiInstanceConfig {
+  enabled: boolean;
+  instanceCount: number;
+  instances: InstanceConfig[];
+  deduplication: DeduplicationConfig;
+}
+
+export interface InstanceConfig {
+  name: string;
+  provider: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  weight?: number;
+  timeout?: string;
+}
+
+export interface DeduplicationConfig {
+  enabled: boolean;
+  similarityThreshold: number; // 0-100 percentage scale for semantic similarity
+  aiProvider?: string;
+  maxCommentsToPost: number;
+  prioritizeBy: "severity" | "similarity" | "confidence";
+}
+
+export interface InstanceResult {
+  instanceName: string;
+  violations: Violation[];
+  processingTime: number;
+  tokenUsage?: {
+    input: number;
+    output: number;
+    total: number;
+  };
+  error?: string;
+  success: boolean;
+}
+
+export interface DeduplicationResult {
+  uniqueViolations: Violation[];
+  duplicatesRemoved: {
+    exactDuplicates: number;
+    normalizedDuplicates: number;
+    sameLineDuplicates: number;
+    semanticDuplicates?: number;
+  };
+  instanceContributions: Map<string, number>;
+  processingMetrics: DeduplicationMetrics;
+}
+
+export interface DeduplicationMetrics {
+  totalViolationsInput: number;
+  exactDuplicatesRemoved: number;
+  normalizedDuplicatesRemoved: number;
+  sameLineDuplicatesRemoved: number;
+  semanticDuplicatesRemoved?: number;
+  finalUniqueViolations: number;
+  deduplicationRate: number; // Percentage removed
+  instanceContributions: Record<string, number>;
+  processingTimeMs: number;
+}
+
+export interface CommentDeduplicationResult {
+  uniqueViolations: Violation[];
+  duplicatesRemoved: number;
+  semanticMatches: Array<{
+    violation: string;
+    comment: string;
+    similarityScore: number;
+    reasoning?: string;
+  }>;
+}
+
+export interface MultiInstanceResult {
+  instances: InstanceResult[];
+  deduplication: DeduplicationResult;
+  finalViolations: Violation[];
+  summary: {
+    totalInstances: number;
+    successfulInstances: number;
+    failedInstances: number;
+    totalViolationsFound: number;
+    uniqueViolationsAfterDedup: number;
+    deduplicationRate: number;
+    totalProcessingTime: number;
+  };
 }
 
 export interface DescriptionEnhancementConfig {
@@ -558,6 +670,35 @@ export interface Cache {
     keys: number;
     size: number;
   };
+}
+
+// ============================================================================
+// Parallel Processing Utility Types
+// ============================================================================
+
+export interface ParallelProcessingMetrics {
+  totalBatches: number;
+  concurrentBatches: number;
+  parallelSpeedup: number;
+  tokenEfficiency: number;
+  failedBatches: number;
+  averageBatchTime: number;
+  totalProcessingTime: number;
+  serialProcessingTime?: number; // For comparison
+}
+
+export interface SemaphoreInterface {
+  acquire(): Promise<void>;
+  release(): void;
+  getAvailablePermits(): number;
+}
+
+export interface TokenBudgetManagerInterface {
+  allocateForBatch(batchIndex: number, estimatedTokens: number): boolean;
+  releaseBatch(batchIndex: number): void;
+  getAvailableBudget(): number;
+  getTotalBudget(): number;
+  getUsedTokens(): number;
 }
 
 // ============================================================================

@@ -470,7 +470,7 @@ export class BitbucketProvider {
   }
 
   /**
-   * Add comment to PR with smart positioning
+   * Add comment to PR with smart positioning and validation
    */
   async addComment(
     identifier: PRIdentifier,
@@ -563,6 +563,43 @@ export class BitbucketProvider {
       };
     } catch (error) {
       logger.error(`Failed to add comment: ${(error as Error).message}`);
+
+      // If inline comment fails, try posting as general comment
+      if (options.filePath && options.codeSnippet) {
+        logger.debug(`Attempting fallback to general comment...`);
+        try {
+          const fallbackArgs = {
+            workspace,
+            repository,
+            pull_request_id: pullRequestId,
+            comment_text: `**File: ${options.filePath}**\n\n${commentText}`,
+          };
+
+          const fallbackResult =
+            await this.pullRequestHandlers.handleAddComment(fallbackArgs);
+          let fallbackData;
+          if (
+            fallbackResult.content &&
+            fallbackResult.content[0] &&
+            fallbackResult.content[0].text
+          ) {
+            fallbackData = JSON.parse(fallbackResult.content[0].text);
+          } else {
+            fallbackData = fallbackResult;
+          }
+
+          logger.debug(`Fallback comment posted successfully`);
+          return {
+            success: true,
+            commentId: fallbackData.id || fallbackData.comment_id,
+          };
+        } catch (fallbackError) {
+          logger.error(
+            `Fallback comment also failed: ${(fallbackError as Error).message}`,
+          );
+        }
+      }
+
       throw new ProviderError(`Comment failed: ${(error as Error).message}`);
     }
   }

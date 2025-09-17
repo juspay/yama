@@ -9,12 +9,16 @@ problem_statement:
 
 solution_overview:
   product_name: "Yama"
-  value_proposition: "AI-powered automated PR analysis that ensures consistent quality"
+  value_proposition: "AI-powered automated PR analysis with consensus-based multi-instance processing and intelligent deduplication"
   key_benefits:
     - "80% reduction in manual review time"
     - "100% coverage of security patterns"
     - "Consistent PR documentation"
     - "Actionable inline feedback"
+    - "Enhanced accuracy through multi-instance AI consensus"
+    - "Reduced noise via intelligent deduplication"
+    - "Optimal performance through parallel processing"
+    - "Fault tolerance and redundancy"
 
 user_personas:
   - name: "Senior Developer"
@@ -75,6 +79,33 @@ feature_highlights:
       - "Inline comment posting"
     severities: ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"]
 
+  multi_instance_processing:
+    description: "Consensus-based analysis using multiple AI instances"
+    capabilities:
+      - "Parallel execution of multiple AI models"
+      - "Instance-specific configurations (provider, model, temperature)"
+      - "Consensus-based result aggregation"
+      - "Fault tolerance through redundancy"
+      - "Enhanced accuracy through diverse perspectives"
+
+  advanced_deduplication:
+    description: "Multi-level intelligent deduplication system"
+    capabilities:
+      - "Exact hash-based duplicate removal"
+      - "Normalized content duplicate elimination"
+      - "Same file+line duplicate resolution with severity prioritization"
+      - "AI-powered semantic similarity analysis"
+      - "Prevention of redundant comments on existing PR discussions"
+
+  parallel_processing:
+    description: "Sophisticated resource management and concurrency control"
+    capabilities:
+      - "Semaphore-based concurrency control"
+      - "Token budget management and allocation"
+      - "Optimal concurrency calculation"
+      - "Graceful error handling and recovery"
+      - "Comprehensive resource utilization monitoring"
+
   description_enhancement:
     description: "Automatic PR description improvement"
     capabilities:
@@ -109,3 +140,10 @@ competitive_advantages:
   - "Content preservation in enhancements"
   - "Configurable quality standards"
   - "Enterprise Bitbucket support"
+  - "Multi-instance consensus-based AI analysis (vs single AI model)"
+  - "Advanced 4-level deduplication system (vs basic duplicate removal)"
+  - "AI-powered semantic similarity analysis for intelligent comment filtering"
+  - "Sophisticated parallel processing with resource management"
+  - "Fault tolerance through instance redundancy and graceful error handling"
+  - "Comprehensive token budget management across multiple AI providers"
+  - "Security-first file prioritization for critical vulnerability detection"
