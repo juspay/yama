@@ -344,7 +344,7 @@ index 1234567..abcdefg 100644
   });
 
   describe("Code Snippet Validation and Fixing", () => {
-    it("should validate code snippets exist in diff", async () => {
+    it("should process all violations without validation", async () => {
       const mockAIResponse = {
         content: JSON.stringify({
           violations: [
@@ -380,10 +380,13 @@ index 1234567..abcdefg 100644
         dryRun: true,
       });
 
-      // Should only include valid snippet
-      expect(result.violations).toHaveLength(1);
+      // Should include all violations (no validation filtering)
+      expect(result.violations).toHaveLength(2);
       expect(result.violations[0].code_snippet).toBe(
         "+  console.log(data); // Debug log",
+      );
+      expect(result.violations[1].code_snippet).toBe(
+        "invalid snippet not in diff",
       );
     });
 

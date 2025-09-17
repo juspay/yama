@@ -56,3 +56,26 @@ key_features:
   - name: "Memory Bank Integration"
     description: "Persistent project context and pattern learning across sessions"
     configurable: true
+  - name: "Multi-Instance Processing"
+    description: "Consensus-based analysis using multiple AI instances with different configurations"
+    configurable: true
+    benefits:
+      - "Improved accuracy through diverse AI model perspectives"
+      - "Reduced false positives via consensus analysis"
+      - "Fault tolerance through instance redundancy"
+  - name: "Advanced Deduplication System"
+    description: "Multi-level deduplication eliminating redundant violations and comments"
+    configurable: true
+    levels:
+      - "Exact hash-based duplicate removal"
+      - "Normalized content duplicate removal"
+      - "Same file+line duplicate resolution"
+      - "AI-powered semantic similarity analysis"
+  - name: "Parallel Processing Infrastructure"
+    description: "Sophisticated concurrency control and resource management for optimal performance"
+    configurable: true
+    features:
+      - "Semaphore-based concurrency control"
+      - "Token budget management and allocation"
+      - "Optimal concurrency calculation"
+      - "Comprehensive resource monitoring"

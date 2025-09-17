@@ -80,6 +80,110 @@ design_patterns:
     related_patterns:
       - "Configuration Pattern"
 
+  - name: "Multi-Instance Processing Pattern"
+    category: "scalability"
+    description: "Orchestrates multiple Neurolink SDK instances for diverse and robust code analysis"
+    usage: "Provides consensus-based analysis by running multiple AI instances with different configurations"
+    implementation:
+      - "Parallel execution of multiple CodeReviewer instances with different AI providers/models"
+      - "Instance-specific configurations (provider, model, temperature, weight)"
+      - "Concurrency control using semaphores and token budget management"
+      - "Result aggregation with comprehensive deduplication"
+      - "Graceful error handling for individual instance failures"
+    example_files:
+      - "src/features/MultiInstanceProcessor.ts"
+    configuration:
+      - "multiInstance.enabled: Enable/disable multi-instance processing"
+      - "multiInstance.instanceCount: Number of parallel instances"
+      - "multiInstance.instances: Array of instance configurations"
+      - "multiInstance.deduplication: Deduplication settings"
+    benefits:
+      - "Improved analysis accuracy through consensus of multiple AI models"
+      - "Reduced false positives through diverse perspective analysis"
+      - "Better coverage of edge cases and complex scenarios"
+      - "Fault tolerance through instance redundancy"
+    related_patterns:
+      - "Advanced Deduplication Strategy"
+      - "Parallel Processing with Resource Management"
+
+  - name: "Advanced Deduplication Strategy"
+    category: "quality"
+    description: "Multi-level deduplication system for eliminating redundant violations from multiple sources"
+    usage: "Ensures clean, non-redundant feedback by removing exact, normalized, and semantic duplicates"
+    implementation:
+      - "Level 1: Exact hash-based duplicate removal using SHA-256"
+      - "Level 2: Normalized duplicate removal (whitespace, quotes, case normalization)"
+      - "Level 3: Same file+line duplicate resolution with severity-based prioritization"
+      - "Level 4: AI-powered semantic similarity analysis against existing PR comments"
+      - "Comprehensive metrics tracking and reporting"
+    example_files:
+      - "src/utils/ExactDuplicateRemover.ts"
+      - "src/utils/ContentSimilarityService.ts"
+    deduplication_levels:
+      - "Exact duplicates: Identical violations with same hash"
+      - "Normalized duplicates: Same content with formatting differences"
+      - "Same-line duplicates: Multiple violations on same code line"
+      - "Semantic duplicates: Similar meaning violations using AI analysis"
+    benefits:
+      - "Eliminates noise from redundant feedback"
+      - "Maintains highest quality violations through severity-based resolution"
+      - "Prevents duplicate comments on existing PR discussions"
+      - "Provides detailed deduplication metrics for analysis"
+    related_patterns:
+      - "Multi-Instance Processing Pattern"
+      - "Semantic Similarity Analysis Pattern"
+
+  - name: "Parallel Processing with Resource Management"
+    category: "performance"
+    description: "Sophisticated concurrency control and resource management for parallel batch execution"
+    usage: "Manages concurrent AI analysis batches while respecting token limits and rate constraints"
+    implementation:
+      - "Semaphore-based concurrency control with configurable permits"
+      - "Token budget manager with allocation tracking and safety margins"
+      - "Optimal concurrency calculation based on resources and constraints"
+      - "Graceful resource cleanup and error recovery"
+      - "Comprehensive monitoring and metrics collection"
+    example_files:
+      - "src/utils/ParallelProcessing.ts"
+    components:
+      - "Semaphore: Controls concurrent access to shared resources"
+      - "TokenBudgetManager: Manages AI token allocation across batches"
+      - "calculateOptimalConcurrency: Determines best concurrency level"
+    benefits:
+      - "Maximizes throughput while respecting API and resource limits"
+      - "Prevents resource exhaustion and API rate limit violations"
+      - "Enables efficient processing of large PRs with many files"
+      - "Provides detailed resource utilization metrics"
+    related_patterns:
+      - "Multi-Instance Processing Pattern"
+      - "Provider-Aware Token Management"
+
+  - name: "Semantic Similarity Analysis Pattern"
+    category: "intelligence"
+    description: "AI-powered content similarity analysis for intelligent deduplication"
+    usage: "Compares new violations with existing PR comments to prevent redundant feedback"
+    implementation:
+      - "Batch processing of similarity comparisons to manage token usage"
+      - "Structured content extraction from violations and comments"
+      - "AI-powered semantic analysis with configurable similarity thresholds"
+      - "Graceful fallback on analysis failures"
+      - "Detailed similarity scoring with reasoning explanations"
+    example_files:
+      - "src/utils/ContentSimilarityService.ts"
+    configuration:
+      - "semanticDeduplication.enabled: Enable AI-powered similarity analysis"
+      - "semanticDeduplication.similarityThreshold: Percentage threshold (0-100)"
+      - "semanticDeduplication.batchSize: Violations per analysis batch"
+      - "semanticDeduplication.fallbackOnError: Return all violations on AI failure"
+    benefits:
+      - "Prevents semantically similar comments from being posted"
+      - "Maintains conversation continuity in PR discussions"
+      - "Reduces reviewer fatigue from redundant feedback"
+      - "Provides intelligent content understanding beyond exact matching"
+    related_patterns:
+      - "Advanced Deduplication Strategy"
+      - "Quality-First AI Configuration"
+
   - name: "Batch Processing Pattern"
     category: "scalability"
     description: "Process large PRs in small, manageable batches to prevent token limit issues"

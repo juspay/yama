@@ -199,6 +199,34 @@ features:
       - "🧪 Testing & Error Handling"
       - "📖 Documentation & Maintainability"
 
+    # Multi-Instance Processing Configuration
+    multiInstance:
+      enabled: true
+      instanceCount: 2
+      instances:
+        - name: "primary"
+          provider: "vertex"
+          model: "gemini-2.5-pro"
+          temperature: 0.3
+        - name: "secondary"
+          provider: "vertex"
+          model: "gemini-2.5-pro"
+          temperature: 0.1
+      deduplication:
+        enabled: true
+        similarityThreshold: 40 # 0-100 percentage scale
+        maxCommentsToPost: 30
+        prioritizeBy: "severity"
+
+    # Semantic Deduplication Configuration
+    semanticDeduplication:
+      enabled: true
+      similarityThreshold: 70 # 0-100 percentage scale
+      batchSize: 15
+      timeout: "5m"
+      fallbackOnError: true
+      logMatches: true
+
   descriptionEnhancement:
     enabled: true
     preserveContent: true # NEVER remove existing content
@@ -477,7 +505,7 @@ await guardian.processPR({
 });
 ```
 
-----
+---
 
 ## 📋 **Configurable Description Sections**
 

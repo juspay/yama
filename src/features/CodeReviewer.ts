@@ -16,11 +16,22 @@ import {
   BatchResult,
   PrioritizedFile,
   FilePriority,
+  ParallelProcessingMetrics,
 } from "../types/index.js";
 import { UnifiedContext } from "../core/ContextGatherer.js";
 import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
+import {
+  MultiInstanceProcessor,
+  createMultiInstanceProcessor,
+} from "./MultiInstanceProcessor.js";
 import { logger } from "../utils/Logger.js";
 import { getProviderTokenLimit } from "../utils/ProviderLimits.js";
+import {
+  Semaphore,
+  TokenBudgetManager,
+  calculateOptimalConcurrency,
+} from "../utils/ParallelProcessing.js";
+import { createExactDuplicateRemover } from "../utils/ExactDuplicateRemover.js";
 
 export class CodeReviewer {
   private neurolink: any;
@@ -39,11 +50,12 @@ export class CodeReviewer {
   }
 
   /**
-   * Review code using pre-gathered unified context (OPTIMIZED with Batch Processing)
+   * Review code using pre-gathered unified context (OPTIMIZED with Multi-Instance and Batch Processing)
    */
   async reviewCodeWithContext(
     context: UnifiedContext,
     options: ReviewOptions,
+    multiInstanceConfig?: any,
   ): Promise<ReviewResult> {
     const startTime = Date.now();
 
@@ -53,41 +65,64 @@ export class CodeReviewer {
         `Analyzing ${context.diffStrategy.fileCount} files using ${context.diffStrategy.strategy} strategy`,
       );
 
-      // Determine if we should use batch processing
-      const batchConfig = this.getBatchProcessingConfig();
-      const shouldUseBatchProcessing = this.shouldUseBatchProcessing(context, batchConfig);
-
       let violations: Violation[];
-      let processingStrategy: "single-request" | "batch-processing";
+      let processingStrategy:
+        | "single-request"
+        | "batch-processing"
+        | "multi-instance";
 
-      if (shouldUseBatchProcessing) {
-        logger.info("🔄 Using batch processing for large PR analysis");
-        const batchResult = await this.reviewWithBatchProcessing(context, options, batchConfig);
-        violations = batchResult.violations;
-        processingStrategy = "batch-processing";
+      // Check if multi-instance processing is enabled and configured
+      if (
+        multiInstanceConfig?.enabled &&
+        multiInstanceConfig.instances?.length > 1
+      ) {
+        logger.info("🚀 Using multi-instance processing for enhanced analysis");
+        const multiInstanceResult = await this.reviewWithMultipleInstances(
+          context,
+          options,
+          multiInstanceConfig,
+        );
+        violations = multiInstanceResult.finalViolations;
+        processingStrategy = "multi-instance";
       } else {
-        logger.info("⚡ Using single-request analysis for small PR");
-        const analysisPrompt = this.buildAnalysisPrompt(context, options);
-        violations = await this.analyzeWithAI(analysisPrompt, context);
-        processingStrategy = "single-request";
+        // Determine if we should use batch processing
+        const batchConfig = this.getBatchProcessingConfig();
+        const shouldUseBatchProcessing = this.shouldUseBatchProcessing(
+          context,
+          batchConfig,
+        );
+
+        if (shouldUseBatchProcessing) {
+          logger.info("🔄 Using batch processing for large PR analysis");
+          const batchResult = await this.reviewWithBatchProcessing(
+            context,
+            options,
+            batchConfig,
+          );
+          violations = batchResult.violations;
+          processingStrategy = "batch-processing";
+        } else {
+          logger.info("⚡ Using single-request analysis for small PR");
+          const analysisPrompt = this.buildAnalysisPrompt(context, options);
+          violations = await this.analyzeWithAI(analysisPrompt, context);
+          processingStrategy = "single-request";
+        }
       }
 
-      const validatedViolations = this.validateViolations(violations, context);
-
-      if (!options.dryRun && validatedViolations.length > 0) {
-        await this.postComments(context, validatedViolations, options);
+      if (!options.dryRun && violations.length > 0) {
+        violations = await this.postComments(context, violations, options);
       }
 
       const duration = Math.round((Date.now() - startTime) / 1000);
       const result = this.generateReviewResult(
-        validatedViolations,
+        violations,
         duration,
         context,
         processingStrategy,
       );
 
       logger.success(
-        `Code review completed in ${duration}s: ${validatedViolations.length} violations found (${processingStrategy})`,
+        `Code review completed in ${duration}s: ${violations.length} violations found (${processingStrategy})`,
       );
 
       return result;
@@ -100,201 +135,34 @@ export class CodeReviewer {
   }
 
   /**
-   * Validate violations to ensure code snippets exist in diff
+   * Review code using multiple instances for enhanced analysis
    */
-  private validateViolations(
-    violations: Violation[],
+  async reviewWithMultipleInstances(
     context: UnifiedContext,
-  ): Violation[] {
-    const validatedViolations: Violation[] = [];
-    const diffContent = this.extractDiffContent(context);
-
-    for (const violation of violations) {
-      if (
-        violation.type === "inline" &&
-        violation.code_snippet &&
-        violation.file
-      ) {
-        // Check if the code snippet exists in the diff
-        if (diffContent.includes(violation.code_snippet)) {
-          validatedViolations.push(violation);
-        } else {
-          // Try to find a close match and fix the snippet
-          const fixedViolation = this.tryFixCodeSnippet(violation, context);
-          if (fixedViolation) {
-            validatedViolations.push(fixedViolation);
-          } else {
-            logger.debug(
-              `⚠️ Skipping violation - snippet not found in diff: ${violation.file}`,
-            );
-            logger.debug(`   Original snippet: "${violation.code_snippet}"`);
-          }
-        }
-      } else {
-        // Non-inline violations are always valid
-        validatedViolations.push(violation);
-      }
-    }
-
-    logger.debug(
-      `Validated ${validatedViolations.length} out of ${violations.length} violations`,
-    );
-    return validatedViolations;
-  }
-
-  /**
-   * Try to fix code snippet by finding it in the actual diff
-   */
-  private tryFixCodeSnippet(
-    violation: Violation,
-    context: UnifiedContext,
-  ): Violation | null {
-    if (!violation.file || !violation.code_snippet) {return null;}
-
+    options: ReviewOptions,
+    multiInstanceConfig: any,
+  ): Promise<any> {
     try {
-      // Get the diff for this specific file
-      let fileDiff: string | undefined;
-
-      if (context.diffStrategy.strategy === "whole" && context.prDiff) {
-        // Extract file diff from whole diff - handle different path formats
-        const diffLines = context.prDiff.diff.split("\n");
-        let fileStartIndex = -1;
-
-        // Generate all possible path variations
-        const pathVariations = this.generatePathVariations(violation.file);
-
-        // Try to find the file in the diff with various path formats
-        for (let i = 0; i < diffLines.length; i++) {
-          const line = diffLines[i];
-          if (line.startsWith("diff --git") || line.startsWith("Index:")) {
-            for (const pathVariation of pathVariations) {
-              if (line.includes(pathVariation)) {
-                fileStartIndex = i;
-                break;
-              }
-            }
-            if (fileStartIndex >= 0) {break;}
-          }
-        }
-
-        if (fileStartIndex >= 0) {
-          const nextFileIndex = diffLines.findIndex(
-            (line: string, idx: number) =>
-              idx > fileStartIndex &&
-              (line.startsWith("diff --git") || line.startsWith("Index:")),
-          );
-
-          fileDiff = diffLines
-            .slice(
-              fileStartIndex,
-              nextFileIndex > 0 ? nextFileIndex : diffLines.length,
-            )
-            .join("\n");
-        }
-      } else if (
-        context.diffStrategy.strategy === "file-by-file" &&
-        context.fileDiffs
-      ) {
-        // Try all path variations
-        const pathVariations = this.generatePathVariations(violation.file);
-
-        for (const path of pathVariations) {
-          fileDiff = context.fileDiffs.get(path);
-          if (fileDiff) {
-            logger.debug(
-              `Found diff for ${violation.file} using variation: ${path}`,
-            );
-            break;
-          }
-        }
-
-        // If still not found, try partial matching
-        if (!fileDiff) {
-          for (const [key, value] of context.fileDiffs.entries()) {
-            if (key.endsWith(violation.file) || violation.file.endsWith(key)) {
-              fileDiff = value;
-              logger.debug(
-                `Found diff for ${violation.file} using partial match: ${key}`,
-              );
-              break;
-            }
-          }
-        }
-      }
-
-      if (!fileDiff) {
-        logger.debug(`❌ Could not find diff for file: ${violation.file}`);
-        return null;
-      }
-
-      // First, try to find the exact line with line number extraction
-      const lineInfo = this.extractLineNumberFromDiff(
-        fileDiff,
-        violation.code_snippet,
+      // Create multi-instance processor
+      const multiInstanceProcessor = createMultiInstanceProcessor(
+        this.bitbucketProvider,
+        this.reviewConfig,
       );
-      if (lineInfo) {
-        const fixedViolation = { ...violation };
-        fixedViolation.line_type = lineInfo.lineType;
 
-        // Extract search context from the diff
-        const diffLines = fileDiff.split("\n");
-        const snippetIndex = diffLines.findIndex(
-          (line) => line === violation.code_snippet,
-        );
-        if (snippetIndex > 0 && snippetIndex < diffLines.length - 1) {
-          fixedViolation.search_context = {
-            before: [diffLines[snippetIndex - 1]],
-            after: [diffLines[snippetIndex + 1]],
-          };
-        }
+      // Execute multi-instance processing
+      const result = await multiInstanceProcessor.processWithMultipleInstances(
+        context,
+        options,
+        multiInstanceConfig,
+      );
 
-        logger.debug(
-          `✅ Found exact match with line number for ${violation.file}`,
-        );
-        return fixedViolation;
-      }
-
-      // Fallback: Clean the snippet and try fuzzy matching
-      const cleanSnippet = violation.code_snippet
-        .trim()
-        .replace(/^[+\-\s]/, ""); // Remove diff prefix for searching
-
-      // Look for the clean snippet in the diff
-      const diffLines = fileDiff.split("\n");
-      for (let i = 0; i < diffLines.length; i++) {
-        const line = diffLines[i];
-        const cleanLine = line.replace(/^[+\-\s]/, "").trim();
-
-        if (
-          cleanLine.includes(cleanSnippet) ||
-          cleanSnippet.includes(cleanLine)
-        ) {
-          // Found a match! Update the violation with the correct snippet
-          const fixedViolation = { ...violation };
-          fixedViolation.code_snippet = line; // Use the full line with diff prefix
-
-          // Update search context if needed
-          if (i > 0 && i < diffLines.length - 1) {
-            fixedViolation.search_context = {
-              before: [diffLines[i - 1]],
-              after: [diffLines[i + 1]],
-            };
-          }
-
-          logger.debug(
-            `✅ Fixed code snippet for ${violation.file} using fuzzy match`,
-          );
-          return fixedViolation;
-        }
-      }
-
-      logger.debug(`❌ Could not find snippet in diff for ${violation.file}`);
-      logger.debug(`   Looking for: "${violation.code_snippet}"`);
+      return result;
     } catch (error) {
-      logger.debug(`Error fixing code snippet: ${(error as Error).message}`);
+      logger.error(
+        `Multi-instance processing failed: ${(error as Error).message}`,
+      );
+      throw error;
     }
-
-    return null;
   }
 
   /**
@@ -467,20 +335,33 @@ Return ONLY valid JSON:
     if (context.pr.fileChanges) {
       context.pr.fileChanges.forEach((file: any) => {
         const ext = file.split(".").pop()?.toLowerCase();
-        if (ext) {fileExtensions.add(ext);}
+        if (ext) {
+          fileExtensions.add(ext);
+        }
       });
     }
 
-    if (fileExtensions.has("rs") || fileExtensions.has("res"))
-      {return "rescript";}
-    if (fileExtensions.has("ts") || fileExtensions.has("tsx"))
-      {return "typescript";}
-    if (fileExtensions.has("js") || fileExtensions.has("jsx"))
-      {return "javascript";}
-    if (fileExtensions.has("py")) {return "python";}
-    if (fileExtensions.has("go")) {return "golang";}
-    if (fileExtensions.has("java")) {return "java";}
-    if (fileExtensions.has("cpp") || fileExtensions.has("c")) {return "cpp";}
+    if (fileExtensions.has("rs") || fileExtensions.has("res")) {
+      return "rescript";
+    }
+    if (fileExtensions.has("ts") || fileExtensions.has("tsx")) {
+      return "typescript";
+    }
+    if (fileExtensions.has("js") || fileExtensions.has("jsx")) {
+      return "javascript";
+    }
+    if (fileExtensions.has("py")) {
+      return "python";
+    }
+    if (fileExtensions.has("go")) {
+      return "golang";
+    }
+    if (fileExtensions.has("java")) {
+      return "java";
+    }
+    if (fileExtensions.has("cpp") || fileExtensions.has("c")) {
+      return "cpp";
+    }
 
     return "mixed";
   }
@@ -495,9 +376,15 @@ Return ONLY valid JSON:
     const hasLargeFiles = context.diffStrategy.estimatedSize.includes("Large");
     const hasComments = (context.pr.comments?.length || 0) > 0;
 
-    if (fileCount > 50) {return "very-high";}
-    if (fileCount > 20 || hasLargeFiles) {return "high";}
-    if (fileCount > 10 || hasComments) {return "medium";}
+    if (fileCount > 50) {
+      return "very-high";
+    }
+    if (fileCount > 20 || hasLargeFiles) {
+      return "high";
+    }
+    if (fileCount > 10 || hasComments) {
+      return "medium";
+    }
     return "low";
   }
 
@@ -518,18 +405,22 @@ Return ONLY valid JSON:
   private getSafeTokenLimit(): number {
     const provider = this.aiConfig.provider || "auto";
     const configuredTokens = this.aiConfig.maxTokens;
-    
+
     // Use conservative limits for CodeReviewer (safer for large diffs)
     const providerLimit = getProviderTokenLimit(provider, true);
-    
+
     // Use the smaller of configured tokens or provider limit
     if (configuredTokens && configuredTokens > 0) {
       const safeLimit = Math.min(configuredTokens, providerLimit);
-      logger.debug(`Token limit: configured=${configuredTokens}, provider=${providerLimit}, using=${safeLimit}`);
+      logger.debug(
+        `Token limit: configured=${configuredTokens}, provider=${providerLimit}, using=${safeLimit}`,
+      );
       return safeLimit;
     }
 
-    logger.debug(`Token limit: using provider default=${providerLimit} for ${provider}`);
+    logger.debug(
+      `Token limit: using provider default=${providerLimit} for ${provider}`,
+    );
     return providerLimit;
   }
 
@@ -545,7 +436,7 @@ Return ONLY valid JSON:
 
       // Initialize NeuroLink with eval-based dynamic import
       if (!this.neurolink) {
-        const { NeuroLink  } = await import("@juspay/neurolink");
+        const { NeuroLink } = await import("@juspay/neurolink");
         this.neurolink = new NeuroLink();
       }
 
@@ -573,7 +464,7 @@ Return ONLY valid JSON:
 
       // Get safe token limit based on provider
       const safeMaxTokens = this.getSafeTokenLimit();
-      
+
       logger.debug(`Using AI provider: ${this.aiConfig.provider || "auto"}`);
       logger.debug(`Configured maxTokens: ${this.aiConfig.maxTokens}`);
       logger.debug(`Safe maxTokens limit: ${safeMaxTokens}`);
@@ -639,8 +530,41 @@ Return ONLY valid JSON:
     context: UnifiedContext,
     violations: Violation[],
     _options: ReviewOptions,
-  ): Promise<void> {
+  ): Promise<Violation[]> {
     logger.phase("📝 Posting review comments...");
+
+    // NEW: Apply semantic comment deduplication before posting
+    const duplicateRemover = createExactDuplicateRemover();
+    const deduplicationResult =
+      await duplicateRemover.removeAgainstExistingComments(
+        violations,
+        context.pr.comments || [],
+        this.aiConfig,
+        85, // similarity threshold
+      );
+
+    logger.info(
+      `🔍 Semantic deduplication: ${violations.length} → ${deduplicationResult.uniqueViolations.length} violations ` +
+        `(${deduplicationResult.duplicatesRemoved} duplicates removed)`,
+    );
+
+    // Log deduplication details if any duplicates were found
+    if (deduplicationResult.duplicatesRemoved > 0) {
+      logger.info(
+        duplicateRemover.getCommentDeduplicationStats(deduplicationResult),
+      );
+
+      // Log details of semantic matches
+      deduplicationResult.semanticMatches.forEach((match, index) => {
+        logger.debug(
+          `🎯 Semantic match ${index + 1}: "${match.violation}" matches ${match.comment} ` +
+            `(${match.similarityScore}% similarity)${match.reasoning ? ` - ${match.reasoning}` : ""}`,
+        );
+      });
+    }
+
+    // Use deduplicated violations for posting
+    const uniqueViolations = deduplicationResult.uniqueViolations;
 
     let commentsPosted = 0;
     let commentsFailed = 0;
@@ -648,7 +572,7 @@ Return ONLY valid JSON:
       [];
 
     // Post inline comments
-    const inlineViolations = violations.filter(
+    const inlineViolations = uniqueViolations.filter(
       (v) => v.type === "inline" && v.file && v.code_snippet,
     );
 
@@ -724,10 +648,10 @@ Return ONLY valid JSON:
     }
 
     // Post summary comment (include failed comments info if any)
-    if (violations.length > 0) {
+    if (uniqueViolations.length > 0) {
       try {
         const summaryComment = this.generateSummaryComment(
-          violations,
+          uniqueViolations,
           context,
           failedComments,
         );
@@ -748,6 +672,8 @@ Return ONLY valid JSON:
     if (commentsFailed > 0) {
       logger.warn(`⚠️ Failed to post ${commentsFailed} inline comments`);
     }
+
+    return uniqueViolations;
   }
 
   /**
@@ -794,12 +720,15 @@ Return ONLY valid JSON:
     // Add suggested fix section if suggestion is provided
     if (violation.suggestion) {
       comment += `\n\n**Suggested Fix**:\n`;
-      
+
       // Detect the language for syntax highlighting
       const language = this.detectLanguageFromFile(violation.file || "");
-      
+
       // Use proper markdown escaping for code blocks
-      const escapedCodeBlock = this.escapeMarkdownCodeBlock(violation.suggestion, language);
+      const escapedCodeBlock = this.escapeMarkdownCodeBlock(
+        violation.suggestion,
+        language,
+      );
       comment += escapedCodeBlock;
     }
 
@@ -1123,7 +1052,9 @@ ${recommendation}
 
     violations.forEach((v) => {
       const category = v.category || "general";
-      if (!grouped[category]) {grouped[category] = [];}
+      if (!grouped[category]) {
+        grouped[category] = [];
+      }
       grouped[category].push(v);
     });
 
@@ -1147,7 +1078,10 @@ ${recommendation}
     violations: Violation[],
     _duration: number,
     _context: UnifiedContext,
-    processingStrategy?: "single-request" | "batch-processing",
+    processingStrategy?:
+      | "single-request"
+      | "batch-processing"
+      | "multi-instance",
   ): ReviewResult {
     const stats = this.calculateStats(violations);
 
@@ -1179,15 +1113,36 @@ ${recommendation}
       enabled: true,
       maxFilesPerBatch: 3,
       prioritizeSecurityFiles: true,
-      parallelBatches: false, // Sequential for better reliability
+      parallelBatches: false, // Keep for backward compatibility
       batchDelayMs: 1000,
       singleRequestThreshold: 5, // Use single request for ≤5 files
+
+      // NEW: Parallel processing defaults
+      parallel: {
+        enabled: true, // Enable parallel processing by default
+        maxConcurrentBatches: 3,
+        rateLimitStrategy: "fixed",
+        tokenBudgetDistribution: "equal",
+        failureHandling: "continue",
+      },
     };
 
-    return {
+    const mergedConfig = {
       ...defaultConfig,
       ...this.reviewConfig.batchProcessing,
     };
+
+    // Merge parallel config separately to handle nested object properly
+    if (mergedConfig.parallel && this.reviewConfig.batchProcessing?.parallel) {
+      mergedConfig.parallel = {
+        ...defaultConfig.parallel!,
+        ...this.reviewConfig.batchProcessing.parallel,
+      };
+    } else if (!mergedConfig.parallel) {
+      mergedConfig.parallel = defaultConfig.parallel;
+    }
+
+    return mergedConfig;
   }
 
   /**
@@ -1203,7 +1158,7 @@ ${recommendation}
     }
 
     const fileCount = context.diffStrategy.fileCount;
-    
+
     if (fileCount <= batchConfig.singleRequestThreshold) {
       logger.debug(
         `File count (${fileCount}) ≤ threshold (${batchConfig.singleRequestThreshold}), using single request`,
@@ -1226,7 +1181,7 @@ ${recommendation}
   }
 
   /**
-   * Main batch processing method
+   * Main batch processing method with parallel processing support
    */
   private async reviewWithBatchProcessing(
     context: UnifiedContext,
@@ -1239,7 +1194,7 @@ ${recommendation}
       // Step 1: Prioritize and organize files
       const prioritizedFiles = await this.prioritizeFiles(context, batchConfig);
       logger.info(
-        `📋 Prioritized ${prioritizedFiles.length} files: ${prioritizedFiles.filter(f => f.priority === "high").length} high, ${prioritizedFiles.filter(f => f.priority === "medium").length} medium, ${prioritizedFiles.filter(f => f.priority === "low").length} low priority`,
+        `📋 Prioritized ${prioritizedFiles.length} files: ${prioritizedFiles.filter((f) => f.priority === "high").length} high, ${prioritizedFiles.filter((f) => f.priority === "medium").length} medium, ${prioritizedFiles.filter((f) => f.priority === "low").length} low priority`,
       );
 
       // Step 2: Create batches
@@ -1248,57 +1203,232 @@ ${recommendation}
         `📦 Created ${batches.length} batches (max ${batchConfig.maxFilesPerBatch} files per batch)`,
       );
 
-      // Step 3: Process batches
-      const batchResults: BatchResult[] = [];
-      const allViolations: Violation[] = [];
+      // Step 3: Determine processing strategy
+      const useParallel = batchConfig.parallel?.enabled && batches.length > 1;
 
-      for (let i = 0; i < batches.length; i++) {
-        const batch = batches[i];
+      if (useParallel) {
         logger.info(
-          `🔄 Processing batch ${i + 1}/${batches.length} (${batch.files.length} files, ${batch.priority} priority)`,
+          `🚀 Using parallel processing: ${batches.length} batches, max ${batchConfig.parallel?.maxConcurrentBatches} concurrent`,
         );
-
-        try {
-          const batchResult = await this.processBatch(batch, context, options);
-          batchResults.push(batchResult);
-          allViolations.push(...batchResult.violations);
-
-          logger.info(
-            `✅ Batch ${i + 1} completed: ${batchResult.violations.length} violations found in ${Math.round(batchResult.processingTime / 1000)}s`,
-          );
-
-          // Add delay between batches if configured
-          if (i < batches.length - 1 && batchConfig.batchDelayMs > 0) {
-            logger.debug(`⏳ Waiting ${batchConfig.batchDelayMs}ms before next batch`);
-            await new Promise(resolve => setTimeout(resolve, batchConfig.batchDelayMs));
-          }
-        } catch (error) {
-          logger.error(
-            `❌ Batch ${i + 1} failed: ${(error as Error).message}`,
-          );
-          
-          // Record failed batch
-          batchResults.push({
-            batchIndex: i,
-            files: batch.files,
-            violations: [],
-            processingTime: Date.now() - startTime,
-            error: (error as Error).message,
-          });
-        }
+        return await this.processInParallel(
+          batches,
+          context,
+          options,
+          batchConfig,
+        );
+      } else {
+        logger.info(`🔄 Using serial processing: ${batches.length} batches`);
+        return await this.processSerially(
+          batches,
+          context,
+          options,
+          batchConfig,
+        );
       }
-
-      const totalTime = Date.now() - startTime;
-      const avgBatchSize = batches.reduce((sum, b) => sum + b.files.length, 0) / batches.length;
-
-      logger.success(
-        `🎯 Batch processing completed: ${allViolations.length} total violations from ${batches.length} batches in ${Math.round(totalTime / 1000)}s (avg ${avgBatchSize.toFixed(1)} files/batch)`,
-      );
-
-      return { violations: allViolations, batchResults };
     } catch (error) {
       logger.error(`Batch processing failed: ${(error as Error).message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Process batches in parallel with concurrency control
+   */
+  private async processInParallel(
+    batches: FileBatch[],
+    context: UnifiedContext,
+    options: ReviewOptions,
+    batchConfig: BatchProcessingConfig,
+  ): Promise<{ violations: Violation[]; batchResults: BatchResult[] }> {
+    const startTime = Date.now();
+    const parallelConfig = batchConfig.parallel!;
+
+    // Calculate optimal concurrency
+    const avgTokensPerBatch =
+      batches.reduce((sum, b) => sum + b.estimatedTokens, 0) / batches.length;
+    const optimalConcurrency = calculateOptimalConcurrency(
+      batches.length,
+      parallelConfig.maxConcurrentBatches,
+      avgTokensPerBatch,
+      this.getSafeTokenLimit(),
+    );
+
+    // Initialize concurrency control
+    const semaphore = new Semaphore(optimalConcurrency);
+    const tokenBudget = new TokenBudgetManager(this.getSafeTokenLimit() * 0.8); // 80% for safety
+
+    logger.info(
+      `🎯 Parallel processing: ${optimalConcurrency} concurrent batches, ${tokenBudget.getTotalBudget()} token budget`,
+    );
+
+    const batchResults: BatchResult[] = new Array(batches.length);
+    const allViolations: Violation[] = [];
+    const processingPromises: Promise<void>[] = [];
+
+    // Process batches with controlled concurrency
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+
+      const processingPromise = this.processBatchWithConcurrency(
+        batch,
+        context,
+        options,
+        semaphore,
+        tokenBudget,
+        i,
+        batches.length,
+      )
+        .then((result) => {
+          batchResults[i] = result; // Maintain order
+          if (result.violations) {
+            allViolations.push(...result.violations);
+          }
+        })
+        .catch((error) => {
+          logger.error(`❌ Batch ${i + 1} failed: ${error.message}`);
+          batchResults[i] = {
+            batchIndex: i,
+            files: batch.files,
+            violations: [],
+            processingTime: 0,
+            error: error.message,
+          };
+
+          // Handle failure strategy
+          if (parallelConfig.failureHandling === "stop-all") {
+            throw error;
+          }
+        });
+
+      processingPromises.push(processingPromise);
+
+      // Add small delay between batch starts to avoid overwhelming
+      if (i < batches.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+
+    // Wait for all batches to complete
+    await Promise.allSettled(processingPromises);
+
+    // Filter out undefined results and sort by batch index
+    const validResults = batchResults
+      .filter((r) => r !== undefined)
+      .sort((a, b) => a.batchIndex - b.batchIndex);
+
+    const totalTime = Date.now() - startTime;
+    const avgBatchSize =
+      batches.reduce((sum, b) => sum + b.files.length, 0) / batches.length;
+    const budgetStatus = tokenBudget.getBudgetStatus();
+
+    logger.success(
+      `🎯 Parallel processing completed: ${allViolations.length} total violations from ${batches.length} batches in ${Math.round(totalTime / 1000)}s (avg ${avgBatchSize.toFixed(1)} files/batch, ${budgetStatus.utilizationPercent}% token usage)`,
+    );
+
+    return { violations: allViolations, batchResults: validResults };
+  }
+
+  /**
+   * Process batches serially (original implementation)
+   */
+  private async processSerially(
+    batches: FileBatch[],
+    context: UnifiedContext,
+    options: ReviewOptions,
+    batchConfig: BatchProcessingConfig,
+  ): Promise<{ violations: Violation[]; batchResults: BatchResult[] }> {
+    const startTime = Date.now();
+    const batchResults: BatchResult[] = [];
+    const allViolations: Violation[] = [];
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      logger.info(
+        `🔄 Processing batch ${i + 1}/${batches.length} (${batch.files.length} files, ${batch.priority} priority, serial)`,
+      );
+
+      try {
+        const batchResult = await this.processBatch(batch, context, options);
+        batchResults.push(batchResult);
+        allViolations.push(...batchResult.violations);
+
+        logger.info(
+          `✅ Batch ${i + 1} completed: ${batchResult.violations.length} violations found in ${Math.round(batchResult.processingTime / 1000)}s`,
+        );
+
+        // Add delay between batches if configured
+        if (i < batches.length - 1 && batchConfig.batchDelayMs > 0) {
+          logger.debug(
+            `⏳ Waiting ${batchConfig.batchDelayMs}ms before next batch`,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, batchConfig.batchDelayMs),
+          );
+        }
+      } catch (error) {
+        logger.error(`❌ Batch ${i + 1} failed: ${(error as Error).message}`);
+
+        // Record failed batch
+        batchResults.push({
+          batchIndex: i,
+          files: batch.files,
+          violations: [],
+          processingTime: Date.now() - startTime,
+          error: (error as Error).message,
+        });
+      }
+    }
+
+    const totalTime = Date.now() - startTime;
+    const avgBatchSize =
+      batches.reduce((sum, b) => sum + b.files.length, 0) / batches.length;
+
+    logger.success(
+      `🎯 Serial processing completed: ${allViolations.length} total violations from ${batches.length} batches in ${Math.round(totalTime / 1000)}s (avg ${avgBatchSize.toFixed(1)} files/batch)`,
+    );
+
+    return { violations: allViolations, batchResults };
+  }
+
+  /**
+   * Process a single batch with concurrency control
+   */
+  private async processBatchWithConcurrency(
+    batch: FileBatch,
+    context: UnifiedContext,
+    options: ReviewOptions,
+    semaphore: Semaphore,
+    tokenBudget: TokenBudgetManager,
+    batchIndex: number,
+    totalBatches: number,
+  ): Promise<BatchResult> {
+    // Acquire semaphore permit
+    await semaphore.acquire();
+
+    try {
+      // Check token budget
+      if (!tokenBudget.allocateForBatch(batchIndex, batch.estimatedTokens)) {
+        throw new Error(
+          `Insufficient token budget for batch ${batchIndex + 1}`,
+        );
+      }
+
+      logger.info(
+        `🔄 Processing batch ${batchIndex + 1}/${totalBatches} (${batch.files.length} files, parallel)`,
+      );
+
+      // Process the batch (existing logic)
+      const result = await this.processBatch(batch, context, options);
+
+      logger.info(
+        `✅ Batch ${batchIndex + 1} completed: ${result.violations.length} violations in ${Math.round(result.processingTime / 1000)}s`,
+      );
+
+      return result;
+    } finally {
+      // Always release resources
+      tokenBudget.releaseBatch(batchIndex);
+      semaphore.release();
     }
   }
 
@@ -1315,7 +1445,7 @@ ${recommendation}
     for (const filePath of files) {
       const priority = this.calculateFilePriority(filePath, batchConfig);
       const estimatedTokens = await this.estimateFileTokens(filePath, context);
-      
+
       prioritizedFiles.push({
         path: filePath,
         priority,
@@ -1327,12 +1457,13 @@ ${recommendation}
     // Sort by priority (high -> medium -> low) then by estimated tokens (smaller first)
     prioritizedFiles.sort((a, b) => {
       const priorityOrder = { high: 0, medium: 1, low: 2 };
-      const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
-      
+      const priorityDiff =
+        priorityOrder[a.priority] - priorityOrder[b.priority];
+
       if (priorityDiff !== 0) {
         return priorityDiff;
       }
-      
+
       return a.estimatedTokens - b.estimatedTokens;
     });
 
@@ -1342,38 +1473,88 @@ ${recommendation}
   /**
    * Calculate file priority based on path and content
    */
-  private calculateFilePriority(filePath: string, batchConfig: BatchProcessingConfig): FilePriority {
+  private calculateFilePriority(
+    filePath: string,
+    batchConfig: BatchProcessingConfig,
+  ): FilePriority {
     if (!batchConfig.prioritizeSecurityFiles) {
       return "medium"; // All files same priority if not prioritizing
     }
 
     const path = filePath.toLowerCase();
-    
+
     // High priority: Security-sensitive files
     const highPriorityPatterns = [
-      /auth/i, /login/i, /password/i, /token/i, /jwt/i, /oauth/i,
-      /crypto/i, /encrypt/i, /decrypt/i, /hash/i, /security/i,
-      /payment/i, /billing/i, /transaction/i, /money/i, /wallet/i,
-      /admin/i, /privilege/i, /permission/i, /role/i, /access/i,
-      /config/i, /env/i, /secret/i, /key/i, /credential/i,
-      /api/i, /endpoint/i, /route/i, /controller/i, /middleware/i,
+      /auth/i,
+      /login/i,
+      /password/i,
+      /token/i,
+      /jwt/i,
+      /oauth/i,
+      /crypto/i,
+      /encrypt/i,
+      /decrypt/i,
+      /hash/i,
+      /security/i,
+      /payment/i,
+      /billing/i,
+      /transaction/i,
+      /money/i,
+      /wallet/i,
+      /admin/i,
+      /privilege/i,
+      /permission/i,
+      /role/i,
+      /access/i,
+      /config/i,
+      /env/i,
+      /secret/i,
+      /key/i,
+      /credential/i,
+      /api/i,
+      /endpoint/i,
+      /route/i,
+      /controller/i,
+      /middleware/i,
     ];
 
-    if (highPriorityPatterns.some(pattern => pattern.test(path))) {
+    if (highPriorityPatterns.some((pattern) => pattern.test(path))) {
       return "high";
     }
 
     // Low priority: Documentation, tests, config files
     const lowPriorityPatterns = [
-      /\.md$/i, /\.txt$/i, /readme/i, /changelog/i, /license/i,
-      /test/i, /spec/i, /\.test\./i, /\.spec\./i, /__tests__/i,
-      /\.json$/i, /\.yaml$/i, /\.yml$/i, /\.toml$/i, /\.ini$/i,
-      /\.lock$/i, /package-lock/i, /yarn\.lock/i, /pnpm-lock/i,
-      /\.gitignore/i, /\.eslint/i, /\.prettier/i, /tsconfig/i,
-      /\.svg$/i, /\.png$/i, /\.jpg$/i, /\.jpeg$/i, /\.gif$/i,
+      /\.md$/i,
+      /\.txt$/i,
+      /readme/i,
+      /changelog/i,
+      /license/i,
+      /test/i,
+      /spec/i,
+      /\.test\./i,
+      /\.spec\./i,
+      /__tests__/i,
+      /\.json$/i,
+      /\.yaml$/i,
+      /\.yml$/i,
+      /\.toml$/i,
+      /\.ini$/i,
+      /\.lock$/i,
+      /package-lock/i,
+      /yarn\.lock/i,
+      /pnpm-lock/i,
+      /\.gitignore/i,
+      /\.eslint/i,
+      /\.prettier/i,
+      /tsconfig/i,
+      /\.svg$/i,
+      /\.png$/i,
+      /\.jpg$/i,
+      /\.jpeg$/i,
+      /\.gif$/i,
     ];
 
-    if (lowPriorityPatterns.some(pattern => pattern.test(path))) {
+    if (lowPriorityPatterns.some((pattern) => pattern.test(path))) {
       return "low";
     }
 
@@ -1384,17 +1565,20 @@ ${recommendation}
   /**
    * Estimate token count for a file
    */
-  private async estimateFileTokens(filePath: string, context: UnifiedContext): Promise<number> {
+  private async estimateFileTokens(
+    filePath: string,
+    context: UnifiedContext,
+  ): Promise<number> {
     try {
       let content = "";
-      
+
       if (context.fileDiffs?.has(filePath)) {
         content = context.fileDiffs.get(filePath) || "";
       } else if (context.prDiff) {
         // Extract file content from whole diff
         const diffLines = context.prDiff.diff.split("\n");
         let inFile = false;
-        
+
         for (const line of diffLines) {
           if (line.startsWith("diff --git") && line.includes(filePath)) {
             inFile = true;
@@ -1411,13 +1595,15 @@ ${recommendation}
 
       // Rough estimation: ~4 characters per token
       const estimatedTokens = Math.ceil(content.length / 4);
-      
+
       // Add base overhead for context and prompts
       const baseOverhead = 1000;
-      
+
       return estimatedTokens + baseOverhead;
     } catch (error) {
-      logger.debug(`Error estimating tokens for ${filePath}: ${(error as Error).message}`);
+      logger.debug(
+        `Error estimating tokens for ${filePath}: ${(error as Error).message}`,
+      );
       return 2000; // Default estimate
     }
   }
@@ -1431,7 +1617,7 @@ ${recommendation}
   ): FileBatch[] {
     const batches: FileBatch[] = [];
     const maxTokensPerBatch = this.getSafeTokenLimit() * 0.7; // Use 70% of limit for safety
-    
+
     let currentBatch: FileBatch = {
       files: [],
       priority: "medium",
@@ -1440,13 +1626,18 @@ ${recommendation}
     };
 
     for (const file of prioritizedFiles) {
-      const wouldExceedTokens = currentBatch.estimatedTokens + file.estimatedTokens > maxTokensPerBatch;
-      const wouldExceedFileCount = currentBatch.files.length >= batchConfig.maxFilesPerBatch;
-      
-      if ((wouldExceedTokens || wouldExceedFileCount) && currentBatch.files.length > 0) {
+      const wouldExceedTokens =
+        currentBatch.estimatedTokens + file.estimatedTokens > maxTokensPerBatch;
+      const wouldExceedFileCount =
+        currentBatch.files.length >= batchConfig.maxFilesPerBatch;
+
+      if (
+        (wouldExceedTokens || wouldExceedFileCount) &&
+        currentBatch.files.length > 0
+      ) {
         // Finalize current batch
         batches.push(currentBatch);
-        
+
         // Start new batch
         currentBatch = {
           files: [],
@@ -1459,10 +1650,12 @@ ${recommendation}
       // Add file to current batch
       currentBatch.files.push(file.path);
       currentBatch.estimatedTokens += file.estimatedTokens;
-      
+
       // Update batch priority to highest priority file in batch
-      if (file.priority === "high" || 
-          (file.priority === "medium" && currentBatch.priority === "low")) {
+      if (
+        file.priority === "high" ||
+        (file.priority === "medium" && currentBatch.priority === "low")
+      ) {
         currentBatch.priority = file.priority;
       }
     }
@@ -1488,13 +1681,17 @@ ${recommendation}
     try {
       // Create batch-specific context
       const batchContext = this.createBatchContext(batch, context);
-      
+
       // Build batch-specific prompt
-      const batchPrompt = this.buildBatchAnalysisPrompt(batchContext, batch, options);
-      
+      const batchPrompt = this.buildBatchAnalysisPrompt(
+        batchContext,
+        batch,
+        options,
+      );
+
       // Analyze with AI
       const violations = await this.analyzeWithAI(batchPrompt, batchContext);
-      
+
       const processingTime = Date.now() - startTime;
 
       return {
@@ -1505,7 +1702,7 @@ ${recommendation}
       };
     } catch (error) {
       const processingTime = Date.now() - startTime;
-      
+
       return {
         batchIndex: batch.batchIndex,
         files: batch.files,
@@ -1519,10 +1716,13 @@ ${recommendation}
   /**
    * Create context for a specific batch
    */
-  private createBatchContext(batch: FileBatch, originalContext: UnifiedContext): UnifiedContext {
+  private createBatchContext(
+    batch: FileBatch,
+    originalContext: UnifiedContext,
+  ): UnifiedContext {
     // Create a filtered context containing only the files in this batch
     const batchFileDiffs = new Map<string, string>();
-    
+
     if (originalContext.fileDiffs) {
       for (const filePath of batch.files) {
         const diff = originalContext.fileDiffs.get(filePath);
@@ -1657,7 +1857,9 @@ Return ONLY valid JSON:
     violation: Violation,
     context: UnifiedContext,
   ): { lineNumber: number; lineType: "ADDED" | "REMOVED" | "CONTEXT" } | null {
-    if (!violation.file || !violation.code_snippet) {return null;}
+    if (!violation.file || !violation.code_snippet) {
+      return null;
+    }
 
     try {
       // Get the diff for this specific file
@@ -1681,7 +1883,9 @@ Return ONLY valid JSON:
                 break;
               }
             }
-            if (fileStartIndex >= 0) {break;}
+            if (fileStartIndex >= 0) {
+              break;
+            }
           }
         }
 
@@ -1755,7 +1959,7 @@ Return ONLY valid JSON:
    */
   private detectLanguageFromFile(filePath: string): string {
     const ext = filePath.split(".").pop()?.toLowerCase();
-    
+
     const languageMap: Record<string, string> = {
       js: "javascript",
       jsx: "javascript",
@@ -1789,7 +1993,6 @@ Return ONLY valid JSON:
 
     return languageMap[ext || ""] || "text";
   }
-
 
   /**
    * Generate all possible path variations for a file

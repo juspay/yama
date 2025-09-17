@@ -7,7 +7,12 @@ core_technologies:
 libraries_and_bindings:
   - name: "@juspay/neurolink"
     purpose: "AI integration for code analysis and text generation"
-    usage: "Dynamic import due to ESM"
+    usage: "Dynamic import due to ESM, supports multiple providers and models"
+    features:
+      - "Multi-provider support (Google AI, OpenAI, Anthropic, Azure, Bedrock)"
+      - "Auto-provider selection and fallback capabilities"
+      - "Analytics and evaluation tracking"
+      - "Token usage monitoring and optimization"
   - name: "@nexus2520/bitbucket-mcp-server"
     purpose: "Bitbucket API integration via MCP"
     usage: "Dynamic import for handlers"
@@ -19,6 +24,9 @@ libraries_and_bindings:
     purpose: "CLI argument parsing"
   - name: "node-cache"
     purpose: "In-memory caching"
+  - name: "crypto"
+    purpose: "Hash generation for deduplication and content fingerprinting"
+    usage: "SHA-256 hashing for exact duplicate detection"
 
 context_management:
   - name: "Memory Bank System"
@@ -90,6 +98,47 @@ technical_patterns:
       Automatic memory bank discovery and loading
     files:
       - "src/utils/ConfigManager.ts"
+
+  - name: "Multi-Instance Processing Pattern"
+    description: "Orchestrate multiple AI instances for consensus-based analysis"
+    implementation: |
+      Parallel execution of multiple CodeReviewer instances
+      Instance-specific AI provider and model configurations
+      Concurrency control with semaphores and token budget management
+      Result aggregation with comprehensive deduplication
+    files:
+      - "src/features/MultiInstanceProcessor.ts"
+
+  - name: "Advanced Deduplication Pattern"
+    description: "Multi-level deduplication for eliminating redundant violations"
+    implementation: |
+      Level 1: Exact hash-based duplicate removal using SHA-256
+      Level 2: Normalized duplicate removal (whitespace, quotes, case)
+      Level 3: Same file+line duplicate resolution with severity prioritization
+      Level 4: AI-powered semantic similarity analysis
+    files:
+      - "src/utils/ExactDuplicateRemover.ts"
+      - "src/utils/ContentSimilarityService.ts"
+
+  - name: "Parallel Processing with Resource Management"
+    description: "Sophisticated concurrency control and resource management"
+    implementation: |
+      Semaphore-based concurrency control with configurable permits
+      Token budget manager with allocation tracking and safety margins
+      Optimal concurrency calculation based on resources and constraints
+      Graceful resource cleanup and error recovery
+    files:
+      - "src/utils/ParallelProcessing.ts"
+
+  - name: "Semantic Similarity Analysis Pattern"
+    description: "AI-powered content similarity analysis for intelligent deduplication"
+    implementation: |
+      Batch processing of similarity comparisons to manage token usage
+      Structured content extraction from violations and comments
+      AI-powered semantic analysis with configurable similarity thresholds
+      Graceful fallback on analysis failures
+    files:
+      - "src/utils/ContentSimilarityService.ts"
 
 api_integrations:
   bitbucket:

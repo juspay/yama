@@ -51,15 +51,53 @@ features:
       - "Performance bottlenecks"
       - "Error handling"
       - "Code quality"
-    
+
     # NEW: Batch Processing Configuration
     batchProcessing:
       enabled: true # Enable batch processing for large PRs
       maxFilesPerBatch: 3 # Maximum files to process in each batch
       prioritizeSecurityFiles: true # Process security-sensitive files first
-      parallelBatches: false # Process batches sequentially for reliability
+      parallelBatches: false # Keep for backward compatibility
       batchDelayMs: 1000 # Delay between batches in milliseconds
       singleRequestThreshold: 5 # Use single request for PRs with ≤5 files
+
+      # NEW: Parallel Processing Configuration
+      parallel:
+        enabled: true # Enable parallel processing by default
+        maxConcurrentBatches: 3 # Maximum concurrent batches
+        rateLimitStrategy: "fixed" # Options: fixed, adaptive
+        tokenBudgetDistribution: "equal" # Options: equal, weighted
+        failureHandling: "continue" # Options: continue, stop-all
+
+    # Multi-Instance Processing Configuration
+    multiInstance:
+      enabled: true # Enable multi-instance review
+      instanceCount: 2 # Number of instances to run in parallel
+      instances:
+        - name: "primary"
+          provider: "vertex"
+          model: "gemini-2.5-pro"
+          temperature: 0.3
+          weight: 1.0
+        - name: "secondary"
+          provider: "vertex"
+          model: "gemini-2.5-pro"
+          temperature: 0.1
+          weight: 1.0
+      deduplication:
+        enabled: true
+        similarityThreshold: 40 # Similarity percentage threshold (0-100)
+        maxCommentsToPost: 30
+        prioritizeBy: "severity"
+
+    # NEW: Semantic Comment Deduplication Configuration
+    semanticDeduplication:
+      enabled: true # Enable AI-powered semantic similarity analysis
+      similarityThreshold: 70 # Similarity percentage threshold (0-100)
+      batchSize: 15 # Number of violations to process per batch
+      timeout: "5m" # Timeout for similarity analysis
+      fallbackOnError: true # Return all violations if AI analysis fails
+      logMatches: true # Log detailed similarity match information
 
   # Description Enhancement Configuration
   descriptionEnhancement:
@@ -154,8 +192,8 @@ monitoring:
 # Memory Bank Configuration
 memoryBank:
   enabled: true
-  path: "memory-bank"  # Primary path to look for memory bank files
-  fallbackPaths:       # Optional fallback paths if primary doesn't exist
+  path: "memory-bank" # Primary path to look for memory bank files
+  fallbackPaths: # Optional fallback paths if primary doesn't exist
     - "docs/memory-bank"
     - ".memory-bank"
     - "project-docs/context"

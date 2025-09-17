@@ -396,8 +396,6 @@ export class Guardian {
       return { skipped: true, reason: "disabled in config" };
     }
 
-    logger.phase("🔍 Executing code review...");
-
     const reviewOptions: ReviewOptions = {
       workspace: context.identifier.workspace,
       repository: context.identifier.repository,
@@ -408,10 +406,17 @@ export class Guardian {
       contextLines: this.config.features.codeReview.contextLines,
     };
 
-    // Use the already gathered context instead of gathering again
+    logger.phase("🔍 Executing code review...");
+
+    // Check if multi-instance processing is configured
+    const multiInstanceConfig = (this.config as any).features?.codeReview
+      ?.multiInstance;
+
+    // Use code review with multi-instance support
     return await this.codeReviewer.reviewCodeWithContext(
       context,
       reviewOptions,
+      multiInstanceConfig,
     );
   }
 
