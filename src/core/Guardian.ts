@@ -22,7 +22,7 @@ import { ContextGatherer, UnifiedContext } from "./ContextGatherer.js";
 import { CodeReviewer } from "../features/CodeReviewer.js";
 import { DescriptionEnhancer } from "../features/DescriptionEnhancer.js";
 
-import { logger } from "../utils/Logger.js";
+import { logger, createLogger } from "../utils/Logger.js";
 import { configManager } from "../utils/ConfigManager.js";
 import { cache } from "../utils/Cache.js";
 
@@ -34,6 +34,7 @@ export class Guardian {
   private descriptionEnhancer!: DescriptionEnhancer;
   private neurolink!: any;
   private initialized = false;
+  private logger = logger; // Default logger, will be updated after config load
 
   constructor(config?: Partial<GuardianConfig>) {
     this.config = {} as GuardianConfig;
@@ -51,11 +52,21 @@ export class Guardian {
     }
 
     try {
-      logger.badge();
-      logger.phase("🚀 Initializing Yama...");
+      // Load configuration first
+      const loaded = await configManager.loadConfig(configPath);
+      // Loaded file first, then in-memory overrides last
+      this.config = { ...loaded, ...this.config };
 
-      // Load configuration
-      this.config = await configManager.loadConfig(configPath);
+      // Create logger with banner configuration if needed
+      const showBanner = this.config.display?.showBanner ?? true;
+      if (showBanner !== true) {
+        // Only create a new logger if we need to change the banner setting
+        this.logger = createLogger(logger.getConfig(), showBanner);
+      }
+      // Otherwise, keep using the default logger
+
+      this.logger.badge();
+      this.logger.phase("🚀 Initializing Yama...");
 
       // Initialize providers
       this.bitbucketProvider = new BitbucketProvider(
