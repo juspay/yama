@@ -1,3 +1,9 @@
+# [1.4.0](https://github.com/juspay/yama/compare/v1.3.0...v1.4.0) (2025-09-18)
+
+### Features
+
+- **Multi-Instance:** Added support for Multi-Instance Processing and Deduplication ([2724758](https://github.com/juspay/yama/commit/27247587f44740b26218f23694ebdcde4c323266))
+
 # [1.3.0](https://github.com/juspay/yama/compare/v1.2.0...v1.3.0) (2025-09-01)
 
 ### Features
