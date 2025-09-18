@@ -1,6 +1,6 @@
 {
   "name": "@juspay/yama",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Enterprise-grade Pull Request automation toolkit with AI-powered code review and description enhancement",
   "keywords": [
     "pr",

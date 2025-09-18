@@ -1,3 +1,9 @@
+## [1.4.1](https://github.com/juspay/yama/compare/v1.4.0...v1.4.1) (2025-09-18)
+
+### Bug Fixes
+
+- **config:** resolve config layering issue in Guardian initialization ([6a27428](https://github.com/juspay/yama/commit/6a2742863b73dee458f83eadc464f41290fe52d9))
+
 # [1.4.0](https://github.com/juspay/yama/compare/v1.3.0...v1.4.0) (2025-09-18)
 
 ### Features
