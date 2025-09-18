@@ -1,6 +1,10 @@
 # Yama Configuration Example
 # This file contains all available configuration options with explanations
 
+# Display Configuration
+display:
+  showBanner: true # Show ASCII art banner on startup (default: true)
+
 # AI Provider Configuration
 providers:
   ai:

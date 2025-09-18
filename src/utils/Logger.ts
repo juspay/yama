@@ -20,8 +20,12 @@ const YAMA_BADGE = `
 
 export class Logger implements ILogger {
   private options: LoggerOptions;
+  private showBanner: boolean;
 
-  constructor(options: Partial<LoggerOptions> = {}) {
+  constructor(
+    options: Partial<LoggerOptions> = {},
+    showBanner: boolean = true,
+  ) {
     this.options = {
       level: "info",
       verbose: false,
@@ -29,6 +33,7 @@ export class Logger implements ILogger {
       colors: true,
       ...options,
     };
+    this.showBanner = showBanner;
   }
 
   private shouldLog(level: LogLevel): boolean {
@@ -74,7 +79,9 @@ export class Logger implements ILogger {
   }
 
   private colorize(level: LogLevel, text: string): string {
-    if (!this.options.colors) {return text;}
+    if (!this.options.colors) {
+      return text;
+    }
 
     switch (level) {
       case "debug":
@@ -91,31 +98,41 @@ export class Logger implements ILogger {
   }
 
   debug(message: string, ...args: any[]): void {
-    if (!this.shouldLog("debug") || !this.options.verbose) {return;}
+    if (!this.shouldLog("debug") || !this.options.verbose) {
+      return;
+    }
     const formatted = this.formatMessage("debug", `🔍 ${message}`, ...args);
     console.log(this.colorize("debug", formatted));
   }
 
   info(message: string, ...args: any[]): void {
-    if (!this.shouldLog("info")) {return;}
+    if (!this.shouldLog("info")) {
+      return;
+    }
     const formatted = this.formatMessage("info", `ℹ️  ${message}`, ...args);
     console.log(this.colorize("info", formatted));
   }
 
   warn(message: string, ...args: any[]): void {
-    if (!this.shouldLog("warn")) {return;}
+    if (!this.shouldLog("warn")) {
+      return;
+    }
     const formatted = this.formatMessage("warn", `⚠️  ${message}`, ...args);
     console.warn(this.colorize("warn", formatted));
   }
 
   error(message: string, ...args: any[]): void {
-    if (!this.shouldLog("error")) {return;}
+    if (!this.shouldLog("error")) {
+      return;
+    }
     const formatted = this.formatMessage("error", `❌ ${message}`, ...args);
     console.error(this.colorize("error", formatted));
   }
 
   badge(): void {
-    console.log(chalk.cyan(YAMA_BADGE));
+    if (this.showBanner) {
+      console.log(chalk.cyan(YAMA_BADGE));
+    }
   }
 
   phase(message: string): void {
@@ -245,6 +262,9 @@ if (process.env.YAMA_DEBUG === "true") {
 export const logger = new Logger(loggerOptions);
 
 // Export factory function
-export function createLogger(options?: Partial<LoggerOptions>): Logger {
-  return new Logger(options);
+export function createLogger(
+  options?: Partial<LoggerOptions>,
+  showBanner?: boolean,
+): Logger {
+  return new Logger(options, showBanner);
 }

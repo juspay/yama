@@ -317,7 +317,12 @@ export interface EnhancementResult {
 // Configuration Types
 // ============================================================================
 
+export interface DisplayConfig {
+  showBanner: boolean;
+}
+
 export interface GuardianConfig {
+  display?: DisplayConfig;
   providers: {
     ai: AIProviderConfig;
     git: GitProviderConfig;
