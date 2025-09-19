@@ -1,3 +1,9 @@
+# [1.5.0](https://github.com/juspay/yama/compare/v1.4.1...v1.5.0) (2025-09-19)
+
+### Features
+
+- **summary:** Added config support for summary comment ([666ea5c](https://github.com/juspay/yama/commit/666ea5c78b93d2ef3df24a09f95581a4b8e75650))
+
 ## [1.4.1](https://github.com/juspay/yama/compare/v1.4.0...v1.4.1) (2025-09-18)
 
 ### Bug Fixes
