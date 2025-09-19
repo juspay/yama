@@ -647,8 +647,10 @@ Return ONLY valid JSON:
       }
     }
 
-    // Post summary comment (include failed comments info if any)
-    if (uniqueViolations.length > 0) {
+    // Post summary comment (include failed comments info if any) - only if enabled in config
+    const shouldPostSummary = this.reviewConfig.postSummaryComment !== false; // Default to true if not specified
+
+    if (uniqueViolations.length > 0 && shouldPostSummary) {
       try {
         const summaryComment = this.generateSummaryComment(
           uniqueViolations,
@@ -666,6 +668,8 @@ Return ONLY valid JSON:
           `❌ Failed to post summary comment: ${(error as Error).message}`,
         );
       }
+    } else if (uniqueViolations.length > 0 && !shouldPostSummary) {
+      logger.debug("📝 Summary comment posting disabled in configuration");
     }
 
     logger.success(`✅ Posted ${commentsPosted} comments successfully`);

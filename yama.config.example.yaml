@@ -29,6 +29,7 @@ features:
   # Code Review Configuration
   codeReview:
     enabled: true
+    postSummaryComment: true # Post summary comment at the end of review (default: true)
     severityLevels: ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"]
     categories:
       [
