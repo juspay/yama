@@ -352,6 +352,7 @@ export interface CodeReviewConfig {
   systemPrompt?: string;
   analysisTemplate?: string;
   focusAreas?: string[];
+  postSummaryComment?: boolean; // Control whether to post summary comment (default: true)
   batchProcessing?: BatchProcessingConfig;
   multiInstance?: MultiInstanceConfig;
   semanticDeduplication?: SemanticDeduplicationConfig;

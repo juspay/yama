@@ -254,6 +254,14 @@ node dist/index.js guardian --branch <branch-name> --review --enhance
 - Enable/disable memory bank features via configuration
 - Integration with Cline's memory bank system for context preservation
 
+## Summary Comment Configuration (NEW)
+- Added `postSummaryComment` boolean option to CodeReviewConfig
+- Controls whether the comprehensive summary comment is posted at the end of reviews
+- Default: true (maintains backward compatibility)
+- Set to false to disable summary comments and only post inline comments
+- Useful for teams that prefer minimal comment footprint or have their own summary mechanisms
+- Configuration location: `features.codeReview.postSummaryComment`
+
 ### Context Management Patterns
 - YAML-based memory bank files for better merge handling
 - Automatic memory bank discovery and loading
