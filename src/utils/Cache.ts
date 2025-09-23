@@ -4,14 +4,196 @@
  */
 
 import NodeCache from "node-cache";
-import { Cache as ICache, CacheOptions } from "../types/index.js";
+import {
+  Cache as ICache,
+  CacheOptions,
+  CacheError,
+  CacheSystemError,
+  CacheStorageError,
+  CacheOperationError,
+  CacheErrorCode,
+} from "../types/index.js";
 import { logger } from "./Logger.js";
+
+/**
+ * Enhanced cache error detection utility
+ * Provides multi-layer error classification to avoid false positives
+ */
+class CacheErrorDetector {
+  /**
+   * Detect if an error is cache-related using multiple strategies
+   */
+  static isCacheError(
+    error: unknown,
+    operation?: string,
+    key?: string,
+  ): boolean {
+    // Strategy 1: Check error type/class (most reliable)
+    if (error instanceof CacheError) {
+      return true;
+    }
+
+    // Strategy 2: Check for specific cache error patterns in NodeCache
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+      const stackTrace = error.stack?.toLowerCase() || "";
+
+      // Check for NodeCache-specific error patterns
+      const nodeCachePatterns = [
+        /node_modules\/node-cache/,
+        /cache\.js:\d+/,
+        /nodecache/,
+      ];
+
+      const isNodeCacheError = nodeCachePatterns.some((pattern) =>
+        pattern.test(stackTrace),
+      );
+
+      if (isNodeCacheError) {
+        return true;
+      }
+
+      // Strategy 3: Check for specific cache-related error messages (more targeted)
+      const cacheSpecificPatterns = [
+        /cache.*(?:full|exhausted|limit)/,
+        /memory.*(?:cache|allocation).*(?:failed|error)/,
+        /storage.*(?:cache|quota).*(?:exceeded|full)/,
+        /cache.*(?:initialization|setup).*(?:failed|error)/,
+        /ttl.*(?:invalid|expired)/,
+        /cache.*(?:key|value).*(?:invalid|malformed)/,
+      ];
+
+      const hasCacheSpecificError = cacheSpecificPatterns.some((pattern) =>
+        pattern.test(errorMessage),
+      );
+
+      if (hasCacheSpecificError) {
+        return true;
+      }
+
+      // Strategy 4: Context-aware detection
+      if (operation && key) {
+        // If we're in a cache operation and get memory/storage errors, likely cache-related
+        const cacheOperations = [
+          "get",
+          "set",
+          "del",
+          "clear",
+          "has",
+          "getorset",
+          "getorsetresilient",
+        ];
+        const isCacheOperation = cacheOperations.includes(
+          operation.toLowerCase(),
+        );
+
+        const contextualPatterns = [
+          /^out of memory$/,
+          /storage quota exceeded/,
+          /disk full/,
+        ];
+
+        if (
+          isCacheOperation &&
+          contextualPatterns.some((pattern) => pattern.test(errorMessage))
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Classify cache error for better handling and logging
+   */
+  static classifyError(
+    error: unknown,
+    operation?: string,
+    key?: string,
+  ): {
+    isCache: boolean;
+    category: "system" | "storage" | "network" | "operation" | "unknown";
+    confidence: "high" | "medium" | "low";
+    reason: string;
+  } {
+    if (!this.isCacheError(error, operation, key)) {
+      return {
+        isCache: false,
+        category: "unknown",
+        confidence: "high",
+        reason: "Not identified as cache-related error",
+      };
+    }
+
+    if (error instanceof CacheError) {
+      const category = error.code.includes("STORAGE")
+        ? "storage"
+        : error.code.includes("NETWORK")
+          ? "network"
+          : error.code.includes("SYSTEM")
+            ? "system"
+            : "operation";
+
+      return {
+        isCache: true,
+        category,
+        confidence: "high",
+        reason: `Explicit cache error: ${error.code}`,
+      };
+    }
+
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      const stack = error.stack?.toLowerCase() || "";
+
+      // High confidence patterns
+      if (/node_modules\/node-cache/.test(stack)) {
+        return {
+          isCache: true,
+          category: "system",
+          confidence: "high",
+          reason: "NodeCache stack trace detected",
+        };
+      }
+
+      // Medium confidence patterns
+      if (/cache.*(?:full|exhausted)/.test(message)) {
+        return {
+          isCache: true,
+          category: "storage",
+          confidence: "medium",
+          reason: "Cache capacity error pattern",
+        };
+      }
+
+      if (/memory.*cache.*failed/.test(message)) {
+        return {
+          isCache: true,
+          category: "system",
+          confidence: "medium",
+          reason: "Memory allocation error in cache context",
+        };
+      }
+    }
+
+    return {
+      isCache: true,
+      category: "unknown",
+      confidence: "low",
+      reason: "Fallback detection",
+    };
+  }
+}
 
 export class Cache implements ICache {
   private cache: NodeCache;
   private statsData = {
     hits: 0,
     misses: 0,
+    cacheErrors: 0,
+    nonCacheErrors: 0,
   };
 
   constructor(options: CacheOptions = {}) {
@@ -43,18 +225,24 @@ export class Cache implements ICache {
   }
 
   /**
-   * Get value from cache
+   * Get value from cache with resilient error handling
    */
   get<T>(key: string): T | undefined {
-    const value = this.cache.get<T>(key);
+    try {
+      const value = this.cache.get<T>(key);
 
-    if (value !== undefined) {
-      this.statsData.hits++;
-      logger.debug(`Cache HIT: ${key}`);
-      return value;
-    } else {
+      if (value !== undefined) {
+        this.statsData.hits++;
+        logger.debug(`Cache HIT: ${key}`);
+        return value;
+      } else {
+        this.statsData.misses++;
+        logger.debug(`Cache MISS: ${key}`);
+        return undefined;
+      }
+    } catch (error) {
       this.statsData.misses++;
-      logger.debug(`Cache MISS: ${key}`);
+      logger.warn(`Cache GET error for ${key}, treating as miss:`, error);
       return undefined;
     }
   }
@@ -113,12 +301,21 @@ export class Cache implements ICache {
   /**
    * Get cache statistics
    */
-  stats(): { hits: number; misses: number; keys: number; size: number } {
+  stats(): {
+    hits: number;
+    misses: number;
+    keys: number;
+    size: number;
+    cacheErrors: number;
+    nonCacheErrors: number;
+  } {
     return {
       hits: this.statsData.hits,
       misses: this.statsData.misses,
       keys: this.cache.keys().length,
       size: this.cache.getStats().keys,
+      cacheErrors: this.statsData.cacheErrors,
+      nonCacheErrors: this.statsData.nonCacheErrors,
     };
   }
 
@@ -130,13 +327,14 @@ export class Cache implements ICache {
   }
 
   /**
-   * Get or set pattern - common caching pattern
+   * Get or set pattern with automatic fallback on cache failures
    */
   async getOrSet<T>(
     key: string,
     fetchFn: () => Promise<T>,
     ttl?: number,
   ): Promise<T> {
+    // Try to get from cache with resilient error handling
     const cached = this.get<T>(key);
     if (cached !== undefined) {
       return cached;
@@ -145,10 +343,66 @@ export class Cache implements ICache {
     try {
       logger.debug(`Cache FETCH: ${key}`);
       const value = await fetchFn();
-      this.set(key, value, ttl);
+
+      // Try to cache the result, but don't fail if caching fails
+      try {
+        this.set(key, value, ttl);
+      } catch (cacheError) {
+        logger.warn(
+          `Cache SET failed for ${key}, continuing without cache:`,
+          cacheError,
+        );
+      }
+
       return value;
     } catch (error) {
       logger.error(`Cache FETCH error: ${key}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Resilient get or set pattern that bypasses cache entirely on cache system failures
+   */
+  async getOrSetResilient<T>(
+    key: string,
+    fetchFn: () => Promise<T>,
+    ttl?: number,
+  ): Promise<T> {
+    try {
+      // Try normal cache flow first
+      return await this.getOrSet(key, fetchFn, ttl);
+    } catch (error) {
+      // Use enhanced error detection to determine if this is a cache-related error
+      const errorClassification = CacheErrorDetector.classifyError(
+        error,
+        "getOrSet",
+        key,
+      );
+
+      if (errorClassification.isCache) {
+        // Track cache error statistics
+        this.statsData.cacheErrors++;
+
+        logger.warn(
+          `Cache system error detected for ${key} (${errorClassification.confidence} confidence: ${errorClassification.reason}), bypassing cache entirely`,
+          {
+            error: error instanceof Error ? error.message : String(error),
+            category: errorClassification.category,
+            confidence: errorClassification.confidence,
+            key,
+            operation: "getOrSet",
+          },
+        );
+
+        // Bypass cache completely and just fetch the data
+        return await fetchFn();
+      }
+
+      // Track non-cache errors for debugging
+      this.statsData.nonCacheErrors++;
+
+      // Re-throw non-cache errors
       throw error;
     }
   }

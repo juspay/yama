@@ -12,6 +12,7 @@ import {
 } from "../../types/index.js";
 import { logger } from "../../utils/Logger.js";
 import { cache, Cache } from "../../utils/Cache.js";
+import { RetryManager } from "../../utils/RetryManager.js";
 
 export interface BitbucketMCPResponse {
   content?: Array<{ text?: string }>;
@@ -145,19 +146,23 @@ export class BitbucketProvider {
 
     const cacheKey = Cache.keys.branchInfo(workspace, repository, branch);
 
-    return cache.getOrSet(
+    return cache.getOrSetResilient(
       cacheKey,
       async () => {
         logger.debug(
           `Finding PR for branch: ${workspace}/${repository}@${branch}`,
         );
 
-        const rawBranchData = await this.branchHandlers.handleGetBranch({
-          workspace,
-          repository,
-          branch_name: branch,
-          include_merged_prs: false,
-        });
+        const rawBranchData = await RetryManager.withRetry(
+          () =>
+            this.branchHandlers.handleGetBranch({
+              workspace,
+              repository,
+              branch_name: branch,
+              include_merged_prs: false,
+            }),
+          `Find PR for branch ${workspace}/${repository}@${branch}`,
+        );
 
         const branchData = this.parseMCPResponse(rawBranchData);
 
@@ -211,19 +216,22 @@ export class BitbucketProvider {
 
     const cacheKey = Cache.keys.prInfo(workspace, repository, pullRequestId);
 
-    return cache.getOrSet(
+    return cache.getOrSetResilient(
       cacheKey,
       async () => {
         logger.debug(
           `Getting PR details: ${workspace}/${repository}#${pullRequestId}`,
         );
 
-        const rawPRDetails =
-          await this.pullRequestHandlers.handleGetPullRequest({
-            workspace,
-            repository,
-            pull_request_id: pullRequestId,
-          });
+        const rawPRDetails = await RetryManager.withRetry(
+          () =>
+            this.pullRequestHandlers.handleGetPullRequest({
+              workspace,
+              repository,
+              pull_request_id: pullRequestId,
+            }),
+          `Get PR details ${workspace}/${repository}#${pullRequestId}`,
+        );
 
         const prData = this.parseMCPResponse(rawPRDetails);
 
@@ -282,7 +290,7 @@ export class BitbucketProvider {
         ? `file-diff:${workspace}:${repository}:${pullRequestId}:${includePatterns[0]}`
         : Cache.keys.prDiff(workspace, repository, pullRequestId);
 
-    return cache.getOrSet(
+    return cache.getOrSetResilient(
       cacheKey,
       async () => {
         logger.debug(
@@ -305,8 +313,10 @@ export class BitbucketProvider {
           args.include_patterns = includePatterns;
         }
 
-        const rawDiff =
-          await this.reviewHandlers.handleGetPullRequestDiff(args);
+        const rawDiff = await RetryManager.withRetry(
+          () => this.reviewHandlers.handleGetPullRequestDiff(args),
+          `Get PR diff ${workspace}/${repository}#${pullRequestId}`,
+        );
 
         const diffData = this.parseMCPResponse(rawDiff);
 
@@ -339,24 +349,41 @@ export class BitbucketProvider {
       branch,
     );
 
-    return cache.getOrSet(
+    return cache.getOrSetResilient(
       cacheKey,
       async () => {
         logger.debug(
           `Getting file content: ${workspace}/${repository}/${filePath}@${branch}`,
         );
 
-        const result = await this.fileHandlers.handleGetFileContent({
-          workspace,
-          repository,
-          file_path: filePath,
-          branch,
-        });
+        const result = await RetryManager.withRetry(
+          () =>
+            this.fileHandlers.handleGetFileContent({
+              workspace,
+              repository,
+              file_path: filePath,
+              branch,
+            }),
+          `Get file content ${workspace}/${repository}/${filePath}@${branch}`,
+        );
 
-        // Handle file content response directly (don't JSON parse)
-        if (result.content && result.content[0] && result.content[0].text) {
-          const fileResponse = JSON.parse(result.content[0].text);
-          return fileResponse.content || "";
+        // Handle file content response with proper error handling for plain text files
+        if (
+          (result as any).content &&
+          (result as any).content[0] &&
+          (result as any).content[0].text
+        ) {
+          try {
+            const fileResponse = JSON.parse((result as any).content[0].text);
+            return fileResponse.content || "";
+          } catch (parseError) {
+            // If JSON parsing fails, the content might be plain text (like .clinerules)
+            // Return the text content directly
+            logger.debug(
+              `JSON parsing failed for ${filePath}, treating as plain text: ${(parseError as Error).message}`,
+            );
+            return (result as any).content[0].text || "";
+          }
         }
 
         // Handle direct response format
@@ -384,19 +411,23 @@ export class BitbucketProvider {
       branch,
     );
 
-    return cache.getOrSet(
+    return cache.getOrSetResilient(
       cacheKey,
       async () => {
         logger.debug(
           `Listing directory: ${workspace}/${repository}/${path}@${branch}`,
         );
 
-        const result = await this.fileHandlers.handleListDirectoryContent({
-          workspace,
-          repository,
-          path,
-          branch,
-        });
+        const result = await RetryManager.withRetry(
+          () =>
+            this.fileHandlers.handleListDirectoryContent({
+              workspace,
+              repository,
+              path,
+              branch,
+            }),
+          `List directory ${workspace}/${repository}/${path}@${branch}`,
+        );
 
         const dirData = this.parseMCPResponse(result);
         return (dirData as any).contents || [];
@@ -425,12 +456,16 @@ export class BitbucketProvider {
       );
       logger.debug(`Description length: ${description.length} characters`);
 
-      const result = await this.pullRequestHandlers.handleUpdatePullRequest({
-        workspace,
-        repository,
-        pull_request_id: pullRequestId,
-        description: description,
-      });
+      const result = await RetryManager.withRetry(
+        () =>
+          this.pullRequestHandlers.handleUpdatePullRequest({
+            workspace,
+            repository,
+            pull_request_id: pullRequestId,
+            description: description,
+          }),
+        `Update PR description ${workspace}/${repository}#${pullRequestId}`,
+      );
 
       // Log the raw MCP response
       logger.debug(
@@ -547,12 +582,19 @@ export class BitbucketProvider {
 
       logger.debug(`🔍 MCP addComment args: ${JSON.stringify(args, null, 2)}`);
 
-      const result = await this.pullRequestHandlers.handleAddComment(args);
+      const result = await RetryManager.withRetry(
+        () => this.pullRequestHandlers.handleAddComment(args),
+        `Add comment to PR ${workspace}/${repository}#${pullRequestId}`,
+      );
 
       // Parse response exactly like pr-police.js
       let commentData;
-      if (result.content && result.content[0] && result.content[0].text) {
-        commentData = JSON.parse(result.content[0].text);
+      if (
+        (result as any).content &&
+        (result as any).content[0] &&
+        (result as any).content[0].text
+      ) {
+        commentData = JSON.parse((result as any).content[0].text);
       } else {
         commentData = result;
       }
@@ -575,15 +617,17 @@ export class BitbucketProvider {
             comment_text: `**File: ${options.filePath}**\n\n${commentText}`,
           };
 
-          const fallbackResult =
-            await this.pullRequestHandlers.handleAddComment(fallbackArgs);
+          const fallbackResult = await RetryManager.withRetry(
+            () => this.pullRequestHandlers.handleAddComment(fallbackArgs),
+            `Add fallback comment to PR ${workspace}/${repository}#${pullRequestId}`,
+          );
           let fallbackData;
           if (
-            fallbackResult.content &&
-            fallbackResult.content[0] &&
-            fallbackResult.content[0].text
+            (fallbackResult as any).content &&
+            (fallbackResult as any).content[0] &&
+            (fallbackResult as any).content[0].text
           ) {
-            fallbackData = JSON.parse(fallbackResult.content[0].text);
+            fallbackData = JSON.parse((fallbackResult as any).content[0].text);
           } else {
             fallbackData = fallbackResult;
           }
