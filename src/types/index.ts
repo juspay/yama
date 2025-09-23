@@ -705,6 +705,7 @@ export interface TokenBudgetManagerInterface {
   getAvailableBudget(): number;
   getTotalBudget(): number;
   getUsedTokens(): number;
+  preAllocateAllBatches(allocations: Map<number, number>): boolean;
 }
 
 // ============================================================================
@@ -740,6 +741,119 @@ export class ValidationError extends GuardianError {
   constructor(message: string, context?: any) {
     super("VALIDATION_ERROR", message, context);
     this.name = "ValidationError";
+  }
+}
+
+// ============================================================================
+// Cache Error Types
+// ============================================================================
+
+export enum CacheErrorCode {
+  // System-level cache errors
+  CACHE_SYSTEM_FAILURE = "CACHE_SYSTEM_FAILURE",
+  CACHE_MEMORY_EXHAUSTED = "CACHE_MEMORY_EXHAUSTED",
+  CACHE_INITIALIZATION_FAILED = "CACHE_INITIALIZATION_FAILED",
+
+  // Storage-related errors
+  CACHE_STORAGE_FULL = "CACHE_STORAGE_FULL",
+  CACHE_STORAGE_PERMISSION = "CACHE_STORAGE_PERMISSION",
+  CACHE_STORAGE_CORRUPTION = "CACHE_STORAGE_CORRUPTION",
+
+  // Network-related errors (for future Redis support)
+  CACHE_NETWORK_CONNECTION = "CACHE_NETWORK_CONNECTION",
+  CACHE_NETWORK_TIMEOUT = "CACHE_NETWORK_TIMEOUT",
+  CACHE_NETWORK_AUTH = "CACHE_NETWORK_AUTH",
+
+  // Configuration errors
+  CACHE_CONFIG_INVALID = "CACHE_CONFIG_INVALID",
+  CACHE_CONFIG_MISSING = "CACHE_CONFIG_MISSING",
+
+  // Operation errors
+  CACHE_OPERATION_FAILED = "CACHE_OPERATION_FAILED",
+  CACHE_SERIALIZATION_ERROR = "CACHE_SERIALIZATION_ERROR",
+  CACHE_KEY_INVALID = "CACHE_KEY_INVALID",
+}
+
+export abstract class CacheError extends GuardianError {
+  constructor(
+    code: CacheErrorCode,
+    message: string,
+    public operation?: string,
+    public key?: string,
+    context?: any,
+  ) {
+    super(code, message, context);
+    this.name = "CacheError";
+  }
+}
+
+export class CacheSystemError extends CacheError {
+  constructor(
+    message: string,
+    operation?: string,
+    key?: string,
+    context?: any,
+  ) {
+    super(
+      CacheErrorCode.CACHE_SYSTEM_FAILURE,
+      message,
+      operation,
+      key,
+      context,
+    );
+    this.name = "CacheSystemError";
+  }
+}
+
+export class CacheStorageError extends CacheError {
+  constructor(
+    code: CacheErrorCode = CacheErrorCode.CACHE_STORAGE_FULL,
+    message: string,
+    operation?: string,
+    key?: string,
+    context?: any,
+  ) {
+    super(code, message, operation, key, context);
+    this.name = "CacheStorageError";
+  }
+}
+
+export class CacheNetworkError extends CacheError {
+  constructor(
+    code: CacheErrorCode = CacheErrorCode.CACHE_NETWORK_CONNECTION,
+    message: string,
+    operation?: string,
+    key?: string,
+    context?: any,
+  ) {
+    super(code, message, operation, key, context);
+    this.name = "CacheNetworkError";
+  }
+}
+
+export class CacheConfigurationError extends CacheError {
+  constructor(
+    code: CacheErrorCode = CacheErrorCode.CACHE_CONFIG_INVALID,
+    message: string,
+    operation?: string,
+    key?: string,
+    context?: any,
+  ) {
+    super(code, message, operation, key, context);
+    this.name = "CacheConfigurationError";
+  }
+}
+
+export class CacheOperationError extends CacheError {
+  constructor(
+    code: CacheErrorCode = CacheErrorCode.CACHE_OPERATION_FAILED,
+    message: string,
+    operation?: string,
+    key?: string,
+    context?: any,
+  ) {
+    super(code, message, operation, key, context);
+    this.name = "CacheOperationError";
   }
 }
 

@@ -57,6 +57,7 @@ jest.mock(
 jest.mock("../../src/utils/Cache", () => ({
   cache: {
     getOrSet: jest.fn(),
+    getOrSetResilient: jest.fn(),
     get: jest.fn(),
     set: jest.fn(),
     del: jest.fn(),
@@ -253,7 +254,9 @@ describe("BitbucketProvider", () => {
         globalThis.testUtils.createMockMCPResponse(mockBranchData),
       );
 
-      (cache.getOrSet as jest.Mock).mockImplementation(async (key, fn) => fn());
+      (cache.getOrSetResilient as jest.Mock).mockImplementation(
+        async (key, fn) => fn(),
+      );
 
       const result = await provider.findPRForBranch(mockIdentifier);
 
@@ -292,7 +295,9 @@ describe("BitbucketProvider", () => {
         globalThis.testUtils.createMockMCPResponse(mockBranchData),
       );
 
-      (cache.getOrSet as jest.Mock).mockImplementation(async (key, fn) => fn());
+      (cache.getOrSetResilient as jest.Mock).mockImplementation(
+        async (key, fn) => fn(),
+      );
 
       await expect(provider.findPRForBranch(mockIdentifier)).rejects.toThrow(
         "No open PR found for branch: feature/test",
@@ -327,7 +332,9 @@ describe("BitbucketProvider", () => {
         globalThis.testUtils.createMockMCPResponse(mockPRData),
       );
 
-      (cache.getOrSet as jest.Mock).mockImplementation(async (key, fn) => fn());
+      (cache.getOrSetResilient as jest.Mock).mockImplementation(
+        async (key, fn) => fn(),
+      );
 
       const result = await provider.getPRDetails(mockIdentifier);
 
@@ -380,7 +387,9 @@ describe("BitbucketProvider", () => {
         globalThis.testUtils.createMockMCPResponse(mockDiffData),
       );
 
-      (cache.getOrSet as jest.Mock).mockImplementation(async (key, fn) => fn());
+      (cache.getOrSetResilient as jest.Mock).mockImplementation(
+        async (key, fn) => fn(),
+      );
 
       const result = await provider.getPRDiff(mockIdentifier);
 
@@ -404,7 +413,9 @@ describe("BitbucketProvider", () => {
         globalThis.testUtils.createMockMCPResponse(mockDiffData),
       );
 
-      (cache.getOrSet as jest.Mock).mockImplementation(async (key, fn) => fn());
+      (cache.getOrSetResilient as jest.Mock).mockImplementation(
+        async (key, fn) => fn(),
+      );
 
       await provider.getPRDiff(mockIdentifier, 5, ["*.lock", "*.min.js"]);
 
@@ -432,7 +443,9 @@ describe("BitbucketProvider", () => {
         ],
       });
 
-      (cache.getOrSet as jest.Mock).mockImplementation(async (key, fn) => fn());
+      (cache.getOrSetResilient as jest.Mock).mockImplementation(
+        async (key, fn) => fn(),
+      );
 
       const result = await provider.getFileContent(
         "workspace",
@@ -449,7 +462,9 @@ describe("BitbucketProvider", () => {
         content: "direct content",
       });
 
-      (cache.getOrSet as jest.Mock).mockImplementation(async (key, fn) => fn());
+      (cache.getOrSetResilient as jest.Mock).mockImplementation(
+        async (key, fn) => fn(),
+      );
 
       const result = await provider.getFileContent(
         "workspace",

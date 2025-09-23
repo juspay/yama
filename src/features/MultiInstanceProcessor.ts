@@ -384,10 +384,11 @@ export class MultiInstanceProcessor {
     }
 
     // Total budget is the sum of all instance limits, but with safety margin
-    const totalBudget = instances.length * minLimit * 0.8; // 80% safety margin
+    // Use Math.floor to ensure integer result and avoid floating-point precision issues
+    const totalBudget = Math.floor(instances.length * minLimit * 0.8); // 80% safety margin
 
     logger.debug(
-      `Calculated total token budget: ${totalBudget} (${instances.length} instances × ${minLimit} × 0.8)`,
+      `Calculated total token budget: ${totalBudget} (${instances.length} instances × ${minLimit} × 0.8, floored)`,
     );
 
     return totalBudget;

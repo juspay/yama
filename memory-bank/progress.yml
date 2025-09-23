@@ -109,6 +109,15 @@ current_features:
     - "Webhook automation"
 
 recent_improvements:
+  - date: "2025-09-24"
+    changes:
+      - "CRITICAL FIX: Resolved cache error with .clinerules file parsing"
+      - "Fixed BitbucketProvider.getFileContent() to handle plain text files properly"
+      - "Added try-catch for JSON parsing with fallback to plain text content"
+      - "Enhanced error handling for mixed content types (JSON vs plain text)"
+      - "Improved logging for file content parsing failures"
+      - "Prevents 'Unexpected token F' errors when caching .clinerules files"
+
   - date: "2025-09-17"
     changes:
       - "MAJOR FEATURE: Implemented multi-instance processing system for consensus-based AI analysis"

@@ -97,13 +97,23 @@ export class TokenBudgetManager implements TokenBudgetManagerInterface {
   private batchAllocations: Map<number, number> = new Map();
   private reservedTokens: number = 0; // Tokens allocated but not yet used
 
+  // NEW: Pre-allocation mode tracking
+  private preAllocationMode: boolean = false;
+  private preAllocatedBatches: Set<number> = new Set();
+  private batchStates: Map<
+    number,
+    "pending" | "processing" | "completed" | "failed"
+  > = new Map();
+
   constructor(totalBudget: number) {
     if (totalBudget <= 0) {
       throw new Error("Token budget must be greater than 0");
     }
-    this.totalBudget = totalBudget;
+    // Floor the budget to ensure integer arithmetic and avoid floating-point precision issues.
+    // The fractional part is discarded, so the budget is always rounded down.
+    this.totalBudget = Math.floor(totalBudget);
     logger.debug(
-      `TokenBudgetManager created with budget of ${totalBudget} tokens`,
+      `TokenBudgetManager created with budget of ${this.totalBudget} tokens (original: ${totalBudget})`,
     );
   }
 
@@ -119,8 +129,39 @@ export class TokenBudgetManager implements TokenBudgetManagerInterface {
       return false;
     }
 
-    // Check if we already have an allocation for this batch
+    // NEW: Handle pre-allocation mode
+    if (this.preAllocationMode && this.preAllocatedBatches.has(batchIndex)) {
+      // Check if batch is already being processed
+      const currentState = this.batchStates.get(batchIndex);
+      if (currentState === "processing") {
+        logger.warn(`Batch ${batchIndex} is already being processed`);
+        return false;
+      }
+
+      if (currentState !== "pending") {
+        logger.warn(
+          `Batch ${batchIndex} is not in pending state (current: ${currentState})`,
+        );
+        return false;
+      }
+
+      // In pre-allocation mode, just mark batch as processing and return success
+      this.batchStates.set(batchIndex, "processing");
+      logger.debug(
+        `Batch ${batchIndex} using pre-allocated tokens (${this.batchAllocations.get(batchIndex)} tokens)`,
+      );
+      return true;
+    }
+
+    // Check if we already have an allocation for this batch (non-pre-allocation mode)
     if (this.batchAllocations.has(batchIndex)) {
+      // Check if batch is already being processed
+      const currentState = this.batchStates.get(batchIndex);
+      if (currentState === "processing") {
+        logger.warn(`Batch ${batchIndex} is already being processed`);
+        return false;
+      }
+
       logger.warn(`Batch ${batchIndex} already has token allocation`);
       return false;
     }
@@ -139,6 +180,7 @@ export class TokenBudgetManager implements TokenBudgetManagerInterface {
     // Allocate the tokens
     this.reservedTokens += estimatedTokens;
     this.batchAllocations.set(batchIndex, estimatedTokens);
+    this.batchStates.set(batchIndex, "processing");
 
     logger.debug(
       `Allocated ${estimatedTokens} tokens for batch ${batchIndex} ` +
@@ -159,10 +201,21 @@ export class TokenBudgetManager implements TokenBudgetManagerInterface {
       return;
     }
 
+    // Update batch state to completed only if not already failed
+    const currentState = this.batchStates.get(batchIndex);
+    if (currentState !== "failed") {
+      this.batchStates.set(batchIndex, "completed");
+    }
+
     // Move from reserved to used (assuming the tokens were actually used)
     this.reservedTokens -= allocated;
     this.usedTokens += allocated;
     this.batchAllocations.delete(batchIndex);
+
+    // Clean up pre-allocation tracking
+    if (this.preAllocationMode) {
+      this.preAllocatedBatches.delete(batchIndex);
+    }
 
     logger.debug(
       `Released ${allocated} tokens from batch ${batchIndex} ` +
@@ -237,6 +290,96 @@ export class TokenBudgetManager implements TokenBudgetManagerInterface {
     this.reservedTokens = 0;
     this.batchAllocations.clear();
     logger.debug("TokenBudgetManager reset");
+  }
+
+  /**
+   * Pre-allocate tokens for all batches upfront
+   * This ensures all batches have guaranteed token allocation before processing starts
+   */
+  preAllocateAllBatches(allocations: Map<number, number>): boolean {
+    const totalRequired = Array.from(allocations.values()).reduce(
+      (sum, tokens) => sum + tokens,
+      0,
+    );
+
+    if (totalRequired > this.totalBudget) {
+      logger.error(
+        `Pre-allocation failed: total required (${totalRequired}) exceeds budget (${this.totalBudget})`,
+      );
+      return false;
+    }
+
+    // Clear any existing allocations and reset state
+    this.batchAllocations.clear();
+    this.reservedTokens = 0;
+    this.batchStates.clear();
+    this.preAllocatedBatches.clear();
+
+    // Enable pre-allocation mode
+    this.preAllocationMode = true;
+
+    // Reserve all tokens upfront
+    allocations.forEach((tokens, batchIndex) => {
+      this.batchAllocations.set(batchIndex, tokens);
+      this.reservedTokens += tokens;
+      this.preAllocatedBatches.add(batchIndex);
+      this.batchStates.set(batchIndex, "pending");
+    });
+
+    logger.info(
+      `Pre-allocated ${totalRequired} tokens across ${allocations.size} batches ` +
+        `(${this.getAvailableBudget()} remaining)`,
+    );
+
+    return true;
+  }
+
+  /**
+   * Mark a batch as failed and handle cleanup
+   */
+  markBatchFailed(batchIndex: number, error?: string): void {
+    this.batchStates.set(batchIndex, "failed");
+
+    if (error) {
+      logger.debug(`Batch ${batchIndex} marked as failed: ${error}`);
+    } else {
+      logger.debug(`Batch ${batchIndex} marked as failed`);
+    }
+  }
+
+  /**
+   * Get the current state of a batch
+   */
+  getBatchState(
+    batchIndex: number,
+  ): "pending" | "processing" | "completed" | "failed" | undefined {
+    return this.batchStates.get(batchIndex);
+  }
+
+  /**
+   * Check if pre-allocation mode is active
+   */
+  isPreAllocationMode(): boolean {
+    return this.preAllocationMode;
+  }
+
+  /**
+   * Get all batch states for debugging
+   */
+  getAllBatchStates(): Map<
+    number,
+    "pending" | "processing" | "completed" | "failed"
+  > {
+    return new Map(this.batchStates);
+  }
+
+  /**
+   * Disable pre-allocation mode and clean up
+   */
+  disablePreAllocationMode(): void {
+    this.preAllocationMode = false;
+    this.preAllocatedBatches.clear();
+    logger.debug("Pre-allocation mode disabled");
   }
 
   /**

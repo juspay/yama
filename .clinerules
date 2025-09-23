@@ -180,6 +180,15 @@
 - Issue: Cannot analyze binary files
 - Workaround: Skip them in analysis
 
+### Cache JSON Parsing Errors with Plain Text Files (RESOLVED)
+- Issue: Cache system trying to parse plain text files (like .clinerules) as JSON
+- Root cause: BitbucketProvider.getFileContent() assumed all MCP responses were JSON
+- Error: "Unexpected token 'F', \"File '.cli\"... is not valid JSON"
+- Resolution: Added try-catch in getFileContent() with fallback to plain text
+- Pattern: Always handle mixed content types in file retrieval operations
+- Files affected: src/core/providers/BitbucketProvider.ts
+- Date resolved: 2025-09-24
+
 ### Similarity Threshold Standardization (RESOLVED)
 - Issue: Inconsistent similarity scales (0-1 vs 0-100) across different features
 - Root cause: multiInstance.deduplication.similarityThreshold used 0.4 (0-1 scale) while semanticDeduplication.similarityThreshold used 70 (0-100 scale)
@@ -191,6 +200,24 @@
   - All validation logic already expected 0-100 scale
   - All tests already used 0-100 scale
 - Pattern: Always use 0-100 percentage scale for similarity thresholds to avoid misconfiguration
+
+### Parallel Batch Processing Race Conditions (RESOLVED)
+- Issue: All batches except first failing with "Insufficient token budget" errors and duplicate processing
+- Root cause: Multiple interconnected issues in parallel processing system
+  1. Token budget race condition in allocateForBatch() method
+  2. Duplicate processing attempts due to lack of proper state management
+  3. Floating-point precision errors in token distribution (52428.8 → 52429 allocation)
+  4. Pre-allocation logic flaw allowing duplicate allocations
+- Resolution: Comprehensive fix with enhanced TokenBudgetManager and proper state management
+- Changes made:
+  - Enhanced TokenBudgetManager with pre-allocation mode tracking
+  - Added batch state management (pending → processing → completed/failed)
+  - Fixed floating-point precision by flooring budgets in constructor and calculations
+  - Implemented proper duplicate allocation prevention
+  - Added comprehensive error handling and recovery
+  - Enhanced token distribution with integer arithmetic and remainder handling
+  - Added 15 new tests covering all edge cases and race conditions
+- Pattern: Always use integer arithmetic for token budgets and implement proper state management for concurrent operations
 
 ## Development Workflow
 

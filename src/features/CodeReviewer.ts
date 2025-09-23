@@ -1261,9 +1261,43 @@ ${recommendation}
     const semaphore = new Semaphore(optimalConcurrency);
     const tokenBudget = new TokenBudgetManager(this.getSafeTokenLimit() * 0.8); // 80% for safety
 
+    // NEW: Pre-allocate tokens based on distribution strategy
+    const distributionStrategy =
+      parallelConfig.tokenBudgetDistribution || "equal";
     logger.info(
-      `🎯 Parallel processing: ${optimalConcurrency} concurrent batches, ${tokenBudget.getTotalBudget()} token budget`,
+      `🎯 Using ${distributionStrategy} token distribution strategy for ${batches.length} batches`,
     );
+
+    const tokenAllocations = this.preAllocateTokens(
+      batches,
+      tokenBudget,
+      distributionStrategy,
+    );
+    if (!tokenAllocations) {
+      const totalRequired = batches.reduce(
+        (sum, b) => sum + b.estimatedTokens,
+        0,
+      );
+      const totalBudget = tokenBudget.getTotalBudget();
+      throw new Error(
+        `Insufficient token budget: required ${totalRequired}, available ${totalBudget}. ` +
+          `Consider reducing batch count (current: ${batches.length}) or increasing token limit.`,
+      );
+    }
+
+    // Apply pre-allocated tokens to the budget manager
+    if (!tokenBudget.preAllocateAllBatches(tokenAllocations)) {
+      throw new Error("Failed to pre-allocate tokens for all batches");
+    }
+
+    logger.info(
+      `🎯 Parallel processing: ${optimalConcurrency} concurrent batches, ${tokenBudget.getTotalBudget()} token budget (${distributionStrategy} distribution)`,
+    );
+
+    // Log allocation details
+    tokenAllocations.forEach((tokens, batchIndex) => {
+      logger.debug(`Batch ${batchIndex + 1}: ${tokens} tokens allocated`);
+    });
 
     const batchResults: BatchResult[] = new Array(batches.length);
     const allViolations: Violation[] = [];
@@ -1395,6 +1429,230 @@ ${recommendation}
   }
 
   /**
+   * Pre-allocate tokens based on distribution strategy with proper integer arithmetic
+   */
+  private preAllocateTokens(
+    batches: FileBatch[],
+    tokenBudget: TokenBudgetManager,
+    strategy: "equal" | "weighted",
+  ): Map<number, number> | null {
+    // Ensure we're working with integer budget to avoid floating-point issues
+    const totalBudget = Math.floor(tokenBudget.getTotalBudget());
+    const allocations = new Map<number, number>();
+
+    if (strategy === "equal") {
+      // Equal distribution: divide budget equally among all batches with proper remainder handling
+      const baseTokens = Math.floor(totalBudget / batches.length);
+      const remainder = totalBudget % batches.length;
+
+      if (baseTokens < 1000) {
+        // Minimum viable tokens per batch
+        logger.error(
+          `Equal distribution would give ${baseTokens} tokens per batch, which is insufficient`,
+        );
+        return null;
+      }
+
+      let totalAllocated = 0;
+      for (let i = 0; i < batches.length; i++) {
+        // Distribute remainder to first few batches
+        const tokens = baseTokens + (i < remainder ? 1 : 0);
+        allocations.set(i, tokens);
+        totalAllocated += tokens;
+      }
+
+      // Double-check that we haven't exceeded budget due to any calculation errors
+      if (totalAllocated > totalBudget) {
+        logger.error(
+          `Equal distribution calculation error: ${totalAllocated} > ${totalBudget}`,
+        );
+        // Adjust the last batch to fit within budget
+        const lastBatchIndex = batches.length - 1;
+        const lastBatchTokens = allocations.get(lastBatchIndex)!;
+        const adjustment = totalAllocated - totalBudget;
+        const newLastBatchTokens = lastBatchTokens - adjustment;
+        if (newLastBatchTokens < 1000) {
+          logger.error(
+            `Adjustment would result in last batch having ${newLastBatchTokens} tokens, which is below the minimum threshold (1000). Aborting allocation.`,
+          );
+          return null;
+        }
+        allocations.set(lastBatchIndex, newLastBatchTokens);
+        totalAllocated = totalBudget;
+        logger.warn(
+          `Adjusted last batch by -${adjustment} tokens to fit budget`,
+        );
+      }
+
+      logger.info(
+        `Equal distribution: ${baseTokens} tokens per batch for ${batches.length} batches`,
+      );
+      logger.debug(
+        `Pre-allocated ${totalAllocated} tokens across ${batches.length} batches (${totalBudget - totalAllocated} remaining)`,
+      );
+    } else if (strategy === "weighted") {
+      // Weighted distribution: try weighted first, automatically fallback to equal if needed
+      logger.debug(`Attempting weighted distribution...`);
+
+      const weightedResult = this.tryWeightedAllocation(batches, totalBudget);
+
+      if (weightedResult) {
+        // Weighted allocation succeeded
+        weightedResult.forEach((tokens, batchIndex) => {
+          allocations.set(batchIndex, tokens);
+        });
+
+        logger.info(`✅ Weighted distribution: optimal allocation successful`);
+        logger.debug(
+          `Pre-allocated ${Array.from(weightedResult.values()).reduce((sum, tokens) => sum + tokens, 0)} tokens across ${batches.length} batches`,
+        );
+      } else {
+        // Weighted allocation failed, automatically fallback to equal distribution
+        logger.warn(
+          `⚠️ Weighted distribution: insufficient budget for optimal allocation, falling back to equal distribution`,
+        );
+
+        const equalResult = this.tryEqualAllocation(batches, totalBudget);
+        if (!equalResult) {
+          logger.error(
+            `Weighted distribution: both optimal and equal allocation failed`,
+          );
+          return null;
+        }
+
+        equalResult.forEach((tokens, batchIndex) => {
+          allocations.set(batchIndex, tokens);
+        });
+
+        logger.info(
+          `✅ Weighted distribution: equal allocation fallback successful`,
+        );
+        logger.debug(
+          `Pre-allocated ${Array.from(equalResult.values()).reduce((sum, tokens) => sum + tokens, 0)} tokens across ${batches.length} batches`,
+        );
+      }
+    }
+
+    // Final validation with strict integer checking
+    const totalAllocated = Array.from(allocations.values()).reduce(
+      (sum, tokens) => sum + tokens,
+      0,
+    );
+    if (totalAllocated > totalBudget) {
+      logger.error(
+        `CRITICAL: Total allocation (${totalAllocated}) exceeds budget (${totalBudget}) - this should never happen`,
+      );
+      logger.error(
+        `Budget type: ${typeof totalBudget}, Allocation type: ${typeof totalAllocated}`,
+      );
+      logger.error(
+        `Individual allocations: ${Array.from(allocations.entries())
+          .map(([i, tokens]) => `batch${i}:${tokens}`)
+          .join(", ")}`,
+      );
+      throw new Error(
+        `Total allocation (${totalAllocated}) exceeds budget (${totalBudget}) - this should never happen`,
+      );
+    }
+
+    return allocations;
+  }
+
+  /**
+   * Try weighted allocation for batches
+   */
+  private tryWeightedAllocation(
+    batches: FileBatch[],
+    totalBudget: number,
+  ): Map<number, number> | null {
+    const totalEstimated = batches.reduce(
+      (sum, batch) => sum + batch.estimatedTokens,
+      0,
+    );
+
+    if (totalEstimated > totalBudget) {
+      logger.debug(
+        `Total estimated tokens (${totalEstimated}) exceed budget (${totalBudget})`,
+      );
+      return null;
+    }
+
+    let totalAllocated = 0;
+    const minTokensPerBatch = 1000;
+    const allocations = new Map<number, number>();
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const weight = batch.estimatedTokens / totalEstimated;
+      const allocation = Math.floor(weight * totalBudget);
+      const finalAllocation = Math.max(allocation, minTokensPerBatch);
+
+      allocations.set(i, finalAllocation);
+      totalAllocated += finalAllocation;
+    }
+
+    // Check if we exceeded budget due to minimum allocations
+    if (totalAllocated > totalBudget) {
+      logger.debug(
+        `Weighted allocation with minimums (${totalAllocated}) exceeds budget (${totalBudget})`,
+      );
+      return null;
+    }
+
+    return allocations;
+  }
+
+  /**
+   * Try equal allocation for batches
+   */
+  private tryEqualAllocation(
+    batches: FileBatch[],
+    totalBudget: number,
+  ): Map<number, number> | null {
+    const baseTokens = Math.floor(totalBudget / batches.length);
+    const remainder = totalBudget % batches.length;
+
+    if (baseTokens < 1000) {
+      // Minimum viable tokens per batch
+      logger.debug(
+        `Equal distribution would give ${baseTokens} tokens per batch, which is insufficient`,
+      );
+      return null;
+    }
+
+    const allocations = new Map<number, number>();
+    let totalAllocated = 0;
+
+    for (let i = 0; i < batches.length; i++) {
+      // Distribute remainder to first few batches
+      const tokens = baseTokens + (i < remainder ? 1 : 0);
+      allocations.set(i, tokens);
+      totalAllocated += tokens;
+    }
+
+    // Double-check that we haven't exceeded budget due to any calculation errors
+    if (totalAllocated > totalBudget) {
+      logger.debug(
+        `Equal distribution calculation error: ${totalAllocated} > ${totalBudget}`,
+      );
+      // Adjust the last batch to fit within budget
+      const lastBatchIndex = batches.length - 1;
+      const lastBatchTokens = allocations.get(lastBatchIndex)!;
+      const adjustment = totalAllocated - totalBudget;
+      const newLastBatchTokens = lastBatchTokens - adjustment;
+      if (newLastBatchTokens < 1000) {
+        logger.error(
+          `Adjustment would result in last batch having ${newLastBatchTokens} tokens, which is below the minimum threshold (1000). Aborting allocation.`,
+        );
+        return null;
+      }
+      allocations.set(lastBatchIndex, newLastBatchTokens);
+    }
+
+    return allocations;
+  }
+
+  /**
    * Process a single batch with concurrency control
    */
   private async processBatchWithConcurrency(
@@ -1410,11 +1668,28 @@ ${recommendation}
     await semaphore.acquire();
 
     try {
-      // Check token budget
-      if (!tokenBudget.allocateForBatch(batchIndex, batch.estimatedTokens)) {
-        throw new Error(
-          `Insufficient token budget for batch ${batchIndex + 1}`,
-        );
+      // NEW: In pre-allocation mode, tokens are already allocated, just verify and mark as processing
+      if (tokenBudget.isPreAllocationMode()) {
+        const batchState = tokenBudget.getBatchState(batchIndex);
+        if (batchState !== "pending") {
+          throw new Error(
+            `Batch ${batchIndex + 1} is not in pending state (current: ${batchState})`,
+          );
+        }
+
+        // Mark as processing (this is handled in allocateForBatch for pre-allocation mode)
+        if (!tokenBudget.allocateForBatch(batchIndex, batch.estimatedTokens)) {
+          throw new Error(
+            `Failed to mark batch ${batchIndex + 1} as processing`,
+          );
+        }
+      } else {
+        // Legacy mode: allocate tokens dynamically
+        if (!tokenBudget.allocateForBatch(batchIndex, batch.estimatedTokens)) {
+          throw new Error(
+            `Insufficient token budget for batch ${batchIndex + 1}`,
+          );
+        }
       }
 
       logger.info(
@@ -1429,6 +1704,10 @@ ${recommendation}
       );
 
       return result;
+    } catch (error) {
+      // Mark batch as failed in token budget
+      tokenBudget.markBatchFailed(batchIndex, (error as Error).message);
+      throw error;
     } finally {
       // Always release resources
       tokenBudget.releaseBatch(batchIndex);
