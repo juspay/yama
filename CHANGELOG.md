@@ -1,3 +1,9 @@
+## [1.5.1](https://github.com/juspay/yama/compare/v1.5.0...v1.5.1) (2025-09-24)
+
+### Bug Fixes
+
+- **allocation:** Added fix for batch token allocation ([11f7192](https://github.com/juspay/yama/commit/11f719257a75ba946c45612e336db69a17cf278d))
+
 # [1.5.0](https://github.com/juspay/yama/compare/v1.4.1...v1.5.0) (2025-09-19)
 
 ### Features
