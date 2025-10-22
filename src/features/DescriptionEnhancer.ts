@@ -10,6 +10,7 @@ import {
   PreservableContent,
   SectionAnalysis,
   AIProviderConfig,
+  DescriptionEnhancementConfig,
   ProviderError,
 } from "../types/index.js";
 import { UnifiedContext } from "../core/ContextGatherer.js";
@@ -20,6 +21,7 @@ export class DescriptionEnhancer {
   private neurolink: any;
   private bitbucketProvider: BitbucketProvider;
   private aiConfig: AIProviderConfig;
+  private enhancementConfig: DescriptionEnhancementConfig;
 
   private defaultRequiredSections: RequiredSection[] = [
     { key: "changelog", name: "Changelog (Modules Modified)", required: true },
@@ -38,9 +40,40 @@ export class DescriptionEnhancer {
   constructor(
     bitbucketProvider: BitbucketProvider,
     aiConfig: AIProviderConfig,
+    enhancementConfig: DescriptionEnhancementConfig,
   ) {
     this.bitbucketProvider = bitbucketProvider;
     this.aiConfig = aiConfig;
+    this.enhancementConfig = enhancementConfig;
+  }
+
+  /**
+   * Get system prompt for description enhancement
+   * Uses config.systemPrompt if provided, otherwise uses default
+   */
+  private getSystemPrompt(): string {
+    const isCustomPrompt = !!this.enhancementConfig.systemPrompt;
+
+    if (isCustomPrompt) {
+      logger.debug("✓ Using custom systemPrompt from configuration");
+      logger.debug(
+        `Custom prompt preview: ${this.enhancementConfig.systemPrompt?.substring(0, 100)}...`,
+      );
+    } else {
+      logger.debug("Using default systemPrompt (no custom prompt configured)");
+    }
+
+    return (
+      this.enhancementConfig.systemPrompt ||
+      `You are an Expert Technical Writer specializing in pull request documentation.
+Focus on clarity, completeness, and helping reviewers understand the changes.
+
+CRITICAL INSTRUCTION: Return ONLY the enhanced PR description content.
+- DO NOT add meta-commentary like "No description provided" or "Here is the enhanced description"
+- DO NOT add explanatory text about what you're doing
+- START directly with the actual PR content (title, sections, etc.)
+- If there's no existing description, just write the new sections without mentioning it`
+    );
   }
 
   /**
@@ -57,10 +90,31 @@ export class DescriptionEnhancer {
       logger.info(`Processing PR #${context.pr.id}: "${context.pr.title}"`);
 
       // Step 1: Analyze existing content and identify what needs enhancement
+      const sectionsToUse =
+        options.customSections || this.defaultRequiredSections;
+
+      logger.debug(
+        `Checking ${sectionsToUse.length} required sections: ${sectionsToUse.map((s) => s.key).join(", ")}`,
+      );
+
       const analysisResult = this.analyzeExistingContent(
         context.pr.description,
-        options.customSections || this.defaultRequiredSections,
+        sectionsToUse,
       );
+
+      const presentSections = analysisResult.requiredSections
+        .filter((s) => s.present)
+        .map((s) => s.key);
+      const missingSections = analysisResult.requiredSections
+        .filter((s) => !s.present)
+        .map((s) => s.key);
+
+      if (presentSections.length > 0) {
+        logger.debug(`✓ Present sections: ${presentSections.join(", ")}`);
+      }
+      if (missingSections.length > 0) {
+        logger.debug(`✗ Missing sections: ${missingSections.join(", ")}`);
+      }
 
       logger.info(
         `Content analysis: ${analysisResult.preservedContent.media.length} media items, ` +
@@ -189,7 +243,7 @@ export class DescriptionEnhancer {
       }));
     }
 
-    const sectionPatterns = {
+    const sectionPatterns: Record<string, RegExp[]> = {
       changelog: [
         /##.*?[Cc]hangelog/i,
         /##.*?[Mm]odules?\s+[Mm]odified/i,
@@ -211,17 +265,29 @@ export class DescriptionEnhancer {
     };
 
     return requiredSections.map((section) => {
-      const patterns =
-        sectionPatterns[section.key as keyof typeof sectionPatterns];
-      const isPresent = patterns
-        ? patterns.some((pattern) => pattern.test(description))
-        : false;
+      let patterns = sectionPatterns[section.key];
+
+      if (!patterns) {
+        logger.debug(
+          `No predefined pattern for section "${section.key}", using dynamic pattern based on name`,
+        );
+
+        const nameWords = section.name.split(/\s+/).filter((w) => w.length > 2); // Filter out short words like "Or", "Of"
+        const namePattern = new RegExp(`##.*?${nameWords.join(".*?")}`, "i");
+
+        const keyWords = section.key.split("_").filter((w) => w.length > 2);
+        const keyPattern = new RegExp(`##.*?${keyWords.join(".*?")}`, "i");
+
+        patterns = [namePattern, keyPattern];
+      }
+
+      const isPresent = patterns.some((pattern) => pattern.test(description));
 
       return {
         ...section,
         present: isPresent,
         content: isPresent
-          ? this.extractSectionContent(description, patterns || [])
+          ? this.extractSectionContent(description, patterns)
           : "",
       };
     });
@@ -294,7 +360,7 @@ export class DescriptionEnhancer {
 
     // Initialize NeuroLink with eval-based dynamic import
     if (!this.neurolink) {
-      const { NeuroLink  } = await import("@juspay/neurolink");
+      const { NeuroLink } = await import("@juspay/neurolink");
       this.neurolink = new NeuroLink();
     }
 
@@ -307,6 +373,7 @@ export class DescriptionEnhancer {
     try {
       const result = await this.neurolink.generate({
         input: { text: enhancementPrompt },
+        systemPrompt: this.getSystemPrompt(), // Use config or default system prompt
         provider: this.aiConfig.provider,
         model: this.aiConfig.model,
         temperature: this.aiConfig.temperature || 0.7,
@@ -328,6 +395,14 @@ export class DescriptionEnhancer {
         .replace(/\s*```$/, "")
         .trim();
 
+      // Remove any meta-commentary that AI might have added
+      enhancedDescription = enhancedDescription
+        .replace(/^No description provided\.?\s*/i, "")
+        .replace(/^Here is the enhanced description:?\s*/i, "")
+        .replace(/^I will enhance.*?:\s*/i, "")
+        .replace(/^Enhanced description:?\s*/i, "")
+        .trim();
+
       if (!enhancedDescription) {
         throw new Error("AI generated empty description");
       }
@@ -340,8 +415,16 @@ export class DescriptionEnhancer {
 
       const stillMissing = finalValidation.filter((s) => !s.present);
       if (stillMissing.length > 0) {
+        const missingSectionNames = stillMissing.map((s) => s.key).join(", ");
         logger.warn(
-          `Warning: ${stillMissing.length} required sections still missing after AI enhancement`,
+          `Warning: ${stillMissing.length} required sections still missing after AI enhancement: ${missingSectionNames}`,
+        );
+        logger.debug(
+          `AI may not have added these sections or they don't match detection patterns`,
+        );
+      } else {
+        logger.debug(
+          `✓ All ${finalValidation.length} required sections are now present`,
         );
       }
 
@@ -382,7 +465,19 @@ export class DescriptionEnhancer {
 **Modified Files**: ${JSON.stringify(fileList, null, 2)}`;
     }
 
-    return `You are an expert technical writer specializing in comprehensive PR descriptions.
+    const customInstructions =
+      this.enhancementConfig.enhancementInstructions || "";
+
+    if (customInstructions) {
+      logger.debug("✓ Using custom enhancementInstructions from configuration");
+      logger.debug(
+        `Instructions preview: ${customInstructions.substring(0, 80)}...`,
+      );
+    } else {
+      logger.debug("Using default enhancementInstructions");
+    }
+
+    return `${customInstructions || "You are an expert technical writer specializing in comprehensive PR descriptions."}
 
 ## PR INFORMATION:
 **Title**: ${context.pr.title}
@@ -613,6 +708,11 @@ Generate the enhanced description now, ensuring ALL preservation requirements ar
 export function createDescriptionEnhancer(
   bitbucketProvider: BitbucketProvider,
   aiConfig: AIProviderConfig,
+  enhancementConfig: DescriptionEnhancementConfig,
 ): DescriptionEnhancer {
-  return new DescriptionEnhancer(bitbucketProvider, aiConfig);
+  return new DescriptionEnhancer(
+    bitbucketProvider,
+    aiConfig,
+    enhancementConfig,
+  );
 }

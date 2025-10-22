@@ -109,6 +109,7 @@ features:
     enabled: true
     preserveContent: true # Always preserve existing content
     autoFormat: true
+
     requiredSections:
       - key: "changelog"
         name: "Changelog (Modules Modified)"
@@ -119,6 +120,16 @@ features:
       - key: "config_changes"
         name: "CAC Config Or Service Config Changes"
         required: true
+
+    # Customize AI behavior:
+    systemPrompt: |
+      You are a Senior Staff Engineer writing comprehensive technical documentation.
+      Focus on architectural decisions, trade-offs, and long-term maintainability.
+
+    # Customize formatting:
+    enhancementInstructions: |
+      Keep descriptions under 300 words. Use bullet points, not paragraphs.
+      No emojis. Professional tone only. Include numbers and metrics.
 
   # NEW: Diff Strategy Configuration
   diffStrategy:

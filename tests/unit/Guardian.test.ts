@@ -207,7 +207,10 @@ describe("Guardian", () => {
         expect.objectContaining({
           enabled: true,
           path: "memory-bank",
-          fallbackPaths: expect.arrayContaining(["docs/memory-bank", ".memory-bank"]),
+          fallbackPaths: expect.arrayContaining([
+            "docs/memory-bank",
+            ".memory-bank",
+          ]),
         }),
       );
       expect(CodeReviewer).toHaveBeenCalledWith(
@@ -218,6 +221,7 @@ describe("Guardian", () => {
       expect(DescriptionEnhancer).toHaveBeenCalledWith(
         mockBitbucketProvider,
         mockConfig.providers.ai,
+        mockConfig.features.descriptionEnhancement,
       );
       expect(logger.badge).toHaveBeenCalled();
       expect(logger.phase).toHaveBeenCalledWith("🚀 Initializing Yama...");

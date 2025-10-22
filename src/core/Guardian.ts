@@ -98,6 +98,24 @@ export class Guardian {
       this.descriptionEnhancer = new DescriptionEnhancer(
         this.bitbucketProvider,
         this.config.providers.ai,
+        this.config.features.descriptionEnhancement,
+      );
+
+      logger.debug("Description Enhancement Configuration:");
+      logger.debug(
+        `  - Enabled: ${this.config.features.descriptionEnhancement.enabled}`,
+      );
+      logger.debug(
+        `  - Required Sections: ${this.config.features.descriptionEnhancement.requiredSections.length} (${this.config.features.descriptionEnhancement.requiredSections.map((s) => s.key).join(", ")})`,
+      );
+      logger.debug(
+        `  - Custom systemPrompt: ${this.config.features.descriptionEnhancement.systemPrompt ? "Yes" : "No (using default)"}`,
+      );
+      logger.debug(
+        `  - Custom enhancementInstructions: ${this.config.features.descriptionEnhancement.enhancementInstructions ? "Yes" : "No (using default)"}`,
+      );
+      logger.debug(
+        `  - outputTemplate: ${this.config.features.descriptionEnhancement.outputTemplate ? "Provided" : "Not provided"}`,
       );
 
       this.initialized = true;
