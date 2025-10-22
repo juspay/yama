@@ -86,7 +86,7 @@ export class ConfigManager {
         ],
         autoFormat: true,
         systemPrompt:
-          "You are an Expert Technical Writer specializing in pull request documentation. Your role is to:\n\n📝 CLARITY FIRST: Create clear, comprehensive PR descriptions that help reviewers understand the changes\n🎥 STORY TELLING: Explain the 'why' behind changes, not just the 'what'\n📈 STRUCTURED: Follow consistent formatting with required sections\n🔗 CONTEXTUAL: Link changes to business value and technical rationale\n\nCRITICAL INSTRUCTION: Return ONLY the enhanced PR description content as clean markdown. Do NOT include any meta-commentary, explanations about what you're doing, or introductory text like \"I will enhance...\" or \"Here is the enhanced description:\". \n\nOutput the enhanced description directly without any wrapper text or explanations.",
+          "You are an Expert Technical Writer specializing in pull request documentation. Your role is to:\n\n📝 CLARITY FIRST: Create clear, comprehensive PR descriptions that help reviewers understand the changes\n🎥 STORY TELLING: Explain the 'why' behind changes, not just the 'what'\n📈 STRUCTURED: Follow consistent formatting with required sections\n🔗 CONTEXTUAL: Link changes to business value and technical rationale\n\nCRITICAL INSTRUCTION: Return ONLY the enhanced PR description content as clean markdown.\n- DO NOT add meta-commentary like \"No description provided\" or \"Here is the enhanced description\"\n- DO NOT add explanatory text about what you're doing\n- START directly with the actual PR content (sections, lists, explanations)\n- If there's no existing description, just write the new sections without mentioning it\n\nOutput the enhanced description directly without any wrapper text or explanations.",
         outputTemplate:
           "# PR Title Enhancement (if needed)\n\n## Summary\n[Clear overview of what this PR accomplishes]\n\n## Changes Made\n[Specific technical changes - be precise]\n\n## Testing\n[How the changes were tested]\n\n## Impact\n[Business/technical impact and considerations]\n\n## Additional Notes\n[Any deployment notes, follow-ups, or special considerations]",
         enhancementInstructions:
@@ -276,16 +276,16 @@ export class ConfigManager {
    * Apply provider-aware token limits using shared utility
    */
   private applyProviderTokenLimits(config: GuardianConfig): GuardianConfig {
-    const provider = config.providers.ai.provider || 'auto';
+    const provider = config.providers.ai.provider || "auto";
     const configuredTokens = config.providers.ai.maxTokens;
-    
+
     // Use the shared utility to validate and adjust token limits
     const validatedTokens = validateProviderTokenLimit(
       provider,
       configuredTokens,
-      false // Use standard limits for configuration
+      false, // Use standard limits for configuration
     );
-    
+
     config.providers.ai.maxTokens = validatedTokens;
     return config;
   }
@@ -553,7 +553,9 @@ export class ConfigManager {
   }
 
   private validateCache(cacheConfig: any): boolean {
-    if (!cacheConfig?.enabled) {return true;}
+    if (!cacheConfig?.enabled) {
+      return true;
+    }
     return !!(cacheConfig.storage && cacheConfig.ttl);
   }
 

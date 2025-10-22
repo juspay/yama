@@ -167,6 +167,7 @@ index 0000000..1234567
     descriptionEnhancer = new DescriptionEnhancer(
       mockBitbucketProvider,
       mockAIConfig,
+      mockEnhancementConfig,
     );
 
     // Pre-initialize neurolink to use our mock
