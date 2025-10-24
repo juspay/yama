@@ -1,3 +1,9 @@
+# [1.6.0](https://github.com/juspay/yama/compare/v1.5.1...v1.6.0) (2025-10-24)
+
+### Features
+
+- added support for system prompt and fixed required section check in description enhancer ([c22d1ff](https://github.com/juspay/yama/commit/c22d1ff15a165379dece65145123433f7c1d6b98))
+
 ## [1.5.1](https://github.com/juspay/yama/compare/v1.5.0...v1.5.1) (2025-09-24)
 
 ### Bug Fixes
