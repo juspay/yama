@@ -25,6 +25,7 @@ import { DescriptionEnhancer } from "../features/DescriptionEnhancer.js";
 import { logger, createLogger } from "../utils/Logger.js";
 import { configManager } from "../utils/ConfigManager.js";
 import { cache } from "../utils/Cache.js";
+import { initializeNeuroLink } from "../utils/NeuroLinkFactory.js";
 
 export class Guardian {
   private config: GuardianConfig;
@@ -70,13 +71,12 @@ export class Guardian {
 
       // Initialize providers
       this.bitbucketProvider = new BitbucketProvider(
-        this.config.providers.git.credentials,
+        this.config.providers.git.credentials
       );
       await this.bitbucketProvider.initialize();
 
-      // Initialize NeuroLink with native ESM dynamic import
-      const { NeuroLink } = await import("@juspay/neurolink");
-      this.neurolink = new NeuroLink();
+      // Initialize NeuroLink with observability config
+      this.neurolink = await initializeNeuroLink();
 
       // Initialize core components
       this.contextGatherer = new ContextGatherer(
@@ -86,36 +86,36 @@ export class Guardian {
           enabled: true,
           path: "memory-bank",
           fallbackPaths: ["docs/memory-bank", ".memory-bank"],
-        },
+        }
       );
 
       this.codeReviewer = new CodeReviewer(
         this.bitbucketProvider,
         this.config.providers.ai,
-        this.config.features.codeReview,
+        this.config.features.codeReview
       );
 
       this.descriptionEnhancer = new DescriptionEnhancer(
         this.bitbucketProvider,
         this.config.providers.ai,
-        this.config.features.descriptionEnhancement,
+        this.config.features.descriptionEnhancement
       );
 
       logger.debug("Description Enhancement Configuration:");
       logger.debug(
-        `  - Enabled: ${this.config.features.descriptionEnhancement.enabled}`,
+        `  - Enabled: ${this.config.features.descriptionEnhancement.enabled}`
       );
       logger.debug(
-        `  - Required Sections: ${this.config.features.descriptionEnhancement.requiredSections.length} (${this.config.features.descriptionEnhancement.requiredSections.map((s) => s.key).join(", ")})`,
+        `  - Required Sections: ${this.config.features.descriptionEnhancement.requiredSections.length} (${this.config.features.descriptionEnhancement.requiredSections.map((s) => s.key).join(", ")})`
       );
       logger.debug(
-        `  - Custom systemPrompt: ${this.config.features.descriptionEnhancement.systemPrompt ? "Yes" : "No (using default)"}`,
+        `  - Custom systemPrompt: ${this.config.features.descriptionEnhancement.systemPrompt ? "Yes" : "No (using default)"}`
       );
       logger.debug(
-        `  - Custom enhancementInstructions: ${this.config.features.descriptionEnhancement.enhancementInstructions ? "Yes" : "No (using default)"}`,
+        `  - Custom enhancementInstructions: ${this.config.features.descriptionEnhancement.enhancementInstructions ? "Yes" : "No (using default)"}`
       );
       logger.debug(
-        `  - outputTemplate: ${this.config.features.descriptionEnhancement.outputTemplate ? "Provided" : "Not provided"}`,
+        `  - outputTemplate: ${this.config.features.descriptionEnhancement.outputTemplate ? "Provided" : "Not provided"}`
       );
 
       this.initialized = true;
@@ -124,7 +124,7 @@ export class Guardian {
       logger.error(`Failed to initialize Yama: ${(error as Error).message}`);
       throw new GuardianError(
         "INITIALIZATION_ERROR",
-        `Initialization failed: ${(error as Error).message}`,
+        `Initialization failed: ${(error as Error).message}`
       );
     }
   }
@@ -149,10 +149,10 @@ export class Guardian {
       const context = await this.gatherUnifiedContext(options);
 
       logger.success(
-        `Context ready: PR #${context.pr.id} - "${context.pr.title}"`,
+        `Context ready: PR #${context.pr.id} - "${context.pr.title}"`
       );
       logger.info(
-        `Files: ${context.diffStrategy.fileCount}, Strategy: ${context.diffStrategy.strategy}`,
+        `Files: ${context.diffStrategy.fileCount}, Strategy: ${context.diffStrategy.strategy}`
       );
 
       // Step 2: Execute requested operations using shared context
@@ -160,31 +160,27 @@ export class Guardian {
         if (operation === "all") {
           // Execute all available operations
           operations.push(
-            await this.executeOperation("review", context, options),
+            await this.executeOperation("review", context, options)
           );
           operations.push(
-            await this.executeOperation(
-              "enhance-description",
-              context,
-              options,
-            ),
+            await this.executeOperation("enhance-description", context, options)
           );
         } else {
           operations.push(
-            await this.executeOperation(operation, context, options),
+            await this.executeOperation(operation, context, options)
           );
         }
       }
 
       const duration = Date.now() - startTime;
       const successCount = operations.filter(
-        (op) => op.status === "success",
+        (op) => op.status === "success"
       ).length;
       const errorCount = operations.filter(
-        (op) => op.status === "error",
+        (op) => op.status === "error"
       ).length;
       const skippedCount = operations.filter(
-        (op) => op.status === "skipped",
+        (op) => op.status === "skipped"
       ).length;
 
       const result: ProcessResult = {
@@ -202,7 +198,7 @@ export class Guardian {
       logger.operation("PR Processing", "completed");
       logger.success(
         `✅ Processing completed in ${Math.round(duration / 1000)}s: ` +
-          `${successCount} success, ${errorCount} errors, ${skippedCount} skipped`,
+          `${successCount} success, ${errorCount} errors, ${skippedCount} skipped`
       );
 
       return result;
@@ -218,7 +214,7 @@ export class Guardian {
    */
   async *processPRStream(
     options: OperationOptions,
-    _streamOptions?: StreamOptions,
+    _streamOptions?: StreamOptions
   ): AsyncIterableIterator<StreamUpdate> {
     await this.ensureInitialized();
 
@@ -269,7 +265,7 @@ export class Guardian {
           const result = await this.executeOperation(
             operation,
             context,
-            options,
+            options
           );
 
           if (result.status === "error") {
@@ -324,7 +320,7 @@ export class Guardian {
    * Gather unified context (cached and reusable)
    */
   private async gatherUnifiedContext(
-    options: OperationOptions,
+    options: OperationOptions
   ): Promise<UnifiedContext> {
     const identifier: PRIdentifier = {
       workspace: options.workspace,
@@ -343,7 +339,7 @@ export class Guardian {
 
     // Determine what operations need diff data
     const needsDiff = options.operations.some(
-      (op) => op === "review" || op === "security-scan" || op === "all",
+      (op) => op === "review" || op === "security-scan" || op === "all"
     );
 
     const contextOptions = {
@@ -363,7 +359,7 @@ export class Guardian {
   private async executeOperation(
     operation: OperationType,
     context: UnifiedContext,
-    options: OperationOptions,
+    options: OperationOptions
   ): Promise<OperationResult> {
     const startTime = Date.now();
 
@@ -400,7 +396,7 @@ export class Guardian {
       };
     } catch (error) {
       logger.error(
-        `Operation ${operation} failed: ${(error as Error).message}`,
+        `Operation ${operation} failed: ${(error as Error).message}`
       );
 
       return {
@@ -418,7 +414,7 @@ export class Guardian {
    */
   private async executeCodeReview(
     context: UnifiedContext,
-    options: OperationOptions,
+    options: OperationOptions
   ): Promise<any> {
     if (!this.config.features.codeReview.enabled) {
       logger.info("Code review is disabled in configuration");
@@ -445,7 +441,7 @@ export class Guardian {
     return await this.codeReviewer.reviewCodeWithContext(
       context,
       reviewOptions,
-      multiInstanceConfig,
+      multiInstanceConfig
     );
   }
 
@@ -454,7 +450,7 @@ export class Guardian {
    */
   private async executeDescriptionEnhancement(
     context: UnifiedContext,
-    options: OperationOptions,
+    options: OperationOptions
   ): Promise<any> {
     if (!this.config.features.descriptionEnhancement.enabled) {
       logger.info("Description enhancement is disabled in configuration");
@@ -479,7 +475,7 @@ export class Guardian {
     // Use the already gathered context instead of gathering again
     return await this.descriptionEnhancer.enhanceWithContext(
       context,
-      enhancementOptions,
+      enhancementOptions
     );
   }
 
@@ -512,7 +508,7 @@ export class Guardian {
 
       const result = await this.codeReviewer.reviewCodeWithContext(
         context,
-        options,
+        options
       );
 
       logger.operation("Code Review", "completed");
@@ -546,7 +542,7 @@ export class Guardian {
 
       const result = await this.descriptionEnhancer.enhanceWithContext(
         context,
-        options,
+        options
       );
 
       logger.operation("Description Enhancement", "completed");
@@ -580,7 +576,7 @@ export class Guardian {
       };
 
       const allHealthy = Object.values(components).every(
-        (comp: any) => comp.healthy,
+        (comp: any) => comp.healthy
       );
 
       return {
@@ -639,6 +635,18 @@ export class Guardian {
    */
   async shutdown(): Promise<void> {
     logger.info("Shutting down Yama...");
+
+    if (this.neurolink && typeof this.neurolink.shutdown === "function") {
+      try {
+        logger.debug("Flushing observability traces to Langfuse...");
+        await this.neurolink.shutdown();
+        logger.info("NeuroLink shutdown completed - traces flushed");
+      } catch (error) {
+        logger.warn("NeuroLink shutdown failed:", error);
+      }
+    } else {
+      logger.debug("No NeuroLink instance to shutdown");
+    }
 
     // Clear caches
     this.clearCache();

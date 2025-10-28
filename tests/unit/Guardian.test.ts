@@ -30,6 +30,11 @@ global.eval = jest.fn().mockReturnValue(
   }),
 );
 
+jest.mock("@juspay/neurolink", () => ({
+  NeuroLink: jest.fn().mockImplementation(() => mockNeurolink),
+  buildObservabilityConfigFromEnv: jest.fn(() => undefined),
+}));
+
 // Mock all dependencies
 jest.mock("../../src/core/providers/BitbucketProvider");
 jest.mock("../../src/core/ContextGatherer");

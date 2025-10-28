@@ -26,6 +26,7 @@ import {
 } from "./MultiInstanceProcessor.js";
 import { logger } from "../utils/Logger.js";
 import { getProviderTokenLimit } from "../utils/ProviderLimits.js";
+import { initializeNeuroLink } from "../utils/NeuroLinkFactory.js";
 import {
   Semaphore,
   TokenBudgetManager,
@@ -434,10 +435,9 @@ Return ONLY valid JSON:
     try {
       logger.debug("Starting AI analysis...");
 
-      // Initialize NeuroLink with eval-based dynamic import
+      // Initialize NeuroLink with observability config if not already done
       if (!this.neurolink) {
-        const { NeuroLink } = await import("@juspay/neurolink");
-        this.neurolink = new NeuroLink();
+        this.neurolink = await initializeNeuroLink();
       }
 
       // Extract context from unified context for better AI understanding
