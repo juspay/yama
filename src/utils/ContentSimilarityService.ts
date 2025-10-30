@@ -5,6 +5,7 @@
 
 import { Violation, PRComment, AIProviderConfig } from "../types/index.js";
 import { logger } from "./Logger.js";
+import { initializeNeuroLink } from "./NeuroLinkFactory.js";
 
 export interface SimilarityResult {
   violationIndex: number;
@@ -180,10 +181,9 @@ export class ContentSimilarityService {
     const prompt = this.createSimilarityPrompt(violationBatch, commentData);
 
     try {
-      // Initialize NeuroLink if not already done
+      // Initialize NeuroLink with observability config if not already done
       if (!this.neurolink) {
-        const { NeuroLink } = await import("@juspay/neurolink");
-        this.neurolink = new NeuroLink();
+        this.neurolink = await initializeNeuroLink();
       }
 
       // Use NeuroLink for AI analysis

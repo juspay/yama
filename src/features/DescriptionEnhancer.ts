@@ -16,6 +16,7 @@ import {
 import { UnifiedContext } from "../core/ContextGatherer.js";
 import { BitbucketProvider } from "../core/providers/BitbucketProvider.js";
 import { logger } from "../utils/Logger.js";
+import { initializeNeuroLink } from "../utils/NeuroLinkFactory.js";
 
 export class DescriptionEnhancer {
   private neurolink: any;
@@ -358,10 +359,9 @@ CRITICAL INSTRUCTION: Return ONLY the enhanced PR description content.
   ): Promise<string> {
     logger.debug("Generating AI-enhanced description...");
 
-    // Initialize NeuroLink with eval-based dynamic import
+    // Initialize NeuroLink with observability config if not already done
     if (!this.neurolink) {
-      const { NeuroLink } = await import("@juspay/neurolink");
-      this.neurolink = new NeuroLink();
+      this.neurolink = await initializeNeuroLink();
     }
 
     const enhancementPrompt = this.buildEnhancementPrompt(

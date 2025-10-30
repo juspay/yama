@@ -83,7 +83,7 @@
     "check:all": "npm run lint && npm run format --check && npm run validate && npm run validate:commit"
   },
   "dependencies": {
-    "@juspay/neurolink": "^7.40.1",
+    "@juspay/neurolink": "7.53.2",
     "@nexus2520/bitbucket-mcp-server": "^0.10.0",
     "chalk": "^4.1.2",
     "commander": "^11.0.0",

@@ -16,6 +16,7 @@ const mockNeuroLink = {
 
 jest.mock("@juspay/neurolink", () => ({
   NeuroLink: jest.fn(() => mockNeuroLink),
+  buildObservabilityConfigFromEnv: jest.fn(() => undefined),
 }));
 
 describe("ContentSimilarityService", () => {

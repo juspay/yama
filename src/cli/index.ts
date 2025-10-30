@@ -112,28 +112,32 @@ function setupProcessCommand(): void {
         const guardian = new Guardian();
         await guardian.initialize(options.config);
 
-        if (options.verbose) {
-          // Use streaming for verbose mode
-          console.log(chalk.blue("\n📡 Starting streaming processing...\n"));
+        try {
+          if (options.verbose) {
+            // Use streaming for verbose mode
+            console.log(chalk.blue("\n📡 Starting streaming processing...\n"));
 
-          for await (const update of guardian.processPRStream(
-            operationOptions,
-          )) {
-            logStreamUpdate(update);
+            for await (const update of guardian.processPRStream(
+              operationOptions
+            )) {
+              logStreamUpdate(update);
+            }
+          } else {
+            // Use regular processing
+            const spinner = ora("Processing PR...").start();
+
+            try {
+              const result = await guardian.processPR(operationOptions);
+              spinner.succeed("Processing completed");
+
+              printProcessResult(result);
+            } catch (error) {
+              spinner.fail("Processing failed");
+              throw error;
+            }
           }
-        } else {
-          // Use regular processing
-          const spinner = ora("Processing PR...").start();
-
-          try {
-            const result = await guardian.processPR(operationOptions);
-            spinner.succeed("Processing completed");
-
-            printProcessResult(result);
-          } catch (error) {
-            spinner.fail("Processing failed");
-            throw error;
-          }
+        } finally {
+          await guardian.shutdown();
         }
       } catch (error) {
         console.error(chalk.red(`❌ Error: ${(error as Error).message}`));
@@ -190,6 +194,8 @@ function setupReviewCommand(): void {
         } catch (error) {
           spinner.fail("Code review failed");
           throw error;
+        } finally {
+          await guardian.shutdown();
         }
       } catch (error) {
         console.error(chalk.red(`❌ Error: ${(error as Error).message}`));
@@ -241,6 +247,8 @@ function setupEnhanceCommand(): void {
         } catch (error) {
           spinner.fail("Description enhancement failed");
           throw error;
+        } finally {
+          await guardian.shutdown();
         }
       } catch (error) {
         console.error(chalk.red(`❌ Error: ${(error as Error).message}`));
