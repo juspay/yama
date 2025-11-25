@@ -1,811 +1,463 @@
-# ⚔️ Yama
+# ⚔️ Yama - AI-Native Code Review Guardian
 
-> **Enterprise-grade Pull Request automation toolkit with AI-powered code review and description enhancement**
+> **Enterprise-grade autonomous code review powered by AI and MCP tools**
 
 [![Version](https://img.shields.io/npm/v/@juspay/yama.svg)](https://www.npmjs.com/package/@juspay/yama)
 [![License](https://img.shields.io/npm/l/@juspay/yama.svg)](https://github.com/juspay/yama/blob/main/LICENSE)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](https://www.typescriptlang.org/)
 
-## 🎯 **What is Yama?**
-
-Yama is the **code quality judge** that combines and optimizes the functionality from pr-police.js and pr-describe.js into a unified, enterprise-grade toolkit. It provides **AI-powered code review** and **intelligent description enhancement** with **90% fewer API calls** through unified context gathering.
-
 **Named after the Hindu deity of justice and death, Yama judges code quality and ensures only the worthy changes pass through.**
 
----
+## What's New in V2?
 
-## ✨ **Core Features**
+Yama V2 represents a **complete architectural shift** from coded orchestration to **AI-native autonomous orchestration**:
 
-### 🔍 **AI-Powered Code Review**
+| Aspect                    | V1                     | V2                            |
+| ------------------------- | ---------------------- | ----------------------------- |
+| **Architecture**          | Coded orchestration    | AI autonomous orchestration   |
+| **Bitbucket Integration** | Direct handler imports | External MCP server           |
+| **Context Strategy**      | Pre-fetch everything   | Lazy load on-demand           |
+| **AI Role**               | Static analyzer        | Autonomous agent with tools   |
+| **Decision Making**       | TypeScript code        | AI decides                    |
+| **Tool Access**           | None                   | All operations via MCP        |
+| **File Analysis**         | All at once in prompt  | File-by-file AI loop          |
+| **Jira Integration**      | None                   | MCP tools for requirements    |
+| **Comment Posting**       | Batch after analysis   | Real-time as found            |
+| **PR Blocking**           | Manual logic           | AI decision based on criteria |
 
-- **🔒 Security Analysis**: SQL injection, XSS, hardcoded secrets detection
-- **⚡ Performance Review**: N+1 queries, memory leaks, algorithm efficiency
-- **🏗️ Code Quality**: SOLID principles, maintainability, best practices
-- **💬 Smart Comments**: Contextual inline comments with actionable suggestions
-- **📊 Severity Levels**: CRITICAL, MAJOR, MINOR, SUGGESTION with intelligent categorization
+## Architecture Overview
 
-### 📝 **Intelligent Description Enhancement**
-
-- **📎 Content Preservation**: Never removes screenshots, links, or existing explanations
-- **📋 Required Sections**: Configurable sections (Changelog, Test Cases, Config Changes, etc.)
-- **🤖 AI Enhancement**: Automatically improves incomplete descriptions while preserving content
-- **🧠 Project Context**: Uses memory-bank and .clinerules for contextual enhancement
-
-### 🚀 **Unified Context System** (Core Innovation)
-
-- **⚡ One-Time Gathering**: Collect all PR context once, reuse across all operations
-- **🧠 Smart Diff Strategy**: Automatically chooses whole diff vs file-by-file based on PR size
-- **💾 Intelligent Caching**: 90% reduction in API calls through multi-layer caching
-- **📦 Batch Processing**: Process large PRs efficiently with intelligent file batching
-
-### 🏗️ **Enterprise Ready**
-
-- **🌐 Multi-Platform**: Bitbucket Server (Phase 1), GitHub/GitLab (Future phases)
-- **📘 Full TypeScript**: Complete type safety and excellent developer experience
-- **⚙️ Highly Configurable**: YAML/JSON configuration with validation and hot-reload
-- **🛠️ CLI + API**: Use as command-line tool or programmatic library
-
----
-
-## 🚀 **Performance Benefits**
-
-| Metric                    | Individual Scripts    | Yama                 | Improvement             |
-| ------------------------- | --------------------- | -------------------- | ----------------------- |
-| **API Calls**             | ~50-100 per operation | ~10-20 total         | **90% reduction**       |
-| **Execution Time**        | 3-5 minutes each      | 2-3 minutes total    | **3x faster**           |
-| **Memory Usage**          | High duplication      | Shared context       | **50% reduction**       |
-| **Cache Efficiency**      | None                  | 80-90% hit ratio     | **New capability**      |
-| **Large PRs (40+ files)** | Often fails/timeouts  | Intelligent batching | **Reliable processing** |
-
----
-
-## 📦 **Installation**
-
-```bash
-# Install globally for CLI usage
-npm install -g @juspay/yama
-
-# Or install locally for programmatic usage
-npm install @juspay/yama
+```
+YamaV2Orchestrator
+    ↓
+NeuroLink AI Agent (Autonomous)
+    ↓
+MCP Tools (Bitbucket + Jira)
+    ↓
+Pull Request Operations
 ```
 
----
+### AI Autonomous Workflow
 
-## ⚡ **Quick Start**
+1. **Context Gathering** (AI-driven)
+   - Reads PR details
+   - Finds and reads Jira ticket
+   - Loads project standards from memory-bank
+   - Reads .clinerules for review guidelines
 
-### **1. Initialize Configuration**
+2. **File-by-File Analysis** (AI-driven)
+   - Reads each file diff individually
+   - Searches code for context when needed
+   - Reads reference files to understand patterns
+   - Comments on issues immediately
+
+3. **PR Description Enhancement** (AI-driven)
+   - Analyzes changes and requirements
+   - Generates comprehensive description
+   - Updates PR with enhanced content
+
+4. **Final Decision** (AI-driven)
+   - Evaluates all findings
+   - Applies blocking criteria
+   - Approves or blocks PR
+
+## Installation & Setup
+
+### 1. Prerequisites
 
 ```bash
-# Interactive setup
-yama init --interactive
+# Node.js 18+ required
+node --version
 
-# Quick setup with defaults
-yama init
+# Install Yama V2
+npm install @juspay/yama@2.0.0
 ```
 
-### **2. Basic Usage**
+### 2. Environment Variables
 
-#### **Unified Processing (Recommended)**
+Create a `.env` file:
 
 ```bash
-# Process PR with both review and description enhancement
-yama process --workspace YOUR_WORKSPACE --repository my-repo --branch feature/auth
+# Bitbucket
+BITBUCKET_USERNAME=your.email@company.com
+BITBUCKET_APP_PASSWORD=your-http-access-token
+BITBUCKET_BASE_URL=https://bitbucket.yourcompany.com
 
-# Process specific operations
-yama process --workspace YOUR_WORKSPACE --repository my-repo --branch feature/auth --operations review,enhance
+# Jira (optional)
+JIRA_EMAIL=your-email@company.com
+JIRA_API_TOKEN=your-jira-api-token
+JIRA_BASE_URL=https://yourcompany.atlassian.net
+
+# AI Provider (optional - defaults to auto)
+AI_PROVIDER=google-ai
+AI_MODEL=gemini-2.5-pro
+
+# Langfuse Observability (optional)
+LANGFUSE_PUBLIC_KEY=your-public-key
+LANGFUSE_SECRET_KEY=your-secret-key
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
 ```
 
-#### **Individual Operations**
+### 3. Initialize Configuration
 
 ```bash
-# Code review only
-yama review --workspace YOUR_WORKSPACE --repository my-repo --branch feature/auth
+# Create default config
+npx yama init
 
-# Description enhancement only
-yama enhance --workspace YOUR_WORKSPACE --repository my-repo --branch feature/auth
+# Or copy example
+cp yama.config.example.yaml yama.config.yaml
+
+# Edit configuration
+vim yama.config.yaml
 ```
 
-#### **Backward Compatibility**
+### 4. Verify Setup
 
 ```bash
-# Still works exactly like pr-police.js
-yama police --workspace YOUR_WORKSPACE --repository my-repo --branch feature/auth
-
-# Still works exactly like pr-describe.js / pr-scribe.js
-yama scribe --workspace YOUR_WORKSPACE --repository my-repo --branch feature/auth
+# Test initialization
+npx yama review --help
 ```
 
----
+## Usage
 
-## 🔧 **Advanced Configuration**
-
-### **File Exclusion Patterns**
+### Basic Review
 
 ```bash
-# Exclude specific file types and directories
-yama process \
+# Review by PR ID
+npx yama review \
   --workspace YOUR_WORKSPACE \
   --repository my-repo \
-  --branch feature/auth \
-  --exclude "*.lock,*.svg,*.min.js,dist/**,node_modules/**,coverage/**"
+  --pr 123
 
-# Different exclusions for different operations
-yama review --exclude "*.lock,*.svg,**/*.test.js"
-yama enhance --exclude "*.md"  # Don't process existing markdown files
+# Review by branch
+npx yama review \
+  --workspace YOUR_WORKSPACE \
+  --repository my-repo \
+  --branch feature/new-feature
 ```
 
-### **Context and Performance Tuning**
+### Dry Run Mode
 
 ```bash
-# More context lines for better AI analysis
-yama review --context-lines 5 --exclude "*.lock"
-
-# Dry run to preview changes
-yama process --dry-run --verbose
-
-# Force cache refresh
-yama process --force-refresh
+# Test without posting comments
+npx yama review \
+  --workspace YOUR_WORKSPACE \
+  --repository my-repo \
+  --pr 123 \
+  --dry-run
 ```
 
----
+### Enhance Description Only
 
-## ⚙️ **Configuration File**
+```bash
+npx yama enhance \
+  --workspace YOUR_WORKSPACE \
+  --repository my-repo \
+  --pr 123
+```
 
-Create `yama.config.yaml` in your project root:
+### Programmatic Usage
+
+```typescript
+import { createYamaV2 } from "@juspay/yama";
+
+const yama = createYamaV2();
+
+await yama.initialize();
+
+const result = await yama.startReview({
+  workspace: "YOUR_WORKSPACE",
+  repository: "my-repo",
+  pullRequestId: 123,
+  dryRun: false,
+});
+
+console.log("Decision:", result.decision);
+console.log("Issues:", result.statistics.issuesFound);
+```
+
+## Configuration
+
+### Basic Configuration
 
 ```yaml
-# AI Provider Configuration
+version: 2
+configType: "yama-v2"
+
 ai:
-  provider: "auto" # auto, google-ai, openai, anthropic
-  enableFallback: true
-  enableAnalytics: true
-  timeout: "5m"
-  temperature: 0.7
+  provider: "auto"
+  model: "gemini-2.5-pro"
+  temperature: 0.2
 
-# Git Platform Configuration
-git:
-  platform: "bitbucket"
-  credentials:
-    username: "${BITBUCKET_USERNAME}"
-    token: "${BITBUCKET_TOKEN}"
-    baseUrl: "https://your-bitbucket-server.com"
-  defaultWorkspace: "${DEFAULT_WORKSPACE}"
-
-# Feature Configuration
-features:
-  codeReview:
+mcpServers:
+  jira:
     enabled: true
-    severityLevels: ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"]
-    excludePatterns:
-      - "*.lock"
-      - "*.svg"
-      - "*.min.js"
-      - "node_modules/**"
-      - "dist/**"
-      - "build/**"
-      - "coverage/**"
-    contextLines: 3
 
-    # Custom AI Prompts for Code Review (Advanced)
-    systemPrompt: |
-      You are an Expert Security Code Reviewer focusing on enterprise standards.
-      Prioritize security vulnerabilities, performance issues, and code quality.
-      Provide actionable feedback with specific examples and solutions.
-
-    focusAreas:
-      - "🔒 Security Analysis (CRITICAL PRIORITY)"
-      - "⚡ Performance Review"
-      - "🏗️ Code Quality & Best Practices"
-      - "🧪 Testing & Error Handling"
-      - "📖 Documentation & Maintainability"
-
-    # Multi-Instance Processing Configuration
-    multiInstance:
-      enabled: true
-      instanceCount: 2
-      instances:
-        - name: "primary"
-          provider: "vertex"
-          model: "gemini-2.5-pro"
-          temperature: 0.3
-        - name: "secondary"
-          provider: "vertex"
-          model: "gemini-2.5-pro"
-          temperature: 0.1
-      deduplication:
-        enabled: true
-        similarityThreshold: 40 # 0-100 percentage scale
-        maxCommentsToPost: 30
-        prioritizeBy: "severity"
-
-    # Semantic Deduplication Configuration
-    semanticDeduplication:
-      enabled: true
-      similarityThreshold: 70 # 0-100 percentage scale
-      batchSize: 15
-      timeout: "5m"
-      fallbackOnError: true
-      logMatches: true
-
-  descriptionEnhancement:
-    enabled: true
-    preserveContent: true # NEVER remove existing content
-    requiredSections:
-      # Default sections
-      - key: "changelog"
-        name: "📋 Changelog (Modules Modified)"
-        required: true
-
-      - key: "testcases"
-        name: "🧪 Test Cases (What to be tested)"
-        required: true
-
-      - key: "config_changes"
-        name: "⚙️ Config Changes (CAC/Service Config)"
-        required: true
-
-      # Optional custom sections
-      - key: "breaking_changes"
-        name: "⚠️ Breaking Changes"
-        required: false
-
-      - key: "migration_notes"
-        name: "🔄 Migration Notes"
-        required: false
-
-      - key: "performance_impact"
-        name: "⚡ Performance Impact"
-        required: false
-
-      - key: "security_considerations"
-        name: "🔒 Security Considerations"
-        required: false
-
-    # Custom AI Prompts and Templates (Advanced)
-    systemPrompt: |
-      You are an Expert Technical Writer specializing in pull request documentation.
-      Focus on clarity, completeness, and helping reviewers understand the changes.
-      CRITICAL: Return ONLY the enhanced description without meta-commentary.
-
-    enhancementInstructions: |
-      Return ONLY the enhanced PR description as clean markdown.
-      Start directly with the enhanced description content.
-
-    outputTemplate: |
-      # {{PR_TITLE}}
-
-      ## Summary
-      [Clear overview of what this PR accomplishes]
-
-      ## Changes Made
-      [Specific technical changes with file references]
-
-      ## Testing Strategy
-      [How changes were tested and validated]
-
-      ## Impact & Considerations
-      [Business impact, performance implications, breaking changes]
-
-# Performance Configuration
-cache:
+review:
   enabled: true
-  ttl: "1h"
-  maxSize: "100mb"
-  storage: "memory"
-
-# Monitoring and Analytics
-monitoring:
-  enabled: true
-  metrics: ["performance", "cache", "api_calls"]
+  focusAreas:
+    - name: "Security Analysis"
+      priority: "CRITICAL"
+    - name: "Performance Review"
+      priority: "MAJOR"
 ```
 
----
+### Advanced Configuration
 
-## 🤖 **Programmatic Usage**
+See [yama.config.example.yaml](yama.config.example.yaml) for complete configuration options.
 
-### **Basic Setup**
+## Project-Specific Standards
 
-```typescript
-import { Guardian, createGuardian } from "@juspay/yama";
-
-// Create Guardian instance
-const guardian = createGuardian({
-  providers: {
-    ai: {
-      provider: "google-ai",
-      enableAnalytics: true,
-    },
-    git: {
-      platform: "bitbucket",
-      credentials: {
-        username: process.env.BITBUCKET_USERNAME!,
-        token: process.env.BITBUCKET_TOKEN!,
-        baseUrl: "https://your-bitbucket-server.com",
-      },
-    },
-  },
-});
-
-// Initialize
-await guardian.initialize();
-```
-
-### **Unified Processing**
-
-```typescript
-// Process PR with multiple operations using shared context
-const result = await guardian.processPR({
-  workspace: "YOUR_WORKSPACE",
-  repository: "my-repo",
-  branch: "feature/auth",
-  operations: ["review", "enhance-description"],
-});
-
-console.log(`Processed ${result.operations.length} operations`);
-console.log(`API calls saved: ${result.performance.apiCallsSaved}`);
-console.log(`Cache hit ratio: ${result.performance.cacheHitRatio}%`);
-```
-
-### **Streaming Processing with Real-time Updates**
-
-```typescript
-// Real-time progress updates
-for await (const update of guardian.processPRStream({
-  workspace: "YOUR_WORKSPACE",
-  repository: "my-repo",
-  branch: "feature/auth",
-  operations: ["review", "enhance-description"],
-})) {
-  console.log(`${update.operation}: ${update.status} - ${update.message}`);
-
-  if (update.progress) {
-    console.log(`Progress: ${update.progress}%`);
-  }
-}
-```
-
-### **Individual Operations**
-
-```typescript
-// Code review only
-const reviewResult = await guardian.reviewCode({
-  workspace: "YOUR_WORKSPACE",
-  repository: "my-repo",
-  branch: "feature/auth",
-  excludePatterns: ["*.lock", "*.svg"],
-});
-
-// Description enhancement only
-const enhancementResult = await guardian.enhanceDescription({
-  workspace: "YOUR_WORKSPACE",
-  repository: "my-repo",
-  branch: "feature/auth",
-  customSections: [
-    { key: "summary", name: "📝 Summary", required: true },
-    { key: "rollback", name: "🔄 Rollback Plan", required: true },
-  ],
-});
-```
-
-### **Configuration Hot-Reload**
-
-```typescript
-import { configManager } from "@juspay/yama";
-
-// Enable hot-reload for configuration changes
-const stopWatching = configManager.enableHotReload((newConfig) => {
-  console.log("Configuration updated:", newConfig);
-  // Optionally reinitialize Guardian with new config
-});
-
-// Stop watching when done
-process.on("SIGINT", () => {
-  stopWatching();
-  process.exit(0);
-});
-```
-
----
-
-## 🧠 **Smart Diff Strategy**
-
-Yama automatically chooses the optimal diff processing strategy:
-
-### **Strategy Selection**
-
-```typescript
-// File count ≤ 5: Whole diff strategy
-if (fileCount <= 5) {
-  strategy = "whole"; // Fast, provides full context
-  reason = "Small PR, whole diff provides better context";
-}
-
-// File count 6-20: Still whole diff (manageable)
-else if (fileCount <= 20) {
-  strategy = "whole";
-  reason = "Moderate PR size, whole diff manageable";
-}
-
-// File count 21-50: File-by-file with batching
-else if (fileCount <= 50) {
-  strategy = "file-by-file"; // Batch process 5 files at a time
-  reason = "Large PR, file-by-file more efficient";
-}
-
-// File count > 50: Essential batching for performance
-else {
-  strategy = "file-by-file";
-  reason = "Very large PR, batching required for performance";
-}
-```
-
-### **Batch Processing for Large PRs**
-
-```typescript
-// Process files in optimized batches
-const batchSize = 5;
-for (let i = 0; i < filteredFiles.length; i += batchSize) {
-  const batch = filteredFiles.slice(i, i + batchSize);
-
-  // Process batch in parallel with intelligent caching
-  const batchResults = await Promise.all(
-    batch.map((file) => processFileWithCache(file)),
-  );
-}
-```
-
----
-
-## 🎯 **File Exclusion Patterns**
-
-### **Built-in Smart Exclusions**
-
-```yaml
-# Default exclusions (always applied unless overridden)
-excludePatterns:
-  - "*.lock" # Package lock files
-  - "*.svg" # SVG images
-  - "*.min.js" # Minified JavaScript
-  - "*.min.css" # Minified CSS
-  - "node_modules/**" # Dependencies
-  - "dist/**" # Build outputs
-  - "build/**" # Build outputs
-  - "coverage/**" # Test coverage
-```
-
-### **Pattern Syntax**
+Create custom review standards for your repository:
 
 ```bash
-# Examples of supported patterns:
---exclude "*.lock"                    # All lock files
---exclude "**/*.test.js"              # Test files in any directory
---exclude "src/generated/**"          # Entire generated directory
---exclude "*.{lock,svg,min.js}"       # Multiple extensions
---exclude "!important.lock"           # Exclude everything except important.lock
+mkdir -p memory-bank
 ```
 
-### **Context-Aware Exclusions**
+Create `memory-bank/coding-standards.md`:
+
+```markdown
+# Project-Specific Review Standards
+
+## Critical Security Rules
+
+1. ALL payment data MUST be encrypted
+2. NO credit card numbers in logs
+3. ALL database queries MUST use parameterized statements
+
+## Performance Requirements
+
+- API response time: < 200ms p95
+- Database queries: < 50ms p95
+```
+
+Yama V2 AI will automatically read and apply these standards.
+
+## AI Autonomous Features
+
+### Lazy Context Loading
+
+AI reads only what it needs:
+
+- Sees unfamiliar function? → `search_code("functionName")`
+- Needs to understand import? → `get_file_content("path/to/file.ts")`
+- Confused about structure? → `list_directory_content("src/")`
+
+### Real-Time Feedback
+
+AI comments as it finds issues:
+
+- No batching - immediate feedback
+- Severity-based emojis (🔒 CRITICAL, ⚠️ MAJOR, 💡 MINOR, 💬 SUGGESTION)
+- Actionable suggestions with code examples
+
+### Requirement Alignment
+
+AI reads Jira tickets:
+
+- Extracts acceptance criteria
+- Verifies implementation matches requirements
+- Calculates requirement coverage
+- Blocks PR if coverage < 70%
+
+### Code Context Understanding
+
+AI uses tools to understand code:
+
+- `search_code()` - Find function definitions
+- `get_file_content()` - Read related files
+- `list_directory_content()` - Explore structure
+
+## Blocking Criteria
+
+AI applies these criteria automatically:
+
+1. **ANY CRITICAL issue** → BLOCKS PR
+   - Security vulnerabilities
+   - Data loss risks
+   - Authentication bypasses
+
+2. **3+ MAJOR issues** → BLOCKS PR
+   - Significant bugs
+   - Performance problems
+   - Logic errors
+
+3. **Requirement coverage < 70%** → BLOCKS PR (when Jira enabled)
+   - Incomplete Jira implementation
+   - Missing acceptance criteria
+
+## MCP Servers
+
+Yama V2 uses MCP (Model Context Protocol) servers for tool access:
+
+### Bitbucket MCP
+
+- **Package**: `@anthropic/bitbucket-mcp-server`
+- **Tools**: get_pull_request, add_comment, search_code, etc.
+- **Status**: Production ready
+
+### Jira MCP
+
+- **Package**: `@nexus2520/jira-mcp-server`
+- **Tools**: get_issue, search_issues, get_issue_comments
+- **Status**: Optional integration
+
+## Monitoring & Analytics
+
+Track review performance with Langfuse integration:
+
+```bash
+# Set Langfuse environment variables
+export LANGFUSE_PUBLIC_KEY=your-public-key
+export LANGFUSE_SECRET_KEY=your-secret-key
+```
+
+Analytics include:
+
+- Tool calls made
+- Token usage
+- Cost estimate
+- Duration
+- Decision rationale
+
+## Troubleshooting
+
+### MCP Server Connection Issues
+
+```bash
+# Verify environment variables
+echo $BITBUCKET_USERNAME
+echo $BITBUCKET_APP_PASSWORD
+echo $BITBUCKET_BASE_URL
+```
+
+### AI Not Finding Issues
+
+- Check `focusAreas` in config
+- Verify `blockingCriteria` are clear
+- Ensure `temperature` is low (0.2-0.3)
+- Review project-specific standards in memory-bank
+
+### High Token Usage
+
+- Enable `lazyLoading: true` in config
+- Reduce `maxFilesPerReview`
+- Set `maxToolCallsPerFile` limit
+- Use `excludePatterns` to skip generated files
+
+## Performance
+
+### Expected Metrics
+
+| Metric          | Target                |
+| --------------- | --------------------- |
+| Review time     | < 10 min for 20 files |
+| Token usage     | < 500K per review     |
+| Cost per review | < $2 USD              |
+| Accuracy        | > 95% of V1 findings  |
+
+### Optimization Tips
+
+1. **Use lazy loading** - Don't pre-fetch everything
+2. **Cache tool results** - Reuse MCP responses
+3. **Exclude generated files** - Skip lock files, minified code
+4. **Limit file count** - Split large PRs
+
+## Migration from V1
+
+**Breaking Change**: V1 has been completely replaced by V2. There is no backward compatibility.
+
+### Automated Config Migration
+
+Use the built-in migration script to convert your V1 config to V2 format:
+
+```bash
+# Rename your current config to V1
+mv yama.config.yaml yama.v1.config.yaml
+
+# Run migration (dry-run first to preview)
+npx yama migrate-config --dry-run
+
+# Run actual migration
+npx yama migrate-config
+
+# Or with custom paths
+npx yama migrate-config \
+  --input yama.v1.config.yaml \
+  --output yama.config.yaml \
+  --force
+```
+
+The migration script will:
+
+- ✅ Migrate AI provider settings
+- ✅ Convert focus areas to structured format
+- ✅ Transform required sections with descriptions
+- ✅ Apply V2 defaults for new features
+- ⚠️ Warn about dropped V1 features (batchProcessing, multiInstance, etc.)
+- 📊 Generate a detailed migration report
+
+### V1 → V2 Migration Steps
+
+1. **Migrate configuration** (automated):
+
+```bash
+npx yama migrate-config
+```
+
+2. **Update imports**:
 
 ```typescript
-// Different exclusions for different operations
-const reviewExclusions = ["*.lock", "*.svg", "**/*.test.js"];
-const enhancementExclusions = ["*.lock"]; // Allow SVGs in descriptions
+// V1 (removed)
+// import { Guardian } from "@juspay/yama";
 
-await guardian.processPR({
-  operations: [
-    {
-      type: "review",
-      excludePatterns: reviewExclusions,
-    },
-    {
-      type: "enhance-description",
-      excludePatterns: enhancementExclusions,
-    },
-  ],
-});
+// V2 (use this)
+import { createYamaV2 } from "@juspay/yama";
+const yama = createYamaV2();
 ```
 
----
-
-## 📋 **Configurable Description Sections**
-
-### **Default Required Sections**
-
-```typescript
-const defaultSections = [
-  { key: "changelog", name: "📋 Changelog (Modules Modified)", required: true },
-  {
-    key: "testcases",
-    name: "🧪 Test Cases (What to be tested)",
-    required: true,
-  },
-  { key: "config_changes", name: "⚙️ Config Changes", required: true },
-];
-```
-
-### **Custom Section Examples**
-
-```yaml
-# Enterprise setup
-requiredSections:
-  - key: "summary"
-    name: "📝 Executive Summary"
-    required: true
-
-  - key: "business_impact"
-    name: "💼 Business Impact"
-    required: true
-
-  - key: "technical_changes"
-    name: "🔧 Technical Changes"
-    required: true
-
-  - key: "testing_strategy"
-    name: "🧪 Testing Strategy"
-    required: true
-
-  - key: "rollback_plan"
-    name: "🔄 Rollback Plan"
-    required: true
-
-  - key: "monitoring"
-    name: "📊 Monitoring & Alerts"
-    required: false
-
-  - key: "documentation"
-    name: "📖 Documentation Updates"
-    required: false
-```
-
-### **Section Auto-Detection**
-
-```typescript
-// Smart pattern matching for existing sections
-const sectionPatterns = {
-  changelog: [
-    /##.*?[Cc]hangelog/i,
-    /##.*?[Mm]odules?\s+[Mm]odified/i,
-    /📋.*?[Cc]hangelog/i,
-  ],
-  testcases: [/##.*?[Tt]est\s+[Cc]ases?/i, /##.*?[Tt]esting/i, /🧪.*?[Tt]est/i],
-  security: [/##.*?[Ss]ecurity/i, /🔒.*?[Ss]ecurity/i, /##.*?[Vv]ulnerabilit/i],
-};
-```
-
----
-
-## 🛠️ **Utility Commands**
-
-### **Health and Status**
+3. **Set environment variables**: V2 uses MCP servers configured via env vars
 
 ```bash
-# Check system health
-yama status --detailed
+# Bitbucket (required)
+export BITBUCKET_USERNAME=your.email@company.com
+export BITBUCKET_APP_PASSWORD=your-http-access-token
+export BITBUCKET_BASE_URL=https://bitbucket.yourcompany.com
 
-# Output:
-# ⚔️ Yama Status
-# ✅ Overall Health: Healthy
-#
-# 📊 Component Status:
-#   ✅ ai: OK
-#   ✅ git: OK
-#   ✅ cache: OK
-#   ✅ config: OK
-#
-# 📈 Statistics:
-# {
-#   "totalOperations": 45,
-#   "successRate": 0.98,
-#   "avgProcessingTime": 120,
-#   "apiCallsSaved": 1250
-# }
-#
-# 💾 Cache: 67 keys, 423 hits, 89% hit ratio
+# Jira (optional)
+export JIRA_EMAIL=your-email@company.com
+export JIRA_API_TOKEN=your-jira-api-token
+export JIRA_BASE_URL=https://yourcompany.atlassian.net
 ```
 
-### **Cache Management**
+4. **Test thoroughly**: V2 uses autonomous AI orchestration - validate behavior in dry-run mode first
 
 ```bash
-# View cache statistics
-yama cache stats
-
-# Output:
-# 💾 Cache Statistics
-# Keys: 67
-# Hits: 423
-# Misses: 52
-# Hit Ratio: 89%
-#
-# 📊 Detailed Stats:
-# {
-#   "pr": { "hits": 45, "misses": 5 },
-#   "file-diff": { "hits": 234, "misses": 28 },
-#   "context": { "hits": 144, "misses": 19 }
-# }
-
-# Clear caches
-yama cache clear
+npx yama review --workspace YOUR_WORKSPACE --repository my-repo --pr 123 --dry-run
 ```
 
-### **Configuration Management**
+### What Gets Migrated
 
-```bash
-# Validate configuration
-yama config validate
+| V1 Section                        | V2 Section               | Notes                    |
+| --------------------------------- | ------------------------ | ------------------------ |
+| `providers.ai`                    | `ai`                     | Direct mapping           |
+| `features.codeReview`             | `review`                 | Restructured             |
+| `features.descriptionEnhancement` | `descriptionEnhancement` | Restructured             |
+| `monitoring`                      | `monitoring`             | Enhanced                 |
+| `rules`                           | `projectStandards`       | Converted to focus areas |
 
-# Show current configuration (sensitive data masked)
-yama config show
+### What Gets Dropped
 
-# Output:
-# ⚙️ Current Configuration
-# {
-#   "ai": {
-#     "provider": "google-ai",
-#     "enableAnalytics": true
-#   },
-#   "git": {
-#     "platform": "bitbucket",
-#     "credentials": {
-#       "token": "***MASKED***"
-#     }
-#   }
-# }
-```
+These V1 features are **removed** in V2 (AI handles autonomously):
 
----
+- `providers.git` → Use environment variables
+- `features.codeReview.batchProcessing` → AI manages batching
+- `features.codeReview.multiInstance` → Single autonomous agent
+- `features.codeReview.semanticDeduplication` → AI deduplicates naturally
+- `features.securityScan` → Built into AI prompts
+- `cache` → MCP tools handle caching
 
-## 🔄 **Migration from Individual Scripts**
-
-Yama provides **100% backward compatibility** with your existing workflows:
-
-### **From pr-police.js**
-
-```bash
-# Old way
-node pr-police.js --workspace YOUR_WORKSPACE --repository repo --branch branch
-
-# New way (identical functionality + optimizations)
-yama review --workspace YOUR_WORKSPACE --repository repo --branch branch
-
-# OR use the direct alias
-yama police --workspace YOUR_WORKSPACE --repository repo --branch branch
-```
-
-### **From pr-describe.js / pr-scribe.js**
-
-```bash
-# Old way
-node pr-describe.js --workspace YOUR_WORKSPACE --repository repo --branch branch
-
-# New way (identical functionality + optimizations)
-yama enhance --workspace YOUR_WORKSPACE --repository repo --branch branch
-
-# OR use the direct alias
-yama scribe --workspace YOUR_WORKSPACE --repository repo --branch branch
-```
-
-### **New Unified Approach (Best Performance)**
-
-```bash
-# Best of both worlds + 90% performance improvement
-yama process --workspace YOUR_WORKSPACE --repository repo --branch branch --operations all
-```
-
----
-
-## 🏗️ **Architecture Overview**
-
-```
-⚔️ YAMA ARCHITECTURE ⚔️
-┌─────────────────────────────────────────────────────────────┐
-│  🔍 UNIFIED CONTEXT GATHERING (Once for all operations)    │
-│     ├── 🔍 Find Open PR (by branch or PR ID)               │
-│     ├── 📄 Get PR Details (title, description, comments)   │
-│     ├── 🧠 Get Memory Bank Context (project rules)         │
-│     ├── 📊 Smart Diff Strategy (whole vs file-by-file)     │
-│     └── 📎 Apply File Exclusions & Filters                 │
-├─────────────────────────────────────────────────────────────┤
-│  ⚡ OPTIMIZED OPERATIONS (Use shared context)              │
-│     ├── 🛡️ Code Review (security, performance, quality)    │
-│     ├── 📝 Description Enhancement (preserve + enhance)    │
-│     ├── 🔒 Security Scan (future)                          │
-│     └── 📊 Analytics & Reporting (future)                  │
-├─────────────────────────────────────────────────────────────┤
-│  🚀 PERFORMANCE LAYER                                      │
-│     ├── 💾 Multi-Layer Caching (90% fewer API calls)      │
-│     ├── 🔗 Connection Reuse (single MCP connection)        │
-│     ├── 📦 Intelligent Batching (5 files per batch)       │
-│     └── 🔄 Smart Retry Logic (exponential backoff)         │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🌟 **Why Yama?**
-
-### **vs Individual Scripts**
-
-1. **🚀 90% Performance Gain**: Unified context eliminates duplicate API calls
-2. **🧠 Shared Intelligence**: AI analysis benefits from complete PR context
-3. **💾 Intelligent Caching**: Multi-layer caching with 80-90% hit rates
-4. **📦 Batch Processing**: Handles large PRs (50+ files) that would fail before
-5. **🔧 Enterprise Features**: Health monitoring, configuration management, analytics
-6. **📘 Type Safety**: Complete TypeScript implementation with IntelliSense
-7. **🔄 Backward Compatible**: Existing workflows work unchanged
-
-### **vs Other Tools**
-
-1. **🎯 Purpose-Built**: Specifically designed for enterprise PR workflows
-2. **🔒 Security-First**: Built-in security analysis and hardcoded secret detection
-3. **🤖 AI-Native**: Deep integration with multiple AI providers with fallbacks
-4. **⚙️ Highly Configurable**: Every aspect can be customized via configuration
-5. **📊 Analytics Ready**: Built-in performance monitoring and metrics collection
-
----
-
-## 🛡️ **Security & Privacy**
-
-- **🔐 No Data Storage**: All processing is ephemeral, no permanent data storage
-- **🔒 Token Security**: All credentials are handled securely and never logged
-- **🌐 Local Processing**: Diffs and code analysis happen locally before AI submission
-- **🚫 No Tracking**: No usage analytics sent to external services (unless explicitly enabled)
-- **🛡️ Content Filtering**: Automatic detection and filtering of sensitive data before AI processing
-
----
-
-## 📈 **Performance Monitoring**
-
-### **Built-in Metrics**
-
-```typescript
-const stats = guardian.getStats();
-
-console.log({
-  performance: {
-    totalOperations: stats.totalOperations,
-    avgProcessingTime: stats.avgProcessingTime,
-    successRate: stats.successRate,
-    apiCallsSaved: stats.apiCallsSaved,
-  },
-  cache: {
-    hitRatio: stats.cache.hitRatio,
-    totalHits: stats.cache.hits,
-    keyCount: stats.cache.keys,
-  },
-  resources: {
-    memoryUsage: stats.memory,
-    activeConnections: stats.connections,
-  },
-});
-```
-
-### **Performance Tracking**
-
-```bash
-# View performance metrics
-yama status --detailed
-
-# Example output shows:
-# - 90% reduction in API calls vs individual scripts
-# - 3x faster execution through shared context
-# - 89% cache hit ratio
-# - Average processing time: 2.3 minutes for medium PRs
-```
-
----
-
-## 🚀 **Coming Soon (Future Phases)**
-
-- **🔒 Advanced Security Scanning**: Dependency vulnerability analysis, SAST integration
-- **🌐 Multi-Platform Support**: GitHub, GitLab, Azure DevOps integration
-- **📊 Advanced Analytics**: Team productivity metrics, code quality trends
-- **🤖 Custom AI Rules**: Train models on your codebase patterns
-- **⚡ Parallel Processing**: Multi-PR batch processing for CI/CD integration
-- **🔗 IDE Integration**: VSCode, IntelliJ plugins for real-time analysis
-
----
-
-## 🤝 **Contributing**
+## Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
@@ -815,42 +467,16 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 4. **Push** to the branch (`git push origin feature/amazing-feature`)
 5. **Open** a Pull Request
 
----
+## Support
 
-## 📄 **License**
+- **Documentation**: [GitHub Wiki](https://github.com/juspay/yama/wiki)
+- **Issues**: [GitHub Issues](https://github.com/juspay/yama/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/juspay/yama/discussions)
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## License
 
----
-
-## 🆘 **Support**
-
-- **📖 Documentation**: [GitHub Wiki](https://github.com/juspay/yama/wiki)
-- **🐛 Issues**: [GitHub Issues](https://github.com/juspay/yama/issues)
-- **💬 Discussions**: [GitHub Discussions](https://github.com/juspay/yama/discussions)
-- **📧 Email**: opensource@juspay.in
+MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-## 🎯 **Environment Variables**
-
-```bash
-# Required
-BITBUCKET_USERNAME=your-username
-BITBUCKET_TOKEN=your-personal-access-token
-GOOGLE_AI_API_KEY=your-google-ai-api-key
-
-# Optional
-BITBUCKET_BASE_URL=https://your-bitbucket-server.com
-AI_PROVIDER=google-ai
-AI_MODEL=gemini-2.5-pro
-DEFAULT_WORKSPACE=YOUR_WORKSPACE
-ENABLE_CACHE=true
-YAMA_DEBUG=false
-```
-
----
-
-**⚔️ Built with ❤️ by the Juspay team • Powered by AI & Enterprise Security • Code Quality Justice**
-
-> _"In the realm of code, Yama stands as the eternal judge, ensuring only the worthy changes pass through to enlightenment."_
+**⚔️ Built with ❤️ by Juspay • Powered by AI & MCP • Autonomous Code Quality Justice**

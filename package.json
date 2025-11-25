@@ -1,6 +1,6 @@
 {
   "name": "@juspay/yama",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "description": "Enterprise-grade Pull Request automation toolkit with AI-powered code review and description enhancement",
   "keywords": [
     "pr",
@@ -28,10 +28,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "yama": "dist/cli/index.js",
-    "pr-guardian": "dist/cli/index.js",
-    "pr-police": "dist/cli/index.js",
-    "pr-scribe": "dist/cli/index.js"
+    "yama": "dist/cli/v2.cli.js"
   },
   "directories": {
     "test": "tests"
@@ -46,11 +43,14 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "yama.config.example.yaml"
+    "yama.config.example.yaml",
+    ".mcp-config.example.json",
+    "docs/v2"
   ],
   "scripts": {
     "build": "tsc && tsc-alias",
-    "dev": "ts-node-dev --respawn --transpile-only src/cli/index.ts",
+    "dev": "tsx watch src/cli/v2.cli.ts",
+    "dev:run": "tsx src/cli/v2.cli.ts",
     "test": "jest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -83,8 +83,9 @@
     "check:all": "npm run lint && npm run format --check && npm run validate && npm run validate:commit"
   },
   "dependencies": {
-    "@juspay/neurolink": "^7.40.1",
-    "@nexus2520/bitbucket-mcp-server": "^0.10.0",
+    "@juspay/neurolink": "^8.1.0",
+    "@nexus2520/bitbucket-mcp-server": "^1.1.2",
+    "@nexus2520/jira-mcp-server": "^1.0.1",
     "chalk": "^4.1.2",
     "commander": "^11.0.0",
     "debug": "^4.3.4",
@@ -125,6 +126,7 @@
     "ts-node": "^10.0.0",
     "ts-node-dev": "^2.0.0",
     "tsc-alias": "^1.8.0",
+    "tsx": "^4.20.6",
     "typedoc": "^0.25.0",
     "typescript": "^5.0.0"
   },
