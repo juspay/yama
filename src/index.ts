@@ -1,43 +1,58 @@
 /**
- * Yama - Main package exports
- * Provides both programmatic API and CLI access
+ * Yama - AI-Native Code Review
+ * Main export file
  */
 
-// Core classes
-export { Guardian, createGuardian, guardian } from "./core/Guardian.js";
-export { ContextGatherer, createContextGatherer } from "./core/ContextGatherer.js";
+// ============================================================================
+// Core Exports
+// ============================================================================
+
+export {
+  YamaV2Orchestrator,
+  createYamaV2,
+} from "./v2/core/YamaV2Orchestrator.js";
+export { ConfigLoader } from "./v2/config/ConfigLoader.js";
+export { MCPServerManager } from "./v2/core/MCPServerManager.js";
+export { SessionManager } from "./v2/core/SessionManager.js";
+export { PromptBuilder } from "./v2/prompts/PromptBuilder.js";
+
+// ============================================================================
+// Type Exports
+// ============================================================================
+
 export type {
-  UnifiedContext,
-  ProjectContext,
-  DiffStrategy,
-} from "./core/ContextGatherer.js";
+  ReviewRequest,
+  ReviewResult,
+  ReviewUpdate,
+  ReviewSession,
+  ReviewStatistics,
+  IssuesBySeverity,
+  TokenUsage,
+} from "./v2/types/v2.types.js";
 
-// Providers
-export {
-  BitbucketProvider,
-  createBitbucketProvider,
-} from "./core/providers/BitbucketProvider.js";
+export type {
+  YamaV2Config,
+  AIConfig,
+  MCPServersConfig,
+  ReviewConfig,
+  DescriptionEnhancementConfig,
+} from "./v2/types/config.types.js";
 
-// Features
-export { CodeReviewer, createCodeReviewer } from "./features/CodeReviewer.js";
-export {
-  DescriptionEnhancer,
-  createDescriptionEnhancer,
-} from "./features/DescriptionEnhancer.js";
+export type {
+  GetPullRequestResponse,
+  GetPullRequestDiffResponse,
+  GetIssueResponse,
+  SearchCodeResponse,
+} from "./v2/types/mcp.types.js";
 
-// Utilities
-export { Logger, createLogger, logger } from "./utils/Logger.js";
-export { Cache, createCache, cache } from "./utils/Cache.js";
-export {
-  ConfigManager,
-  createConfigManager,
-  configManager,
-} from "./utils/ConfigManager.js";
+// ============================================================================
+// Version Information
+// ============================================================================
 
-// Types
-export * from "./types/index.js";
+export const VERSION = "2.0.0";
 
-// CLI
-export { main as cli } from "./cli/index.js";
+// ============================================================================
+// Default Export
+// ============================================================================
 
-// Note: Use named import { Guardian } from '@juspay/yama' instead
+export { createYamaV2 as default } from "./v2/core/YamaV2Orchestrator.js";

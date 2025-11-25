@@ -47,14 +47,15 @@ const VALID_SCOPES = [
   'github',
   'bitbucket',
   'gitlab',
-  'deps'
+  'deps',
+  'v2'
 ];
 
-// Semantic commit regex pattern
-const COMMIT_PATTERN = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|deps|security|revert)(\(.+\))?: .{1,72}$/;
+// Semantic commit regex pattern (supports breaking change with !)
+const COMMIT_PATTERN = /^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|deps|security|revert)(\(.+\))?!?: .{1,72}$/;
 
-// More detailed pattern for parsing
-const DETAILED_PATTERN = /^(\w+)(\(([^)]+)\))?: (.+)$/;
+// More detailed pattern for parsing (supports breaking change with !)
+const DETAILED_PATTERN = /^(\w+)(\(([^)]+)\))?(!?)?: (.+)$/;
 
 function validateCommitMessage(message) {
   const errors = [];
@@ -68,7 +69,7 @@ function validateCommitMessage(message) {
     }
 
     const match = message.match(DETAILED_PATTERN);
-    const [, type, , scope, description] = match;
+    const [, type, , scope, breakingChange, description] = match;
 
     // Validate type
     if (!VALID_TYPES.includes(type)) {
@@ -121,11 +122,18 @@ function validateCommitMessage(message) {
 }
 
 function main() {
+  const fs = require('fs');
   let commitMessage;
 
-  // Get commit message from command line argument or stdin
+  // Get commit message from command line argument (file path or content) or stdin
   if (process.argv[2]) {
-    commitMessage = process.argv[2];
+    // Check if argument is a file path
+    if (fs.existsSync(process.argv[2])) {
+      commitMessage = fs.readFileSync(process.argv[2], 'utf8').trim();
+    } else {
+      // Treat as direct message content
+      commitMessage = process.argv[2];
+    }
   } else if (process.env.COMMIT_MESSAGE) {
     commitMessage = process.env.COMMIT_MESSAGE;
   } else {
@@ -203,6 +211,7 @@ function main() {
 
     console.log('\n📖 Examples of valid commit messages:');
     console.log('   • feat(cli): add new command for PR analysis');
+    console.log('   • feat(v2)!: complete revamp with breaking changes');
     console.log('   • fix(api): resolve authentication issue with GitHub');
     console.log('   • docs: update installation instructions');
     console.log('   • refactor(core): simplify PR processing logic');

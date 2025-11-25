@@ -1,215 +1,225 @@
 # Yama Configuration Example
-# This file contains all available configuration options with explanations
+# Copy this file to yama.config.yaml and customize for your project
 
-# Display Configuration
+version: 2
+configType: "yama-v2"
+
+# ============================================================================
+# Display & Streaming Configuration
+# ============================================================================
 display:
-  showBanner: true # Show ASCII art banner on startup (default: true)
+  showBanner: true # Show Yama banner on startup
+  streamingMode: false # Enable real-time streaming of AI decisions
+  verboseToolCalls: false # Log every MCP tool call
+  showAIThinking: false # Display AI reasoning process
 
-# AI Provider Configuration
-providers:
-  ai:
-    provider: "auto" # Options: auto, google-ai, openai, anthropic, azure, bedrock
-    model: "best" # Model name or "best" for auto-selection
-    temperature: 0.3 # Lower = more focused (0.0-1.0)
-    maxTokens: 60000 # Maximum tokens for response (provider-aware limits will be applied automatically)
-    timeout: "15m" # Timeout for AI operations
-    enableAnalytics: true
-    enableEvaluation: false
+# ============================================================================
+# AI Configuration
+# ============================================================================
+ai:
+  provider: "auto" # auto | google-ai | anthropic | openai | bedrock
+  model: "gemini-2.5-pro" # or claude-3-7-sonnet-20250219-v1:0, gpt-4, etc.
+  temperature: 0.2 # Lower = more deterministic (0.0-1.0)
+  maxTokens: 128000 # Maximum tokens per AI call
+  enableAnalytics: true # Track token usage and costs
+  enableEvaluation: false # Enable quality evaluation (slower)
+  timeout: "15m" # Maximum time for review
+  retryAttempts: 3 # Number of retries on failure
 
-  # Git Platform Configuration
-  git:
-    platform: "bitbucket" # Options: bitbucket, github, gitlab, azure-devops
-    credentials:
-      username: "${BITBUCKET_USERNAME}" # Environment variable
-      token: "${BITBUCKET_TOKEN}" # Environment variable
-      baseUrl: "${BITBUCKET_BASE_URL}" # Your Bitbucket server URL
-
-# Feature Configuration
-features:
-  # Code Review Configuration
-  codeReview:
+  # Conversation memory for maintaining review state
+  conversationMemory:
     enabled: true
-    postSummaryComment: true # Post summary comment at the end of review (default: true)
-    severityLevels: ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"]
-    categories:
-      [
-        "security",
-        "performance",
-        "maintainability",
-        "functionality",
-        "error_handling",
-      ]
-    excludePatterns:
-      - "*.lock"
-      - "*.svg"
-      - "*.png"
-      - "*.jpg"
-      - "*.gif"
-      - "*.min.js"
-      - "*.min.css"
-      - "dist/**"
-      - "build/**"
-      - "vendor/**"
-    contextLines: 3 # Lines of context around changes
-    focusAreas:
-      - "Security vulnerabilities"
-      - "Performance bottlenecks"
-      - "Error handling"
-      - "Code quality"
+    store: "memory" # memory | redis
+    maxSessions: 50
+    maxTurnsPerSession: 300 # Long reviews need many turns
+    enableSummarization: false # Don't summarize mid-review
 
-    # NEW: Batch Processing Configuration
-    batchProcessing:
-      enabled: true # Enable batch processing for large PRs
-      maxFilesPerBatch: 3 # Maximum files to process in each batch
-      prioritizeSecurityFiles: true # Process security-sensitive files first
-      parallelBatches: false # Keep for backward compatibility
-      batchDelayMs: 1000 # Delay between batches in milliseconds
-      singleRequestThreshold: 5 # Use single request for PRs with ≤5 files
+# ============================================================================
+# MCP Servers Configuration
+# ============================================================================
+# Bitbucket MCP is always enabled (hardcoded)
+# Jira MCP can be enabled/disabled here
+mcpServers:
+  jira:
+    enabled: true # Set to false to disable Jira integration
 
-      # NEW: Parallel Processing Configuration
-      parallel:
-        enabled: true # Enable parallel processing by default
-        maxConcurrentBatches: 3 # Maximum concurrent batches
-        rateLimitStrategy: "fixed" # Options: fixed, adaptive
-        tokenBudgetDistribution: "equal" # Options: equal, weighted
-        failureHandling: "continue" # Options: continue, stop-all
-
-    # Multi-Instance Processing Configuration
-    multiInstance:
-      enabled: true # Enable multi-instance review
-      instanceCount: 2 # Number of instances to run in parallel
-      instances:
-        - name: "primary"
-          provider: "vertex"
-          model: "gemini-2.5-pro"
-          temperature: 0.3
-          weight: 1.0
-        - name: "secondary"
-          provider: "vertex"
-          model: "gemini-2.5-pro"
-          temperature: 0.1
-          weight: 1.0
-      deduplication:
-        enabled: true
-        similarityThreshold: 40 # Similarity percentage threshold (0-100)
-        maxCommentsToPost: 30
-        prioritizeBy: "severity"
-
-    # NEW: Semantic Comment Deduplication Configuration
-    semanticDeduplication:
-      enabled: true # Enable AI-powered semantic similarity analysis
-      similarityThreshold: 70 # Similarity percentage threshold (0-100)
-      batchSize: 15 # Number of violations to process per batch
-      timeout: "5m" # Timeout for similarity analysis
-      fallbackOnError: true # Return all violations if AI analysis fails
-      logMatches: true # Log detailed similarity match information
-
-  # Description Enhancement Configuration
-  descriptionEnhancement:
-    enabled: true
-    preserveContent: true # Always preserve existing content
-    autoFormat: true
-
-    requiredSections:
-      - key: "changelog"
-        name: "Changelog (Modules Modified)"
-        required: true
-      - key: "testcases"
-        name: "Test Cases (What to be tested)"
-        required: true
-      - key: "config_changes"
-        name: "CAC Config Or Service Config Changes"
-        required: true
-
-    # Customize AI behavior:
-    systemPrompt: |
-      You are a Senior Staff Engineer writing comprehensive technical documentation.
-      Focus on architectural decisions, trade-offs, and long-term maintainability.
-
-    # Customize formatting:
-    enhancementInstructions: |
-      Keep descriptions under 300 words. Use bullet points, not paragraphs.
-      No emojis. Professional tone only. Include numbers and metrics.
-
-  # NEW: Diff Strategy Configuration
-  diffStrategy:
-    enabled: true
-    thresholds:
-      wholeDiffMaxFiles: 2 # Use whole diff for ≤2 files
-      fileByFileMinFiles: 3 # Use file-by-file for ≥3 files
-    # Optional: Force a specific strategy regardless of file count
-    # forceStrategy: "file-by-file"  # Options: whole, file-by-file, auto
-
-  # Security Scan Configuration (Future)
-  securityScan:
-    enabled: false
-    level: "strict" # Options: strict, moderate, basic
-    scanTypes: ["dependencies", "secrets", "vulnerabilities"]
-
-  # Analytics Configuration (Future)
-  analytics:
-    enabled: false
-    trackMetrics: true
-    exportFormat: "json" # Options: json, csv, yaml
-
-# Cache Configuration
-cache:
+# ============================================================================
+# Review Configuration
+# ============================================================================
+review:
   enabled: true
-  ttl: "30m" # Time to live for cache entries
-  maxSize: "100MB"
-  storage: "memory" # Options: memory, redis, file
 
-# Performance Configuration
-performance:
-  batch:
-    enabled: true
-    maxConcurrent: 5 # Max concurrent API calls
-    delayBetween: "1s" # Delay between batches
-  optimization:
-    reuseConnections: true
-    compressRequests: false
-    enableHttp2: true
+  # High-level workflow instructions (combined with base system prompt)
+  workflowInstructions: |
+    Follow the autonomous review workflow:
+    1. Read PR details and find Jira ticket
+    2. Read project standards from memory-bank
+    3. Analyze files one-by-one
+    4. Search code for context as needed
+    5. Comment on issues immediately
+    6. Make final decision based on blocking criteria
 
-# Custom Rules Configuration
-rules:
-  security:
-    - name: "No hardcoded secrets"
-      pattern: "(password|secret|key)\\s*=\\s*[\"'][^\"']+[\"']"
-      severity: "CRITICAL"
-      message: "Hardcoded secrets detected"
-      suggestion: "Use environment variables or secure configuration"
+  # Analysis focus areas (in priority order)
+  focusAreas:
+    - name: "Security Analysis"
+      priority: "CRITICAL"
+      description: |
+        - SQL/NoSQL injection vulnerabilities
+        - Cross-Site Scripting (XSS)
+        - Authentication/Authorization flaws
+        - Hardcoded secrets, API keys, passwords
+        - Input validation and sanitization
+        - Data exposure and privacy violations
 
-    - name: "SQL injection prevention"
-      pattern: "query\\([^?]+\\+.*\\)"
-      severity: "CRITICAL"
-      message: "Potential SQL injection vulnerability"
-      suggestion: "Use parameterized queries"
+    - name: "Performance Review"
+      priority: "MAJOR"
+      description: |
+        - N+1 database query patterns
+        - Memory leaks and resource management
+        - Algorithm complexity issues
+        - Missing caching opportunities
+        - Blocking I/O in async contexts
 
-  performance:
-    - name: "Avoid N+1 queries"
-      pattern: "forEach.*await.*query"
-      severity: "MAJOR"
-      message: "Potential N+1 query pattern detected"
-      suggestion: "Consider batch loading or joins"
+    - name: "Code Quality"
+      priority: "MAJOR"
+      description: |
+        - SOLID principle violations
+        - Poor error handling
+        - Code duplication (DRY violations)
+        - Poor naming conventions
+        - Missing edge case handling
 
-# Reporting Configuration
-reporting:
-  formats: ["markdown", "json"]
-  includeAnalytics: true
-  includeMetrics: true
+  # Blocking criteria (AI uses these to decide whether to block PR)
+  blockingCriteria:
+    - condition: "ANY CRITICAL severity issue"
+      action: "BLOCK"
+      reason: "Security or data loss risk"
 
-# Monitoring Configuration (Future)
-monitoring:
-  enabled: false
-  metrics: ["api_calls", "cache_hits", "processing_time"]
-  exportFormat: "prometheus"
-  interval: "1m"
+    - condition: "3 or more MAJOR severity issues"
+      action: "BLOCK"
+      reason: "Too many significant bugs/performance issues"
 
-# Memory Bank Configuration
+    - condition: "Jira requirement coverage < 70%"
+      action: "BLOCK"
+      reason: "Incomplete implementation of requirements"
+
+  # Files to exclude from analysis
+  excludePatterns:
+    - "*.lock"
+    - "*.svg"
+    - "*.min.js"
+    - "*.map"
+    - "package-lock.json"
+    - "pnpm-lock.yaml"
+    - "yarn.lock"
+
+  # Context settings
+  contextLines: 3 # Lines of context around each diff change
+  maxFilesPerReview: 100 # Maximum files to review
+  fileAnalysisTimeout: "2m" # Timeout per file
+
+  # Tool usage preferences
+  toolPreferences:
+    lazyLoading: true # Read files on-demand (RECOMMENDED)
+    cacheToolResults: true # Cache MCP tool responses
+    parallelToolCalls: false # Sequential for better context
+    maxToolCallsPerFile: 20 # Prevent infinite loops
+    enableCodeSearch: true # Allow search_code() usage
+    enableDirectoryListing: true # Allow list_directory_content()
+
+# ============================================================================
+# PR Description Enhancement
+# ============================================================================
+descriptionEnhancement:
+  enabled: true
+
+  instructions: |
+    Enhance the PR description using Jira requirements and diff analysis.
+    Generate comprehensive, well-structured description with all required sections.
+
+  requiredSections:
+    - key: "summary"
+      name: "📋 Summary"
+      required: true
+      description: "Clear overview of what this PR accomplishes"
+
+    - key: "changes"
+      name: "🔧 Changes Made"
+      required: true
+      description: "Specific technical changes with file references"
+
+    - key: "jira"
+      name: "🎫 Jira Reference"
+      required: false
+      description: "Link to Jira ticket and requirement coverage"
+
+    - key: "testing"
+      name: "🧪 Testing Strategy"
+      required: true
+      description: "How changes were tested and validation approach"
+
+    - key: "impact"
+      name: "⚡ Impact & Considerations"
+      required: false
+      description: "Business impact, performance implications, breaking changes"
+
+  preserveContent: true # Don't remove existing images/links/tables
+  autoFormat: true # Clean up markdown formatting
+
+# ============================================================================
+# Memory Bank & Project Context
+# ============================================================================
 memoryBank:
   enabled: true
-  path: "memory-bank" # Primary path to look for memory bank files
-  fallbackPaths: # Optional fallback paths if primary doesn't exist
+  path: "memory-bank"
+  fallbackPaths:
     - "docs/memory-bank"
     - ".memory-bank"
-    - "project-docs/context"
+
+  # Standard files to read for project context
+  standardFiles:
+    - "project-overview.md"
+    - "architecture.md"
+    - "coding-standards.md"
+    - "security-guidelines.md"
+
+# ============================================================================
+# Project-Specific Standards (Override in your repository)
+# ============================================================================
+projectStandards:
+  # Path to project-specific prompt files (relative to repo root)
+  customPromptsPath: "config/prompts/"
+
+  # Additional focus areas beyond defaults
+  additionalFocusAreas: []
+
+  # Custom blocking rules
+  customBlockingRules: []
+
+  # Severity level overrides
+  severityOverrides: {}
+
+# ============================================================================
+# Monitoring & Analytics
+# ============================================================================
+monitoring:
+  enabled: true
+  logToolCalls: true # Log every MCP tool execution
+  logAIDecisions: true # Log AI decision points
+  logTokenUsage: true # Log token usage for cost tracking
+  exportFormat: "json" # json | csv
+  exportPath: ".yama/analytics/"
+
+# ============================================================================
+# Performance & Cost Controls
+# ============================================================================
+performance:
+  maxReviewDuration: "15m" # Kill switch for long reviews
+
+  tokenBudget:
+    maxTokensPerReview: 500000 # Hard limit on tokens
+    warningThreshold: 400000 # Warn when approaching limit
+
+  costControls:
+    maxCostPerReview: 2.0 # USD limit per review
+    warningThreshold: 1.5 # Warn at $1.50

@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "bitbucket": {
+      "name": "bitbucket",
+      "command": "npx",
+      "args": ["-y", "@nexus2520/bitbucket-mcp-server"],
+      "transport": "stdio",
+      "env": {
+        "BITBUCKET_USERNAME": "your.email@company.com",
+        "BITBUCKET_TOKEN": "your-http-access-token",
+        "BITBUCKET_BASE_URL": "https://bitbucket.yourcompany.com"
+      }
+    },
+    "jira": {
+      "name": "jira",
+      "command": "node",
+      "args": ["/absolute/path/to/jira-mcp-server/build/index.js"],
+      "transport": "stdio",
+      "env": {
+        "JIRA_EMAIL": "your-email@company.com",
+        "JIRA_API_TOKEN": "your-api-token-here",
+        "JIRA_BASE_URL": "https://yourcompany.atlassian.net"
+      }
+    }
+  }
+}
