@@ -1,3 +1,37 @@
+# [2.0.0](https://github.com/juspay/yama/compare/v1.6.0...v2.0.0) (2025-11-26)
+
+### Features
+
+- **v2:** complete revamp with XML-based prompts and observability ([8eb6153](https://github.com/juspay/yama/commit/8eb6153c6272adc276b1ca44c655bf359733d256))
+
+### BREAKING CHANGES
+
+- **v2:** Complete architecture overhaul to V2. V1 code moved to src/v1/ directory.
+
+* Added ReviewSystemPrompt.ts and EnhancementSystemPrompt.ts with generic XML-based instructions
+* Implemented Langfuse observability integration for AI tracing and monitoring
+* Changed userId format in traces from static to dynamic {repository}-{branch}
+* Refactored PromptBuilder to inject project-specific config into base prompts
+* Added ObservabilityConfig utility for environment-based Langfuse setup
+* Removed session command from CLI (determined unnecessary)
+* Switched to code_snippet approach for accurate inline comment placement
+* Added docs/ reference and LogicUtils helper instructions to workflow config
+* Created comprehensive V2 test suite (37 tests passing)
+* Removed outdated V1 unit tests (10 test files)
+* Updated .env.example with generic examples and Langfuse configuration
+* Genericized all company-specific information in configuration examples
+* CLI entry point now uses v2.cli.ts
+* Fixed husky deprecated warnings by removing old hook syntax
+* Fixed commit validation to support breaking change syntax
+
+Features:
+
+- Generic, reusable base prompts with project-specific YAML config injection
+- Better observability with Langfuse for debugging AI decisions
+- Autonomous code review workflow with lazy file loading
+- Search-first approach: AI must verify code before commenting
+- XML-structured prompts for better AI comprehension
+
 # [1.6.0](https://github.com/juspay/yama/compare/v1.5.1...v1.6.0) (2025-10-24)
 
 ### Features
