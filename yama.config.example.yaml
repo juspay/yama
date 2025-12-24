@@ -40,6 +40,7 @@ ai:
 # Bitbucket MCP is always enabled (hardcoded)
 # Jira MCP can be enabled/disabled here
 mcpServers:
+  initializationTimeout: 120000 # Timeout in milliseconds (120000 = 2 minutes)
   jira:
     enabled: true # Set to false to disable Jira integration
 

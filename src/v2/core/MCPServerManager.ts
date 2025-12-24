@@ -13,6 +13,18 @@ export class MCPServerManager {
   private initialized = false;
 
   /**
+   * Validate timeout value
+   * Accepts timeout in milliseconds
+   */
+  private parseTimeout(timeout: number): number {
+    if (timeout <= 0) {
+      console.warn(`Invalid timeout value: ${timeout}, using default 120000ms`);
+      return 120000; // 2 minutes default
+    }
+    return timeout;
+  }
+
+  /**
    * Setup all MCP servers in NeuroLink
    * Bitbucket is always enabled, Jira is optional based on config
    */
@@ -22,12 +34,15 @@ export class MCPServerManager {
   ): Promise<void> {
     console.log("🔌 Setting up MCP servers...");
 
+    const timeoutMs = this.parseTimeout(config.initializationTimeout);
+    console.log(`   ⏱️  MCP initialization timeout: ${timeoutMs}ms`);
+
     // Setup Bitbucket MCP (always enabled)
-    await this.setupBitbucketMCP(neurolink);
+    await this.setupBitbucketMCP(neurolink, timeoutMs);
 
     // Setup Jira MCP (optional)
     if (config.jira.enabled) {
-      await this.setupJiraMCP(neurolink);
+      await this.setupJiraMCP(neurolink, timeoutMs);
     } else {
       console.log("   ⏭️  Jira MCP disabled in config");
     }
@@ -39,7 +54,10 @@ export class MCPServerManager {
   /**
    * Setup Bitbucket MCP server (hardcoded, always enabled)
    */
-  private async setupBitbucketMCP(neurolink: any): Promise<void> {
+  private async setupBitbucketMCP(
+    neurolink: any,
+    timeoutMs: number,
+  ): Promise<void> {
     try {
       console.log("   🔧 Registering Bitbucket MCP server...");
 
@@ -59,6 +77,7 @@ export class MCPServerManager {
         command: "npx",
         args: ["-y", "@nexus2520/bitbucket-mcp-server"],
         transport: "stdio",
+        timeout: timeoutMs,
         env: {
           BITBUCKET_USERNAME: process.env.BITBUCKET_USERNAME,
           BITBUCKET_TOKEN: process.env.BITBUCKET_TOKEN,
@@ -77,7 +96,7 @@ export class MCPServerManager {
   /**
    * Setup Jira MCP server (hardcoded, optionally enabled)
    */
-  private async setupJiraMCP(neurolink: any): Promise<void> {
+  private async setupJiraMCP(neurolink: any, timeoutMs: number): Promise<void> {
     try {
       console.log("   🔧 Registering Jira MCP server...");
 
@@ -99,6 +118,7 @@ export class MCPServerManager {
         command: "npx",
         args: ["-y", "@nexus2520/jira-mcp-server"],
         transport: "stdio",
+        timeout: timeoutMs,
         env: {
           JIRA_EMAIL: process.env.JIRA_EMAIL,
           JIRA_API_TOKEN: process.env.JIRA_API_TOKEN,
