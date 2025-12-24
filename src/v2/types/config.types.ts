@@ -71,6 +71,7 @@ export interface RedisConfig {
 // ============================================================================
 
 export interface MCPServersConfig {
+  initializationTimeout: number; // Timeout in milliseconds (e.g., 120000 for 2 minutes)
   jira: {
     enabled: boolean;
   };

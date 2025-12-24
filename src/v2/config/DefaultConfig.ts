@@ -37,6 +37,7 @@ export class DefaultConfig {
       },
 
       mcpServers: {
+        initializationTimeout: 120000, // 2 minutes (in milliseconds) for MCP server initialization
         jira: {
           enabled: false, // Opt-in: users must explicitly enable Jira integration
         },

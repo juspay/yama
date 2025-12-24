@@ -45,7 +45,7 @@ ${projectStandards ? `<project-standards>\n${projectStandards}\n</project-standa
 <review-task>
   <workspace>${this.escapeXML(request.workspace)}</workspace>
   <repository>${this.escapeXML(request.repository)}</repository>
-  <pull_request_id>${request.pullRequestId || "find-by-branch"}</pull_request_id>
+  <pull_request_id>${request.pullRequestId || ""}</pull_request_id>
   <branch>${this.escapeXML(request.branch || "N/A")}</branch>
   <mode>${request.dryRun ? "dry-run" : "live"}</mode>
 
@@ -210,7 +210,7 @@ ${enhancementConfigXML}
 <enhancement-task>
   <workspace>${this.escapeXML(request.workspace)}</workspace>
   <repository>${this.escapeXML(request.repository)}</repository>
-  <pull_request_id>${request.pullRequestId || "find-by-branch"}</pull_request_id>
+  <pull_request_id>${request.pullRequestId || ""}</pull_request_id>
   <branch>${this.escapeXML(request.branch || "N/A")}</branch>
   <mode>${request.dryRun ? "dry-run" : "live"}</mode>
 
