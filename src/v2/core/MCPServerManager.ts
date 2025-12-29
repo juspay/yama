@@ -23,11 +23,11 @@ export class MCPServerManager {
     console.log("🔌 Setting up MCP servers...");
 
     // Setup Bitbucket MCP (always enabled)
-    await this.setupBitbucketMCP(neurolink);
+    await this.setupBitbucketMCP(neurolink, config.bitbucket?.blockedTools);
 
     // Setup Jira MCP (optional)
     if (config.jira.enabled) {
-      await this.setupJiraMCP(neurolink);
+      await this.setupJiraMCP(neurolink, config.jira.blockedTools);
     } else {
       console.log("   ⏭️  Jira MCP disabled in config");
     }
@@ -39,7 +39,10 @@ export class MCPServerManager {
   /**
    * Setup Bitbucket MCP server (hardcoded, always enabled)
    */
-  private async setupBitbucketMCP(neurolink: any): Promise<void> {
+  private async setupBitbucketMCP(
+    neurolink: any,
+    blockedTools?: string[],
+  ): Promise<void> {
     try {
       console.log("   🔧 Registering Bitbucket MCP server...");
 
@@ -64,9 +67,13 @@ export class MCPServerManager {
           BITBUCKET_TOKEN: process.env.BITBUCKET_TOKEN,
           BITBUCKET_BASE_URL: process.env.BITBUCKET_BASE_URL,
         },
+        blockedTools: blockedTools || [],
       });
 
       console.log("   ✅ Bitbucket MCP server registered and tools available");
+      if (blockedTools && blockedTools.length > 0) {
+        console.log(`   🚫 Blocked tools: ${blockedTools.join(", ")}`);
+      }
     } catch (error) {
       throw new MCPServerError(
         `Failed to setup Bitbucket MCP server: ${(error as Error).message}`,
@@ -77,7 +84,10 @@ export class MCPServerManager {
   /**
    * Setup Jira MCP server (hardcoded, optionally enabled)
    */
-  private async setupJiraMCP(neurolink: any): Promise<void> {
+  private async setupJiraMCP(
+    neurolink: any,
+    blockedTools?: string[],
+  ): Promise<void> {
     try {
       console.log("   🔧 Registering Jira MCP server...");
 
@@ -104,9 +114,13 @@ export class MCPServerManager {
           JIRA_API_TOKEN: process.env.JIRA_API_TOKEN,
           JIRA_BASE_URL: process.env.JIRA_BASE_URL,
         },
+        blockedTools: blockedTools || [],
       });
 
       console.log("   ✅ Jira MCP server registered and tools available");
+      if (blockedTools && blockedTools.length > 0) {
+        console.log(`   🚫 Blocked tools: ${blockedTools.join(", ")}`);
+      }
     } catch (error) {
       // Jira is optional, so we warn instead of throwing
       console.warn(

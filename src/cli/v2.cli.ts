@@ -8,7 +8,9 @@
 import { Command } from "commander";
 import dotenv from "dotenv";
 import { createYamaV2 } from "../v2/core/YamaV2Orchestrator.js";
+import { createLearningOrchestrator } from "../v2/core/LearningOrchestrator.js";
 import { ReviewRequest } from "../v2/types/v2.types.js";
+import { LearnRequest } from "../v2/learning/types.js";
 
 // Load environment variables
 dotenv.config();
@@ -36,6 +38,9 @@ export function setupV2CLI(): Command {
 
   // Enhance description command
   setupEnhanceCommand();
+
+  // Learn from PR feedback command
+  setupLearnCommand();
 
   // Init command
   setupInitCommand();
@@ -198,6 +203,93 @@ function setupEnhanceCommand(): void {
         process.exit(0);
       } catch (error) {
         console.error("\n❌ Enhancement failed:", (error as Error).message);
+        process.exit(1);
+      }
+    });
+}
+
+/**
+ * Learn from PR feedback command
+ * Extracts learnings from merged PRs to improve future reviews
+ */
+function setupLearnCommand(): void {
+  program
+    .command("learn")
+    .description("Extract learnings from merged PR to improve future reviews")
+    .requiredOption("-w, --workspace <workspace>", "Bitbucket workspace")
+    .requiredOption("-r, --repository <repository>", "Repository name")
+    .requiredOption("-p, --pr <id>", "Merged pull request ID")
+    .option("--commit", "Auto-commit knowledge base changes to git")
+    .option("--summarize", "Force summarization of knowledge base")
+    .option("--output <path>", "Override knowledge base output path")
+    .option(
+      "--format <format>",
+      "Output format for dry-run preview (md|json)",
+      "md",
+    )
+    .action(async (options) => {
+      try {
+        const globalOpts = program.opts();
+
+        // Parse and validate PR ID
+        const pullRequestId = parseInt(options.pr, 10);
+        if (isNaN(pullRequestId)) {
+          console.error(
+            `❌ Error: Invalid PR ID "${options.pr}" (must be a number)`,
+          );
+          process.exit(1);
+        }
+
+        // Validate format option
+        if (options.format && !["md", "json"].includes(options.format)) {
+          console.error(
+            `❌ Error: Invalid format "${options.format}" (must be md or json)`,
+          );
+          process.exit(1);
+        }
+
+        const request: LearnRequest = {
+          workspace: options.workspace,
+          repository: options.repository,
+          pullRequestId,
+          dryRun: globalOpts.dryRun || false,
+          commit: options.commit || false,
+          summarize: options.summarize || false,
+          outputPath: options.output,
+          outputFormat: options.format || "md",
+        };
+
+        // Create and initialize learning orchestrator
+        const orchestrator = createLearningOrchestrator();
+        await orchestrator.initialize(globalOpts.config);
+
+        // Extract learnings
+        const result = await orchestrator.extractLearnings(request);
+
+        // Handle result
+        if (!result.success) {
+          console.error(`\n❌ Learning extraction failed: ${result.error}`);
+          process.exit(1);
+        }
+
+        // Show final summary for live runs
+        if (!globalOpts.dryRun && result.learningsAdded > 0) {
+          console.log("\n🎉 Knowledge base updated successfully!");
+          console.log(
+            `   Use 'yama review' to apply these learnings to future reviews.`,
+          );
+        }
+
+        process.exit(0);
+      } catch (error) {
+        console.error(
+          "\n❌ Learning extraction failed:",
+          (error as Error).message,
+        );
+        if ((error as Error).stack && program.opts().verbose) {
+          console.error("\nStack trace:");
+          console.error((error as Error).stack);
+        }
         process.exit(1);
       }
     });

@@ -11,10 +11,16 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { YamaV2Config } from "../types/config.types.js";
 import { ReviewRequest } from "../types/v2.types.js";
-import { REVIEW_SYSTEM_PROMPT } from "./ReviewSystemPrompt.js";
-import { ENHANCEMENT_SYSTEM_PROMPT } from "./EnhancementSystemPrompt.js";
+import { LangfusePromptManager } from "./LangfusePromptManager.js";
+import { KnowledgeBaseManager } from "../learning/KnowledgeBaseManager.js";
 
 export class PromptBuilder {
+  private langfuseManager: LangfusePromptManager;
+
+  constructor() {
+    this.langfuseManager = new LangfusePromptManager();
+  }
+
   /**
    * Build complete review instructions for AI
    * Combines generic base prompt + project-specific config
@@ -23,14 +29,17 @@ export class PromptBuilder {
     request: ReviewRequest,
     config: YamaV2Config,
   ): Promise<string> {
-    // Base system prompt (generic, project-agnostic)
-    const basePrompt = REVIEW_SYSTEM_PROMPT;
+    // Base system prompt - fetched from Langfuse or local fallback
+    const basePrompt = await this.langfuseManager.getReviewPrompt();
 
     // Project-specific configuration in XML format
     const projectConfig = this.buildProjectConfigXML(config, request);
 
     // Project-specific standards (if available)
     const projectStandards = await this.loadProjectStandards(config);
+
+    // Knowledge base learnings (reinforcement learning)
+    const knowledgeBase = await this.loadKnowledgeBase(config);
 
     // Combine all parts
     return `
@@ -41,6 +50,8 @@ ${projectConfig}
 </project-configuration>
 
 ${projectStandards ? `<project-standards>\n${projectStandards}\n</project-standards>` : ""}
+
+${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` : ""}
 
 <review-task>
   <workspace>${this.escapeXML(request.workspace)}</workspace>
@@ -84,7 +95,7 @@ ${projectStandards ? `<project-standards>\n${projectStandards}\n</project-standa
       )
       .join("\n");
 
-    const blockingCriteriaXML = config.review.blockingCriteria
+    const blockingCriteriaXML = (config.review.blockingCriteria || [])
       .map(
         (criteria) => `
     <criterion>
@@ -188,14 +199,40 @@ ${loadedStandards.join("\n\n---\n\n")}
   }
 
   /**
+   * Load knowledge base for AI prompt injection
+   * Contains learned patterns from previous PR feedback
+   */
+  private async loadKnowledgeBase(
+    config: YamaV2Config,
+  ): Promise<string | null> {
+    if (!config.knowledgeBase?.enabled) {
+      return null;
+    }
+
+    try {
+      const kbManager = new KnowledgeBaseManager(config.knowledgeBase);
+      const content = await kbManager.getForPrompt();
+
+      if (content) {
+        console.log("   📚 Knowledge base loaded for AI context");
+      }
+
+      return content;
+    } catch (error) {
+      // Silently fail - knowledge base is optional enhancement
+      return null;
+    }
+  }
+
+  /**
    * Build description enhancement prompt separately (for description-only operations)
    */
   async buildDescriptionEnhancementInstructions(
     request: ReviewRequest,
     config: YamaV2Config,
   ): Promise<string> {
-    // Base enhancement prompt (generic, project-agnostic)
-    const basePrompt = ENHANCEMENT_SYSTEM_PROMPT;
+    // Base enhancement prompt - fetched from Langfuse or local fallback
+    const basePrompt = await this.langfuseManager.getEnhancementPrompt();
 
     // Project-specific enhancement configuration
     const enhancementConfigXML = this.buildEnhancementConfigXML(config);

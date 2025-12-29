@@ -17,6 +17,7 @@ export interface YamaV2Config {
   review: ReviewConfig;
   descriptionEnhancement: DescriptionEnhancementConfig;
   memoryBank: MemoryBankConfig;
+  knowledgeBase: KnowledgeBaseConfig;
   projectStandards?: ProjectStandardsConfig;
   monitoring: MonitoringConfig;
   performance: PerformanceConfig;
@@ -71,8 +72,14 @@ export interface RedisConfig {
 // ============================================================================
 
 export interface MCPServersConfig {
+  bitbucket?: {
+    /** List of tool names to block from Bitbucket MCP server */
+    blockedTools?: string[];
+  };
   jira: {
     enabled: boolean;
+    /** List of tool names to block from Jira MCP server */
+    blockedTools?: string[];
   };
 }
 
@@ -84,7 +91,7 @@ export interface ReviewConfig {
   enabled: boolean;
   workflowInstructions: string;
   focusAreas: FocusArea[];
-  blockingCriteria: BlockingCriteria[];
+  blockingCriteria?: BlockingCriteria[];
   excludePatterns: string[];
   contextLines: number;
   maxFilesPerReview: number;
@@ -129,6 +136,25 @@ export interface MemoryBankConfig {
   path: string;
   fallbackPaths: string[];
   standardFiles?: string[];
+}
+
+// ============================================================================
+// Knowledge Base Configuration (Reinforcement Learning)
+// ============================================================================
+
+export interface KnowledgeBaseConfig {
+  /** Enable knowledge base feature */
+  enabled: boolean;
+  /** Path to knowledge base file (relative to project root) */
+  path: string;
+  /** Patterns to identify AI comment authors (case-insensitive) */
+  aiAuthorPatterns: string[];
+  /** Number of learnings before auto-summarization triggers */
+  maxEntriesBeforeSummarization: number;
+  /** Number of entries to retain after summarization */
+  summaryRetentionCount: number;
+  /** Auto-commit knowledge base changes (default for --commit flag) */
+  autoCommit: boolean;
 }
 
 // ============================================================================
