@@ -39,9 +39,25 @@ ai:
 # ============================================================================
 # Bitbucket MCP is always enabled (hardcoded)
 # Jira MCP can be enabled/disabled here
+# Use blockedTools to prevent AI from using specific MCP tools
 mcpServers:
+  bitbucket:
+    # Optional: Block specific Bitbucket tools from AI access
+    # This prevents the AI from performing certain actions
+    blockedTools: []
+    # Example blocked tools (uncomment to use):
+    # - merge_pull_request      # Prevent AI from merging PRs
+    # - delete_branch           # Prevent AI from deleting branches
+    # - approve_pull_request    # Prevent AI from auto-approving PRs
+
   jira:
     enabled: true # Set to false to disable Jira integration
+    # Optional: Block specific Jira tools from AI access
+    blockedTools: []
+    # Example blocked tools (uncomment to use):
+    # - jira_create_issue       # Prevent AI from creating Jira issues
+    # - jira_delete_issue       # Prevent AI from deleting issues
+    # - jira_update_issue       # Prevent AI from modifying issues
 
 # ============================================================================
 # Review Configuration
@@ -89,19 +105,22 @@ review:
         - Poor naming conventions
         - Missing edge case handling
 
-  # Blocking criteria (AI uses these to decide whether to block PR)
-  blockingCriteria:
-    - condition: "ANY CRITICAL severity issue"
-      action: "BLOCK"
-      reason: "Security or data loss risk"
-
-    - condition: "3 or more MAJOR severity issues"
-      action: "BLOCK"
-      reason: "Too many significant bugs/performance issues"
-
-    - condition: "Jira requirement coverage < 70%"
-      action: "BLOCK"
-      reason: "Incomplete implementation of requirements"
+  # Blocking criteria (OPTIONAL - AI uses these to decide whether to block PR)
+  # If not provided or empty, AI will review and comment but NOT auto-block/approve PRs
+  # Uncomment and customize the examples below to enable auto-blocking:
+  blockingCriteria: []
+  # blockingCriteria:
+  #   - condition: "ANY CRITICAL severity issue"
+  #     action: "BLOCK"
+  #     reason: "Security or data loss risk"
+  #
+  #   - condition: "3 or more MAJOR severity issues"
+  #     action: "BLOCK"
+  #     reason: "Too many significant bugs/performance issues"
+  #
+  #   - condition: "Jira requirement coverage < 70%"
+  #     action: "BLOCK"
+  #     reason: "Incomplete implementation of requirements"
 
   # Files to exclude from analysis
   excludePatterns:
@@ -182,6 +201,32 @@ memoryBank:
     - "architecture.md"
     - "coding-standards.md"
     - "security-guidelines.md"
+
+# ============================================================================
+# Knowledge Base - Reinforcement Learning from PR Feedback
+# ============================================================================
+# Yama learns from developer feedback on AI comments across merged PRs.
+# Use 'yama learn -w <workspace> -r <repo> -p <pr-id>' to extract learnings.
+knowledgeBase:
+  enabled: true
+
+  # Path to knowledge base file (relative to repo root)
+  path: ".yama/knowledge-base.md"
+
+  # Patterns to identify AI-generated comments (author name matching)
+  aiAuthorPatterns:
+    - "Yama"
+    - "yama-bot"
+    - "yama-review"
+
+  # Automatically summarize knowledge base when entry count exceeds this
+  maxEntriesBeforeSummarization: 50
+
+  # How many consolidated entries to keep after summarization
+  summaryRetentionCount: 20
+
+  # Automatically commit knowledge base changes (with --commit flag)
+  autoCommit: false
 
 # ============================================================================
 # Project-Specific Standards (Override in your repository)

@@ -37,8 +37,12 @@ export class DefaultConfig {
       },
 
       mcpServers: {
+        bitbucket: {
+          blockedTools: [],
+        },
         jira: {
           enabled: false, // Opt-in: users must explicitly enable Jira integration
+          blockedTools: [],
         },
       },
 
@@ -86,24 +90,7 @@ export class DefaultConfig {
             `.trim(),
           },
         ],
-        blockingCriteria: [
-          {
-            condition: "ANY CRITICAL severity issue",
-            action: "BLOCK",
-            reason: "Security or data loss risk",
-          },
-          {
-            condition: "3 or more MAJOR severity issues",
-            action: "BLOCK",
-            reason: "Too many significant bugs/performance issues",
-          },
-          {
-            condition:
-              "Jira requirement coverage < 70% (only when Jira is enabled)",
-            action: "BLOCK",
-            reason: "Incomplete implementation of requirements",
-          },
-        ],
+        blockingCriteria: [], // Empty by default - no auto-blocking. Users can add custom criteria in their config.
         excludePatterns: [
           "*.lock",
           "*.svg",
@@ -169,6 +156,15 @@ export class DefaultConfig {
           "coding-standards.md",
           "security-guidelines.md",
         ],
+      },
+
+      knowledgeBase: {
+        enabled: true,
+        path: ".yama/knowledge-base.md",
+        aiAuthorPatterns: ["Yama", "yama-bot", "yama-review"],
+        maxEntriesBeforeSummarization: 50,
+        summaryRetentionCount: 20,
+        autoCommit: false,
       },
 
       projectStandards: {

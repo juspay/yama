@@ -49,6 +49,8 @@ module.exports = {
     "^@juspay/neurolink$": "<rootDir>/tests/__mocks__/@juspay/neurolink.ts",
     "^@nexus2520/bitbucket-mcp-server$":
       "<rootDir>/tests/__mocks__/@nexus2520/bitbucket-mcp-server.ts",
+    // Mock langfuse to avoid dynamic import issues in Jest
+    "^langfuse$": "<rootDir>/tests/__mocks__/langfuse.ts",
   },
   // Handle ESM modules
   extensionsToTreatAsEsm: [".ts"],
