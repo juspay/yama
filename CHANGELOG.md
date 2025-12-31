@@ -1,3 +1,15 @@
+# [2.1.0](https://github.com/juspay/yama/compare/v2.0.0...v2.1.0) (2025-12-31)
+
+
+### Bug Fixes
+
+* **ci:** migrate to npm trusted publishing with OIDC authentication ([c836a0c](https://github.com/juspay/yama/commit/c836a0c0b3c7077f96fe0ffc8731296e997106c2))
+
+
+### Features
+
+* **learn:** add knowledge base learning from PR feedback ([a9c3d9d](https://github.com/juspay/yama/commit/a9c3d9d75175048caf5468a94949f8fe61bcb0f9))
+
 # [2.0.0](https://github.com/juspay/yama/compare/v1.6.0...v2.0.0) (2025-11-26)
 
 ### Features
