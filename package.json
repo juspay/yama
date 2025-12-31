@@ -151,7 +151,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "@semantic-release/npm": "^13.1.2"
+    }
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
