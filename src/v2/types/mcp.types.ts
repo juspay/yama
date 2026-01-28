@@ -85,11 +85,35 @@ export interface FileChange {
   type: "ADD" | "MODIFY" | "DELETE" | "RENAME";
 }
 
+export interface DiffLine {
+  source_line: number | null;
+  destination_line: number | null;
+  type: "ADDED" | "REMOVED" | "CONTEXT";
+  content: string;
+}
+
+export interface DiffHunk {
+  source_start: number;
+  source_length: number;
+  destination_start: number;
+  destination_length: number;
+  lines: DiffLine[];
+}
+
+export interface DiffFile {
+  file_path: string;
+  old_path?: string;
+  status: "added" | "modified" | "deleted" | "renamed";
+  hunks: DiffHunk[];
+}
+
 export interface GetPullRequestDiffResponse {
-  diff: string;
-  file_changes?: FileChange[];
-  additions?: number;
-  deletions?: number;
+  files: DiffFile[];
+  stats?: {
+    additions: number;
+    deletions: number;
+    files_changed: number;
+  };
 }
 
 export interface AddCommentRequest {
@@ -97,10 +121,10 @@ export interface AddCommentRequest {
   repository: string;
   pull_request_id: number;
   comment_text: string;
-  file_path?: string;
-  code_snippet?: string;
-  line_number?: number;
-  line_type?: "ADDED" | "REMOVED" | "CONTEXT";
+  file_path: string;
+  line_number: number;
+  line_type: "ADDED" | "REMOVED" | "CONTEXT";
+  suggestion?: string;
   parent_comment_id?: number;
 }
 

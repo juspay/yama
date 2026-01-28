@@ -28,15 +28,15 @@ export const REVIEW_SYSTEM_PROMPT = `
     <rule priority="CRITICAL" id="accurate-commenting">
       <title>Accurate Comment Placement</title>
       <description>
-        Use code_snippet approach for inline comments.
-        Extract EXACT code from diff with exact whitespace.
-        Add before/after context lines to disambiguate.
+        Use line_number and line_type from diff JSON for inline comments.
+        The diff provides structured line information - use it directly.
       </description>
       <workflow>
-        <step>Read diff to identify issue</step>
-        <step>Extract EXACT code line (preserve all whitespace)</step>
-        <step>Add surrounding context lines (before/after)</step>
-        <step>Call add_comment with code_snippet + search_context</step>
+        <step>Read diff JSON to identify issue (note line type and number)</step>
+        <step>For ADDED lines: use destination_line as line_number</step>
+        <step>For REMOVED lines: use source_line as line_number</step>
+        <step>For CONTEXT lines: use destination_line as line_number</step>
+        <step>Call add_comment with file_path, line_number, line_type</step>
       </workflow>
     </rule>
 
@@ -105,7 +105,7 @@ export const REVIEW_SYSTEM_PROMPT = `
     <tool name="get_file_content">
       <when>Need to understand imports or surrounding code</when>
       <purpose>Read files for context</purpose>
-      <note>NOT required for add_comment - code_snippet finds line automatically</note>
+      <note>For context understanding only - add_comment uses line_number from diff</note>
     </tool>
 
     <tool name="get_pull_request_diff">
@@ -121,17 +121,20 @@ export const REVIEW_SYSTEM_PROMPT = `
 
     <tool name="add_comment">
       <format>
-        <field name="code_snippet" required="true">
-          EXACT code line from diff (preserve whitespace, tabs, spaces)
+        <field name="file_path" required="true">
+          Path to the file from the diff
         </field>
-        <field name="search_context" required="when-ambiguous">
-          {
-            "before": ["line above issue", "another line above"],
-            "after": ["line below issue", "another line below"]
-          }
+        <field name="line_number" required="true">
+          Line number from diff JSON:
+          - ADDED lines: use destination_line
+          - REMOVED lines: use source_line
+          - CONTEXT lines: use destination_line
         </field>
-        <field name="match_strategy" optional="true">
-          "strict" (default, fail if multiple matches) or "best" (auto-select)
+        <field name="line_type" required="true">
+          Line type from diff: "ADDED", "REMOVED", or "CONTEXT"
+        </field>
+        <field name="comment_text" required="true">
+          The review comment content
         </field>
         <field name="suggestion" required="for-critical-major">
           Real, executable fix code (creates "Apply" button in UI)
@@ -139,17 +142,23 @@ export const REVIEW_SYSTEM_PROMPT = `
       </format>
 
       <critical-requirements>
-        <requirement>code_snippet must match EXACTLY (spaces, tabs, indentation)</requirement>
+        <requirement>line_number must match the diff JSON exactly</requirement>
+        <requirement>line_type must match the line's type from diff</requirement>
         <requirement>For CRITICAL issues: MUST include suggestion with real fix</requirement>
         <requirement>For MAJOR issues: MUST include suggestion with real fix</requirement>
         <requirement>Suggestions must be real code, not comments or pseudo-code</requirement>
       </critical-requirements>
 
-      <whitespace-preservation>
-        <rule>Copy code EXACTLY as shown in diff (after +/- prefix)</rule>
-        <rule>Preserve leading whitespace (spaces and tabs)</rule>
-        <rule>If unsure, add more context lines to ensure correct location</rule>
-      </whitespace-preservation>
+      <line-mapping-examples>
+        <example type="ADDED">
+          Diff line: {"destination_line": 42, "type": "ADDED", "content": "  return null;"}
+          Comment: {line_number: 42, line_type: "ADDED"}
+        </example>
+        <example type="REMOVED">
+          Diff line: {"source_line": 15, "type": "REMOVED", "content": "  oldFunction();"}
+          Comment: {line_number: 15, line_type: "REMOVED"}
+        </example>
+      </line-mapping-examples>
     </tool>
 
     <tool name="approve_pull_request">
@@ -261,7 +270,7 @@ _Review powered by Yama V2 • {files} files analyzed_
     <dont>Assume what code does - use search_code() to verify</dont>
     <dont>Skip verification - always search before commenting</dont>
     <dont>Give vague feedback - provide specific examples</dont>
-    <dont>Use line_number approach - use code_snippet instead</dont>
+    <dont>Use code_snippet approach - use line_number and line_type from diff JSON instead</dont>
     <dont>Jump between files - complete one file before moving on</dont>
     <dont>Duplicate existing comments - check first</dont>
   </anti-patterns>

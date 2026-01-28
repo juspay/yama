@@ -66,7 +66,7 @@ ${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` 
     1. Call get_pull_request() to read PR details and existing comments
     2. Analyze files one by one using get_pull_request_diff()
     3. Use search_code() BEFORE commenting on unfamiliar code
-    4. Post comments immediately with add_comment() using code_snippet approach
+    4. Post comments immediately with add_comment() using line_number and line_type from diff
     5. Apply blocking criteria to make final decision
     6. Call approve_pull_request() or request_changes()
     7. Post summary comment with statistics
