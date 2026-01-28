@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/juspay/yama/compare/v2.1.0...v2.2.0) (2026-01-28)
+
+
+### Features
+
+* **prompts:** switch add_comment to use line_number and line_type from structured diff ([25e2d0a](https://github.com/juspay/yama/commit/25e2d0ac356d47ba6c4a4a5b646714dd87a46fa3))
+
 # [2.1.0](https://github.com/juspay/yama/compare/v2.0.0...v2.1.0) (2025-12-31)
 
 
