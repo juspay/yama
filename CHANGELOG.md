@@ -1,3 +1,10 @@
+## [2.2.1](https://github.com/juspay/yama/compare/v2.2.0...v2.2.1) (2026-02-23)
+
+
+### Bug Fixes
+
+* **version:** Added commit for version bump ([818cfae](https://github.com/juspay/yama/commit/818cfaeff0a3476dd2e4c1a3c22cd973882dfbf1))
+
 # [2.2.0](https://github.com/juspay/yama/compare/v2.1.0...v2.2.0) (2026-01-28)
 
 
