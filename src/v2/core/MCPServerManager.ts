@@ -60,7 +60,7 @@ export class MCPServerManager {
       // Hardcoded Bitbucket MCP configuration
       await neurolink.addExternalMCPServer("bitbucket", {
         command: "npx",
-        args: ["-y", "@nexus2520/bitbucket-mcp-server"],
+        args: ["-y", "@nexus2520/bitbucket-mcp-server@latest"],
         transport: "stdio",
         env: {
           BITBUCKET_USERNAME: process.env.BITBUCKET_USERNAME,
