@@ -8,6 +8,7 @@
 // ============================================================================
 
 export interface ReviewRequest {
+  mode: "pr";
   workspace: string;
   repository: string;
   pullRequestId?: number;
@@ -15,9 +16,34 @@ export interface ReviewRequest {
   dryRun?: boolean;
   verbose?: boolean;
   configPath?: string;
+  prompt?: string;
+  focus?: string[];
+  outputSchemaVersion?: string;
 }
 
+export type ReviewMode = "pr" | "local";
+export type LocalDiffSource = "staged" | "uncommitted" | "range";
+
+export interface LocalReviewRequest {
+  mode: "local";
+  repoPath?: string;
+  diffSource?: LocalDiffSource;
+  baseRef?: string;
+  headRef?: string;
+  includePaths?: string[];
+  dryRun?: boolean;
+  verbose?: boolean;
+  configPath?: string;
+  prompt?: string;
+  focus?: string[];
+  outputSchemaVersion?: string;
+  maxDiffChars?: number;
+}
+
+export type UnifiedReviewRequest = ReviewRequest | LocalReviewRequest;
+
 export interface ReviewResult {
+  mode?: ReviewMode;
   prId: number;
   decision: "APPROVED" | "CHANGES_REQUESTED" | "BLOCKED";
   statistics: ReviewStatistics;
@@ -28,6 +54,45 @@ export interface ReviewResult {
   sessionId: string;
   descriptionEnhanced?: boolean;
   totalComments?: number;
+}
+
+export interface LocalReviewFinding {
+  id: string;
+  severity: "CRITICAL" | "MAJOR" | "MINOR" | "SUGGESTION";
+  category: string;
+  title: string;
+  description: string;
+  filePath?: string;
+  line?: number;
+  suggestion?: string;
+}
+
+export interface LocalReviewResult {
+  mode: "local";
+  decision: "APPROVED" | "CHANGES_REQUESTED" | "BLOCKED";
+  summary: string;
+  issues: LocalReviewFinding[];
+  enhancements: LocalReviewFinding[];
+  statistics: {
+    filesChanged: number;
+    additions: number;
+    deletions: number;
+    issuesFound: number;
+    enhancementsFound: number;
+    issuesBySeverity: IssuesBySeverity;
+  };
+  duration: number;
+  tokenUsage: TokenUsage;
+  costEstimate: number;
+  sessionId: string;
+  schemaVersion: string;
+  metadata: {
+    repoPath: string;
+    diffSource: LocalDiffSource;
+    baseRef?: string;
+    headRef?: string;
+    truncated: boolean;
+  };
 }
 
 export interface ReviewStatistics {
@@ -219,41 +284,44 @@ export interface AIAnalysisContext {
 // Error Types
 // ============================================================================
 
-export class YamaV2Error extends Error {
+export class YamaError extends Error {
   constructor(
     public code: string,
     message: string,
     public context?: any,
   ) {
     super(message);
-    this.name = "YamaV2Error";
+    this.name = "YamaError";
   }
 }
 
-export class MCPServerError extends YamaV2Error {
+export class MCPServerError extends YamaError {
   constructor(message: string, context?: any) {
     super("MCP_SERVER_ERROR", message, context);
     this.name = "MCPServerError";
   }
 }
 
-export class ConfigurationError extends YamaV2Error {
+export class ConfigurationError extends YamaError {
   constructor(message: string, context?: any) {
     super("CONFIGURATION_ERROR", message, context);
     this.name = "ConfigurationError";
   }
 }
 
-export class ReviewTimeoutError extends YamaV2Error {
+export class ReviewTimeoutError extends YamaError {
   constructor(message: string, context?: any) {
     super("REVIEW_TIMEOUT", message, context);
     this.name = "ReviewTimeoutError";
   }
 }
 
-export class TokenBudgetExceededError extends YamaV2Error {
+export class TokenBudgetExceededError extends YamaError {
   constructor(message: string, context?: any) {
     super("TOKEN_BUDGET_EXCEEDED", message, context);
     this.name = "TokenBudgetExceededError";
   }
 }
+
+// Backward-compatible alias.
+export { YamaError as YamaV2Error };

@@ -1,15 +1,15 @@
 /**
- * Default Configuration for Yama V2
+ * Default Configuration for Yama
  * Provides sensible defaults when no config file is present
  */
 
-import { YamaV2Config } from "../types/config.types.js";
+import { YamaConfig } from "../types/config.types.js";
 
 export class DefaultConfig {
-  static get(): YamaV2Config {
+  static get(): YamaConfig {
     return {
       version: 2,
-      configType: "yama-v2",
+      configType: "yama",
 
       display: {
         showBanner: true,
@@ -27,6 +27,8 @@ export class DefaultConfig {
         enableEvaluation: false,
         timeout: "15m",
         retryAttempts: 3,
+        enableToolFiltering: false,
+        toolFilteringMode: "off",
         conversationMemory: {
           enabled: true,
           store: "memory",

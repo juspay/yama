@@ -8,11 +8,9 @@
 
 **Named after the Hindu deity of justice and death, Yama judges code quality and ensures only the worthy changes pass through.**
 
-## What's New in V2?
+## Architecture
 
-Yama V2 represents a **complete architectural shift** from coded orchestration to **AI-native autonomous orchestration**:
-
-| Aspect                    | V1                     | V2                            |
+| Aspect                    | Legacy                 | Current                       |
 | ------------------------- | ---------------------- | ----------------------------- |
 | **Architecture**          | Coded orchestration    | AI autonomous orchestration   |
 | **Bitbucket Integration** | Direct handler imports | External MCP server           |
@@ -28,7 +26,7 @@ Yama V2 represents a **complete architectural shift** from coded orchestration t
 ## Architecture Overview
 
 ```
-YamaV2Orchestrator
+YamaOrchestrator
     ↓
 NeuroLink AI Agent (Autonomous)
     ↓
@@ -66,11 +64,11 @@ Pull Request Operations
 ### 1. Prerequisites
 
 ```bash
-# Node.js 18+ required
+# Node.js 20.18.1+ required
 node --version
 
-# Install Yama V2
-npm install @juspay/yama@2.0.0
+# Install Yama
+npm install @juspay/yama
 ```
 
 ### 2. Environment Variables
@@ -80,7 +78,7 @@ Create a `.env` file:
 ```bash
 # Bitbucket
 BITBUCKET_USERNAME=your.email@company.com
-BITBUCKET_APP_PASSWORD=your-http-access-token
+BITBUCKET_TOKEN=your-http-access-token
 BITBUCKET_BASE_URL=https://bitbucket.yourcompany.com
 
 # Jira (optional)
@@ -159,9 +157,9 @@ npx yama enhance \
 ### Programmatic Usage
 
 ```typescript
-import { createYamaV2 } from "@juspay/yama";
+import { createYama } from "@juspay/yama";
 
-const yama = createYamaV2();
+const yama = createYama();
 
 await yama.initialize();
 
@@ -176,13 +174,58 @@ console.log("Decision:", result.decision);
 console.log("Issues:", result.statistics.issuesFound);
 ```
 
+### Local SDK Mode (No Config File Required)
+
+Note: Local mode initializes Git MCP internally via the package script
+`mcp:git:server` (`uvx mcp-server-git` with `npx @modelcontextprotocol/server-git` fallback).
+
+```typescript
+import { createYama } from "@juspay/yama";
+
+const yama = createYama();
+
+const result = await yama.reviewLocalDiff({
+  mode: "local",
+  repoPath: process.cwd(),
+  diffSource: "staged", // staged | uncommitted | range
+  focus: ["Security Analysis", "Code Quality"],
+  prompt: "Prioritize correctness and edge cases",
+  outputSchemaVersion: "1.0",
+});
+
+console.log(result.decision);
+console.log(result.issues);
+```
+
+SDK override example (no config file edit needed):
+
+```typescript
+const yama = createYama({
+  configOverrides: {
+    ai: {
+      provider: "anthropic",
+      model: "claude-3-7-sonnet-latest",
+    },
+  },
+});
+```
+
+Precedence in SDK mode:
+`configOverrides` > config file > environment variables > defaults
+
+CLI local mode:
+
+```bash
+npx yama review --mode local --repo-path . --diff-source staged
+```
+
 ## Configuration
 
 ### Basic Configuration
 
 ```yaml
 version: 2
-configType: "yama-v2"
+configType: "yama"
 
 ai:
   provider: "auto"
@@ -231,7 +274,7 @@ Create `memory-bank/coding-standards.md`:
 - Database queries: < 50ms p95
 ```
 
-Yama V2 AI will automatically read and apply these standards.
+Yama AI will automatically read and apply these standards.
 
 ## AI Autonomous Features
 
@@ -288,11 +331,11 @@ AI applies these criteria automatically:
 
 ## MCP Servers
 
-Yama V2 uses MCP (Model Context Protocol) servers for tool access:
+Yama uses MCP (Model Context Protocol) servers for tool access:
 
 ### Bitbucket MCP
 
-- **Package**: `@anthropic/bitbucket-mcp-server`
+- **Package**: `@nexus2520/bitbucket-mcp-server`
 - **Tools**: get_pull_request, add_comment, search_code, etc.
 - **Status**: Production ready
 
@@ -327,7 +370,7 @@ Analytics include:
 ```bash
 # Verify environment variables
 echo $BITBUCKET_USERNAME
-echo $BITBUCKET_APP_PASSWORD
+echo $BITBUCKET_TOKEN
 echo $BITBUCKET_BASE_URL
 ```
 
@@ -362,100 +405,6 @@ echo $BITBUCKET_BASE_URL
 2. **Cache tool results** - Reuse MCP responses
 3. **Exclude generated files** - Skip lock files, minified code
 4. **Limit file count** - Split large PRs
-
-## Migration from V1
-
-**Breaking Change**: V1 has been completely replaced by V2. There is no backward compatibility.
-
-### Automated Config Migration
-
-Use the built-in migration script to convert your V1 config to V2 format:
-
-```bash
-# Rename your current config to V1
-mv yama.config.yaml yama.v1.config.yaml
-
-# Run migration (dry-run first to preview)
-npx yama migrate-config --dry-run
-
-# Run actual migration
-npx yama migrate-config
-
-# Or with custom paths
-npx yama migrate-config \
-  --input yama.v1.config.yaml \
-  --output yama.config.yaml \
-  --force
-```
-
-The migration script will:
-
-- ✅ Migrate AI provider settings
-- ✅ Convert focus areas to structured format
-- ✅ Transform required sections with descriptions
-- ✅ Apply V2 defaults for new features
-- ⚠️ Warn about dropped V1 features (batchProcessing, multiInstance, etc.)
-- 📊 Generate a detailed migration report
-
-### V1 → V2 Migration Steps
-
-1. **Migrate configuration** (automated):
-
-```bash
-npx yama migrate-config
-```
-
-2. **Update imports**:
-
-```typescript
-// V1 (removed)
-// import { Guardian } from "@juspay/yama";
-
-// V2 (use this)
-import { createYamaV2 } from "@juspay/yama";
-const yama = createYamaV2();
-```
-
-3. **Set environment variables**: V2 uses MCP servers configured via env vars
-
-```bash
-# Bitbucket (required)
-export BITBUCKET_USERNAME=your.email@company.com
-export BITBUCKET_APP_PASSWORD=your-http-access-token
-export BITBUCKET_BASE_URL=https://bitbucket.yourcompany.com
-
-# Jira (optional)
-export JIRA_EMAIL=your-email@company.com
-export JIRA_API_TOKEN=your-jira-api-token
-export JIRA_BASE_URL=https://yourcompany.atlassian.net
-```
-
-4. **Test thoroughly**: V2 uses autonomous AI orchestration - validate behavior in dry-run mode first
-
-```bash
-npx yama review --workspace YOUR_WORKSPACE --repository my-repo --pr 123 --dry-run
-```
-
-### What Gets Migrated
-
-| V1 Section                        | V2 Section               | Notes                    |
-| --------------------------------- | ------------------------ | ------------------------ |
-| `providers.ai`                    | `ai`                     | Direct mapping           |
-| `features.codeReview`             | `review`                 | Restructured             |
-| `features.descriptionEnhancement` | `descriptionEnhancement` | Restructured             |
-| `monitoring`                      | `monitoring`             | Enhanced                 |
-| `rules`                           | `projectStandards`       | Converted to focus areas |
-
-### What Gets Dropped
-
-These V1 features are **removed** in V2 (AI handles autonomously):
-
-- `providers.git` → Use environment variables
-- `features.codeReview.batchProcessing` → AI manages batching
-- `features.codeReview.multiInstance` → Single autonomous agent
-- `features.codeReview.semanticDeduplication` → AI deduplicates naturally
-- `features.securityScan` → Built into AI prompts
-- `cache` → MCP tools handle caching
 
 ## Contributing
 

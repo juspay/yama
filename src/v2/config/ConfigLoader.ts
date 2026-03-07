@@ -1,30 +1,37 @@
 /**
- * Multi-Layer Configuration Loader for Yama V2
+ * Multi-Layer Configuration Loader for Yama
  * Loads and merges configuration from multiple sources
  */
 
 import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { parse as parseYAML } from "yaml";
-import { join, resolve } from "path";
-import { YamaV2Config } from "../types/config.types.js";
+import { resolve } from "path";
+import { YamaConfig } from "../types/config.types.js";
 import { ConfigurationError } from "../types/v2.types.js";
 import { DefaultConfig } from "./DefaultConfig.js";
 
 export class ConfigLoader {
-  private config: YamaV2Config | null = null;
+  private config: YamaConfig | null = null;
   private configPath: string | null = null;
 
   /**
    * Load configuration from file with multi-layer support
    */
-  async loadConfig(configPath?: string): Promise<YamaV2Config> {
-    console.log("📋 Loading Yama V2 configuration...");
+  async loadConfig(
+    configPath?: string,
+    instanceOverrides?: Partial<YamaConfig>,
+  ): Promise<YamaConfig> {
+    console.log("📋 Loading Yama configuration...");
 
     // Layer 1: Start with default config
     let config = DefaultConfig.get();
 
-    // Layer 2: Load from file if provided or search for default locations
+    // Layer 2: Apply environment variable overrides
+    // Lowest user-provided layer in SDK mode precedence.
+    config = this.applyEnvironmentOverrides(config);
+
+    // Layer 3: Load from file if provided or search for default locations
     const filePath = await this.resolveConfigPath(configPath);
     if (filePath) {
       console.log(`   Reading config from: ${filePath}`);
@@ -35,8 +42,10 @@ export class ConfigLoader {
       console.log("   Using default configuration (no config file found)");
     }
 
-    // Layer 3: Apply environment variable overrides
-    config = this.applyEnvironmentOverrides(config);
+    // Layer 4: Apply SDK instance overrides (highest priority)
+    if (instanceOverrides) {
+      config = this.mergeConfigs(config, instanceOverrides);
+    }
 
     // Validate configuration
     this.validateConfig(config);
@@ -50,7 +59,7 @@ export class ConfigLoader {
   /**
    * Get current loaded configuration
    */
-  getConfig(): YamaV2Config {
+  getConfig(): YamaConfig {
     if (!this.config) {
       throw new ConfigurationError(
         "Configuration not loaded. Call loadConfig() first.",
@@ -62,7 +71,7 @@ export class ConfigLoader {
   /**
    * Validate configuration completeness and correctness
    */
-  async validate(): Promise<void> {
+  async validate(mode: "pr" | "local" = "pr"): Promise<void> {
     if (!this.config) {
       throw new ConfigurationError("No configuration to validate");
     }
@@ -78,26 +87,29 @@ export class ConfigLoader {
       errors.push("AI model not configured");
     }
 
-    // Check environment variables for Bitbucket (always required)
-    if (!process.env.BITBUCKET_USERNAME) {
-      errors.push("BITBUCKET_USERNAME environment variable not set");
-    }
-    if (!process.env.BITBUCKET_TOKEN) {
-      errors.push("BITBUCKET_TOKEN environment variable not set");
-    }
-    if (!process.env.BITBUCKET_BASE_URL) {
-      errors.push("BITBUCKET_BASE_URL environment variable not set");
-    }
+    // Local mode is SDK-first and does not require MCP credentials.
+    if (mode === "pr") {
+      // Check environment variables for Bitbucket (required in PR mode)
+      if (!process.env.BITBUCKET_USERNAME) {
+        errors.push("BITBUCKET_USERNAME environment variable not set");
+      }
+      if (!process.env.BITBUCKET_TOKEN) {
+        errors.push("BITBUCKET_TOKEN environment variable not set");
+      }
+      if (!process.env.BITBUCKET_BASE_URL) {
+        errors.push("BITBUCKET_BASE_URL environment variable not set");
+      }
 
-    if (this.config.mcpServers.jira.enabled) {
-      if (!process.env.JIRA_EMAIL) {
-        errors.push("JIRA_EMAIL environment variable not set");
-      }
-      if (!process.env.JIRA_API_TOKEN) {
-        errors.push("JIRA_API_TOKEN environment variable not set");
-      }
-      if (!process.env.JIRA_BASE_URL) {
-        errors.push("JIRA_BASE_URL environment variable not set");
+      if (this.config.mcpServers.jira.enabled) {
+        if (!process.env.JIRA_EMAIL) {
+          errors.push("JIRA_EMAIL environment variable not set");
+        }
+        if (!process.env.JIRA_API_TOKEN) {
+          errors.push("JIRA_API_TOKEN environment variable not set");
+        }
+        if (!process.env.JIRA_BASE_URL) {
+          errors.push("JIRA_BASE_URL environment variable not set");
+        }
       }
     }
 
@@ -143,13 +155,11 @@ export class ConfigLoader {
   /**
    * Load configuration from YAML file
    */
-  private async loadConfigFile(
-    filePath: string,
-  ): Promise<Partial<YamaV2Config>> {
+  private async loadConfigFile(filePath: string): Promise<Partial<YamaConfig>> {
     try {
       const content = await readFile(filePath, "utf-8");
       const parsed = parseYAML(content);
-      return parsed as Partial<YamaV2Config>;
+      return parsed as Partial<YamaConfig>;
     } catch (error) {
       throw new ConfigurationError(
         `Failed to load config file: ${(error as Error).message}`,
@@ -162,10 +172,10 @@ export class ConfigLoader {
    * Deep merge two configuration objects
    */
   private mergeConfigs(
-    base: YamaV2Config,
-    override: Partial<YamaV2Config>,
-  ): YamaV2Config {
-    return this.deepMerge(base, override) as YamaV2Config;
+    base: YamaConfig,
+    override: Partial<YamaConfig>,
+  ): YamaConfig {
+    return this.deepMerge(base, override) as YamaConfig;
   }
 
   /**
@@ -201,7 +211,7 @@ export class ConfigLoader {
   /**
    * Apply environment variable overrides
    */
-  private applyEnvironmentOverrides(config: YamaV2Config): YamaV2Config {
+  private applyEnvironmentOverrides(config: YamaConfig): YamaConfig {
     // Override AI provider if env var set
     if (process.env.AI_PROVIDER) {
       config.ai.provider = process.env.AI_PROVIDER as any;
@@ -222,13 +232,25 @@ export class ConfigLoader {
       config.ai.maxTokens = parseInt(process.env.AI_MAX_TOKENS, 10);
     }
 
+    if (process.env.AI_ENABLE_TOOL_FILTERING) {
+      config.ai.enableToolFiltering =
+        process.env.AI_ENABLE_TOOL_FILTERING === "true";
+    }
+
+    if (process.env.AI_TOOL_FILTERING_MODE) {
+      const mode = process.env.AI_TOOL_FILTERING_MODE;
+      if (mode === "off" || mode === "log-only" || mode === "active") {
+        config.ai.toolFilteringMode = mode;
+      }
+    }
+
     return config;
   }
 
   /**
    * Basic configuration validation
    */
-  private validateConfig(config: YamaV2Config): void {
+  private validateConfig(config: YamaConfig): void {
     if (!config.version) {
       throw new ConfigurationError("Configuration version not specified");
     }

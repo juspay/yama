@@ -1,5 +1,5 @@
 /**
- * Session Manager for Yama V2
+ * Session Manager for Yama
  * Tracks review sessions, tool calls, and maintains state
  */
 
@@ -29,7 +29,7 @@ export class SessionManager {
       status: "running",
       toolCalls: [],
       metadata: {
-        yamaVersion: "2.0.0",
+        yamaVersion: "2.2.1",
         aiProvider: "auto",
         aiModel: "unknown",
         totalTokens: 0,
@@ -165,7 +165,7 @@ export class SessionManager {
   private generateSessionId(): string {
     const timestamp = Date.now().toString(36);
     const random = randomBytes(4).toString("hex");
-    return `yama-v2-${timestamp}-${random}`;
+    return `yama-${timestamp}-${random}`;
   }
 
   /**

@@ -27,8 +27,14 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "bin": {
-    "yama": "dist/cli/v2.cli.js"
+    "yama": "dist/cli/cli.js"
   },
   "directories": {
     "test": "tests"
@@ -44,13 +50,13 @@
     "CHANGELOG.md",
     "LICENSE",
     "yama.config.example.yaml",
-    ".mcp-config.example.json",
-    "docs/v2"
+    ".mcp-config.example.json"
   ],
   "scripts": {
-    "build": "tsc && tsc-alias",
-    "dev": "tsx watch src/cli/v2.cli.ts",
-    "dev:run": "tsx src/cli/v2.cli.ts",
+    "build": "rimraf dist && tsc && tsc-alias",
+    "dev": "tsx watch src/cli/cli.ts",
+    "dev:run": "tsx src/cli/cli.ts",
+    "mcp:git:server": "uvx mcp-server-git || npx -y @modelcontextprotocol/server-git",
     "test": "jest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -59,7 +65,7 @@
     "format:check": "prettier --check .",
     "docs": "typedoc src",
     "clean": "rimraf dist",
-    "prepare": "husky install",
+    "prepare": "husky",
     "prepack": "npm run build && npm run test",
     "changeset": "changeset",
     "changeset:version": "changeset version && git add --all",
@@ -83,10 +89,10 @@
     "check:all": "npm run lint && npm run format --check && npm run validate && npm run validate:commit"
   },
   "dependencies": {
-    "@juspay/neurolink": "^9.12.0",
+    "@juspay/neurolink": "^9.18.0",
     "langfuse": "^3.35.0",
-    "@nexus2520/bitbucket-mcp-server": "1.4.1",
-    "@nexus2520/jira-mcp-server": "^1.0.1",
+    "@nexus2520/bitbucket-mcp-server": "2.0.1",
+    "@nexus2520/jira-mcp-server": "^1.1.1",
     "chalk": "^4.1.2",
     "commander": "^11.0.0",
     "debug": "^4.3.4",
@@ -108,7 +114,6 @@
     "@semantic-release/github": "^11.0.0",
     "@semantic-release/npm": "^12.0.1",
     "@semantic-release/release-notes-generator": "^14.0.1",
-    "@types/commander": "^2.12.5",
     "@types/inquirer": "^9.0.8",
     "@types/jest": "^29.0.0",
     "@types/lodash": "^4.14.0",
@@ -135,9 +140,9 @@
     "typescript": ">=4.5.0"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0",
-    "pnpm": ">=8.0.0"
+    "node": ">=20.18.1",
+    "npm": ">=10.0.0",
+    "pnpm": ">=9.0.0"
   },
   "os": [
     "darwin",

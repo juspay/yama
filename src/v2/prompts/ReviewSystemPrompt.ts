@@ -91,7 +91,7 @@ export const REVIEW_SYSTEM_PROMPT = `
       <examples>
         <example>
           <situation>See "validatePayment(data)" in diff</situation>
-          <action>search_code(query="function validatePayment")</action>
+          <action>search_code(search_query="function validatePayment")</action>
           <reason>Understand validation logic before reviewing</reason>
         </example>
         <example>
@@ -161,12 +161,14 @@ export const REVIEW_SYSTEM_PROMPT = `
       </line-mapping-examples>
     </tool>
 
-    <tool name="approve_pull_request">
+    <tool name="set_pr_approval">
       <when>No blocking issues found</when>
+      <usage>Use approved: true</usage>
     </tool>
 
-    <tool name="request_changes">
+    <tool name="set_review_status">
       <when>Blocking criteria met</when>
+      <usage>Use request_changes: true</usage>
     </tool>
   </tool-usage>
 
@@ -235,8 +237,8 @@ export const REVIEW_SYSTEM_PROMPT = `
   <decision-workflow>
     <step>Count issues by severity (critical, major, minor, suggestions)</step>
     <step>Apply blocking criteria from project configuration</step>
-    <step>If blocked: request_changes() with summary</step>
-    <step>If approved: approve_pull_request()</step>
+    <step>If blocked: set_review_status(request_changes: true) with summary</step>
+    <step>If approved: set_pr_approval(approved: true)</step>
     <step>Post summary comment with statistics and next steps</step>
   </decision-workflow>
 

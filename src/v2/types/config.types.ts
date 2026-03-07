@@ -8,7 +8,7 @@ import { FocusArea, BlockingCriteria } from "./v2.types.js";
 // Main Configuration Type
 // ============================================================================
 
-export interface YamaV2Config {
+export interface YamaConfig {
   version: number;
   configType: string;
   display: DisplayConfig;
@@ -22,6 +22,9 @@ export interface YamaV2Config {
   monitoring: MonitoringConfig;
   performance: PerformanceConfig;
 }
+
+// Backward-compatible alias.
+export type YamaV2Config = YamaConfig;
 
 // ============================================================================
 // Display Configuration
@@ -47,6 +50,8 @@ export interface AIConfig {
   enableEvaluation: boolean;
   timeout: string;
   retryAttempts: number;
+  enableToolFiltering?: boolean;
+  toolFilteringMode?: "off" | "log-only" | "active";
   conversationMemory: ConversationMemoryConfig;
 }
 
@@ -199,4 +204,15 @@ export interface TokenBudgetConfig {
 export interface CostControlsConfig {
   maxCostPerReview: number;
   warningThreshold: number;
+}
+
+// ============================================================================
+// SDK Initialization Types
+// ============================================================================
+
+export interface YamaInitOptions {
+  /** Optional path to yama config file */
+  configPath?: string;
+  /** Instance-level config overrides. Precedence: sdk overrides > config file > env > defaults. */
+  configOverrides?: Partial<YamaConfig>;
 }

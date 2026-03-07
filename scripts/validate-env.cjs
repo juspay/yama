@@ -20,7 +20,7 @@ const REQUIRED_ENV_VARS = [
 // Optional but recommended environment variables
 const OPTIONAL_ENV_VARS = [
   'BITBUCKET_USERNAME',
-  'BITBUCKET_APP_PASSWORD',
+  'BITBUCKET_TOKEN',
   'GITHUB_TOKEN',
   'GITLAB_TOKEN',
   'LOG_LEVEL',

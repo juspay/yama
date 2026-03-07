@@ -9,8 +9,9 @@
 import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
-import { YamaV2Config } from "../types/config.types.js";
-import { ReviewRequest } from "../types/v2.types.js";
+import { YamaConfig } from "../types/config.types.js";
+import { LocalReviewRequest, ReviewRequest } from "../types/v2.types.js";
+import type { LocalDiffContext } from "../core/LocalDiffSource.js";
 import { LangfusePromptManager } from "./LangfusePromptManager.js";
 import { KnowledgeBaseManager } from "../learning/KnowledgeBaseManager.js";
 
@@ -27,7 +28,7 @@ export class PromptBuilder {
    */
   async buildReviewInstructions(
     request: ReviewRequest,
-    config: YamaV2Config,
+    config: YamaConfig,
   ): Promise<string> {
     // Base system prompt - fetched from Langfuse or local fallback
     const basePrompt = await this.langfuseManager.getReviewPrompt();
@@ -68,10 +69,11 @@ ${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` 
     3. Use search_code() BEFORE commenting on unfamiliar code
     4. Post comments immediately with add_comment() using line_number and line_type from diff
     5. Apply blocking criteria to make final decision
-    6. Call approve_pull_request() or request_changes()
+    6. Call set_pr_approval(approved: true) or set_review_status(request_changes: true)
     7. Post summary comment with statistics
 
     ${request.dryRun ? "DRY RUN MODE: Simulate actions only, do not post real comments." : "LIVE MODE: Post real comments and make real decisions."}
+    ${request.prompt ? `ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}` : ""}
   </instructions>
 </review-task>
     `.trim();
@@ -82,10 +84,19 @@ ${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` 
    * Injects project-specific rules into base system prompt
    */
   private buildProjectConfigXML(
-    config: YamaV2Config,
-    _request: ReviewRequest,
+    config: YamaConfig,
+    request: ReviewRequest,
   ): string {
-    const focusAreasXML = config.review.focusAreas
+    const focusAreas =
+      request.focus && request.focus.length > 0
+        ? request.focus.map((focus) => ({
+            name: focus,
+            priority: "MAJOR" as const,
+            description: "User-specified focus area",
+          }))
+        : config.review.focusAreas;
+
+    const focusAreasXML = focusAreas
       .map(
         (area) => `
     <focus-area priority="${area.priority}">
@@ -158,7 +169,7 @@ ${excludePatternsXML}
    * Load project-specific standards from repository
    */
   private async loadProjectStandards(
-    config: YamaV2Config,
+    config: YamaConfig,
   ): Promise<string | null> {
     if (!config.projectStandards?.customPromptsPath) {
       return null;
@@ -202,9 +213,7 @@ ${loadedStandards.join("\n\n---\n\n")}
    * Load knowledge base for AI prompt injection
    * Contains learned patterns from previous PR feedback
    */
-  private async loadKnowledgeBase(
-    config: YamaV2Config,
-  ): Promise<string | null> {
+  private async loadKnowledgeBase(config: YamaConfig): Promise<string | null> {
     if (!config.knowledgeBase?.enabled) {
       return null;
     }
@@ -229,7 +238,7 @@ ${loadedStandards.join("\n\n---\n\n")}
    */
   async buildDescriptionEnhancementInstructions(
     request: ReviewRequest,
-    config: YamaV2Config,
+    config: YamaConfig,
   ): Promise<string> {
     // Base enhancement prompt - fetched from Langfuse or local fallback
     const basePrompt = await this.langfuseManager.getEnhancementPrompt();
@@ -266,15 +275,106 @@ ${enhancementConfigXML}
     Start directly with section content.
 
     ${request.dryRun ? "DRY RUN MODE: Simulate only, do not actually update PR." : "LIVE MODE: Update the actual PR description."}
+    ${request.prompt ? `ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}` : ""}
   </instructions>
 </enhancement-task>
     `.trim();
   }
 
   /**
+   * Build local SDK review instructions.
+   * Produces strict JSON output for local diff quality analysis.
+   */
+  async buildLocalReviewInstructions(
+    request: LocalReviewRequest,
+    config: YamaConfig,
+    diffContext: LocalDiffContext,
+  ): Promise<string> {
+    const focusAreas =
+      request.focus && request.focus.length > 0
+        ? request.focus
+        : config.review.focusAreas.map((area) => area.name);
+    const customPrompt = request.prompt ? request.prompt.trim() : "";
+    const schemaVersion = request.outputSchemaVersion || "1.0";
+    const diffPreviewMaxChars = 8_000;
+    const diffPreview =
+      diffContext.diff.length > diffPreviewMaxChars
+        ? `${diffContext.diff.slice(0, diffPreviewMaxChars)}\n... [truncated preview]`
+        : diffContext.diff;
+
+    return `
+You are Yama operating in LOCAL SDK MODE.
+Review the provided git changes and return a strict JSON object only.
+
+Rules:
+1. Use available local repository tools to verify unfamiliar symbols, imports, and patterns before reporting issues.
+2. Do not use PR/Jira MCP tools in local mode.
+3. Do not add markdown code fences.
+4. Output must start with "{" and end with "}".
+5. Keep findings actionable and file/line specific where possible.
+6. Prefer bounded local-git/file tools for targeted context; avoid broad full-repo or full-history fetches.
+
+Context Verification Workflow:
+- Start from the diff.
+- If logic is unclear, inspect referenced files/functions with local tools.
+- Avoid assumptions when code context is missing.
+
+Focus Areas:
+${focusAreas.map((area) => `- ${area}`).join("\n")}
+
+${customPrompt ? `Additional Prompt:\n${customPrompt}\n` : ""}
+
+Repository: ${diffContext.repoPath}
+Diff Source: ${diffContext.diffSource}
+${diffContext.baseRef ? `Base Ref: ${diffContext.baseRef}` : ""}
+${diffContext.headRef ? `Head Ref: ${diffContext.headRef}` : ""}
+Files Changed: ${diffContext.changedFiles.length}
+Additions: ${diffContext.additions}
+Deletions: ${diffContext.deletions}
+Diff Truncated: ${diffContext.truncated}
+
+Changed Files:
+${diffContext.changedFiles.map((file) => `- ${file}`).join("\n")}
+
+Initial Diff Preview (may be incomplete, use local-git tools for full context):
+${diffPreview}
+
+Output Schema (version ${schemaVersion}):
+{
+  "summary": "string",
+  "decision": "APPROVED|CHANGES_REQUESTED|BLOCKED",
+  "issues": [
+    {
+      "id": "string",
+      "severity": "CRITICAL|MAJOR|MINOR|SUGGESTION",
+      "category": "string",
+      "title": "string",
+      "description": "string",
+      "filePath": "string",
+      "line": 1,
+      "suggestion": "string"
+    }
+  ],
+  "enhancements": [
+    {
+      "id": "string",
+      "severity": "CRITICAL|MAJOR|MINOR|SUGGESTION",
+      "category": "string",
+      "title": "string",
+      "description": "string",
+      "filePath": "string",
+      "line": 1,
+      "suggestion": "string"
+    }
+  ]
+}
+    `.trim();
+  }
+
+  /**
    * Build enhancement configuration in XML format
    */
-  private buildEnhancementConfigXML(config: YamaV2Config): string {
+  private buildEnhancementConfigXML(config: YamaConfig): string {
     const requiredSectionsXML = config.descriptionEnhancement.requiredSections
       .map(
         (section) => `
