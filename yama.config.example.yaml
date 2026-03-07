@@ -2,7 +2,7 @@
 # Copy this file to yama.config.yaml and customize for your project
 
 version: 2
-configType: "yama-v2"
+configType: "yama"
 
 # ============================================================================
 # Display & Streaming Configuration
@@ -25,6 +25,8 @@ ai:
   enableEvaluation: false # Enable quality evaluation (slower)
   timeout: "15m" # Maximum time for review
   retryAttempts: 3 # Number of retries on failure
+  enableToolFiltering: false # Enable query-level MCP tool filtering
+  toolFilteringMode: "off" # off | log-only | active
 
   # Conversation memory for maintaining review state
   conversationMemory:
@@ -48,16 +50,17 @@ mcpServers:
     # Example blocked tools (uncomment to use):
     # - merge_pull_request      # Prevent AI from merging PRs
     # - delete_branch           # Prevent AI from deleting branches
-    # - approve_pull_request    # Prevent AI from auto-approving PRs
+    # - set_pr_approval         # Prevent AI from changing approval status
+    # - set_review_status       # Prevent AI from requesting/removing changes
 
   jira:
     enabled: true # Set to false to disable Jira integration
     # Optional: Block specific Jira tools from AI access
     blockedTools: []
     # Example blocked tools (uncomment to use):
-    # - jira_create_issue       # Prevent AI from creating Jira issues
-    # - jira_delete_issue       # Prevent AI from deleting issues
-    # - jira_update_issue       # Prevent AI from modifying issues
+    # - jira_issues             # Block issue get/create/update/assign actions
+    # - jira_search             # Block issue/project/user/metadata search
+    # - jira_comments           # Block reading/adding issue comments
 
 # ============================================================================
 # Review Configuration

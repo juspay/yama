@@ -8,8 +8,10 @@
 // ============================================================================
 
 export {
-  YamaV2Orchestrator,
-  createYamaV2,
+  YamaOrchestrator,
+  createYama,
+  YamaOrchestrator as YamaV2Orchestrator,
+  createYama as createYamaV2,
 } from "./v2/core/YamaV2Orchestrator.js";
 export { ConfigLoader } from "./v2/config/ConfigLoader.js";
 export { MCPServerManager } from "./v2/core/MCPServerManager.js";
@@ -21,17 +23,24 @@ export { PromptBuilder } from "./v2/prompts/PromptBuilder.js";
 // ============================================================================
 
 export type {
+  LocalReviewFinding,
+  LocalReviewRequest,
+  LocalReviewResult,
   ReviewRequest,
+  ReviewMode,
   ReviewResult,
   ReviewUpdate,
   ReviewSession,
   ReviewStatistics,
   IssuesBySeverity,
   TokenUsage,
+  UnifiedReviewRequest,
 } from "./v2/types/v2.types.js";
 
 export type {
-  YamaV2Config,
+  YamaConfig,
+  YamaInitOptions,
+  YamaConfig as YamaV2Config,
   AIConfig,
   MCPServersConfig,
   ReviewConfig,
@@ -49,10 +58,10 @@ export type {
 // Version Information
 // ============================================================================
 
-export const VERSION = "2.0.0";
+export const VERSION = "2.2.1";
 
 // ============================================================================
 // Default Export
 // ============================================================================
 
-export { createYamaV2 as default } from "./v2/core/YamaV2Orchestrator.js";
+export { createYama as default } from "./v2/core/YamaV2Orchestrator.js";

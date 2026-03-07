@@ -22,7 +22,8 @@ module.exports = {
   collectCoverageFrom: [
     "src/**/*.{ts,tsx}",
     "!src/**/*.d.ts",
-    "!src/cli/index.ts", // CLI entry point, tested via integration
+    "!src/cli/cli.ts", // CLI entry point, tested via integration
+    "!src/cli/v2.cli.ts", // Backward-compatibility shim
     "!src/types/**", // Type definitions
   ],
   coverageDirectory: "coverage",

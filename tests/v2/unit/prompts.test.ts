@@ -7,7 +7,7 @@ import { describe, it, expect } from "@jest/globals";
 import { REVIEW_SYSTEM_PROMPT } from "../../../src/v2/prompts/ReviewSystemPrompt.js";
 import { ENHANCEMENT_SYSTEM_PROMPT } from "../../../src/v2/prompts/EnhancementSystemPrompt.js";
 import { PromptBuilder } from "../../../src/v2/prompts/PromptBuilder.js";
-import { YamaV2Config } from "../../../src/v2/types/config.types.js";
+import { YamaConfig } from "../../../src/v2/types/config.types.js";
 import { ReviewRequest } from "../../../src/v2/types/v2.types.js";
 
 describe("Review System Prompt", () => {
@@ -38,6 +38,8 @@ describe("Review System Prompt", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("<tool-usage>");
     expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="search_code">');
     expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="add_comment">');
+    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="set_pr_approval">');
+    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="set_review_status">');
     expect(REVIEW_SYSTEM_PROMPT).toContain("code_snippet");
   });
 
@@ -102,7 +104,7 @@ describe("Enhancement System Prompt", () => {
 
 describe("PromptBuilder", () => {
   let builder: PromptBuilder;
-  let mockConfig: YamaV2Config;
+  let mockConfig: YamaConfig;
   let mockRequest: ReviewRequest;
 
   beforeEach(() => {
@@ -110,7 +112,7 @@ describe("PromptBuilder", () => {
 
     mockConfig = {
       version: 2,
-      configType: "yama-v2",
+      configType: "yama",
       display: {
         showBanner: true,
         streamingMode: false,

@@ -15,7 +15,7 @@ import {
   ExtractedLearning,
   LearningCategory,
 } from "../learning/types.js";
-import { YamaV2Config } from "../types/config.types.js";
+import { YamaConfig } from "../types/config.types.js";
 import {
   buildObservabilityConfigFromEnv,
   validateObservabilityConfig,
@@ -43,7 +43,7 @@ export class LearningOrchestrator {
   private mcpManager: MCPServerManager;
   private configLoader: ConfigLoader;
   private promptManager: LangfusePromptManager;
-  private config!: YamaV2Config;
+  private config!: YamaConfig;
   private initialized = false;
 
   constructor() {

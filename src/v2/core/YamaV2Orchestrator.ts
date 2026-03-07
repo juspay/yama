@@ -1,5 +1,5 @@
 /**
- * Yama V2 Orchestrator
+ * Yama Orchestrator
  * Main entry point for AI-native autonomous code review
  */
 
@@ -8,68 +8,93 @@ import { MCPServerManager } from "./MCPServerManager.js";
 import { ConfigLoader } from "../config/ConfigLoader.js";
 import { PromptBuilder } from "../prompts/PromptBuilder.js";
 import { SessionManager } from "./SessionManager.js";
+import { LocalDiffSource } from "./LocalDiffSource.js";
+import type { LocalDiffContext } from "./LocalDiffSource.js";
 import {
+  LocalReviewFinding,
+  LocalReviewRequest,
+  LocalReviewResult,
   ReviewRequest,
   ReviewResult,
+  ReviewMode,
   ReviewUpdate,
-  YamaV2Error,
   ReviewStatistics,
+  TokenUsage,
+  UnifiedReviewRequest,
   IssuesBySeverity,
 } from "../types/v2.types.js";
-import { YamaV2Config } from "../types/config.types.js";
+import { YamaConfig, YamaInitOptions } from "../types/config.types.js";
 import {
   buildObservabilityConfigFromEnv,
   validateObservabilityConfig,
 } from "../utils/ObservabilityConfig.js";
 
-export class YamaV2Orchestrator {
+export class YamaOrchestrator {
   private neurolink!: NeuroLink;
   private mcpManager: MCPServerManager;
   private configLoader: ConfigLoader;
   private promptBuilder: PromptBuilder;
   private sessionManager: SessionManager;
-  private config!: YamaV2Config;
+  private localDiffSource: LocalDiffSource;
+  private config!: YamaConfig;
   private initialized = false;
+  private mcpInitialized = false;
+  private localGitMcpInitialized = false;
+  private initOptions: YamaInitOptions;
 
-  constructor() {
+  constructor(options: YamaInitOptions = {}) {
+    this.initOptions = options;
     this.configLoader = new ConfigLoader();
     this.mcpManager = new MCPServerManager();
     this.promptBuilder = new PromptBuilder();
     this.sessionManager = new SessionManager();
+    this.localDiffSource = new LocalDiffSource();
   }
 
   /**
-   * Initialize Yama V2 with configuration and MCP servers
+   * Initialize Yama with configuration and MCP servers
    */
-  async initialize(configPath?: string): Promise<void> {
-    if (this.initialized) {
-      return;
-    }
-
-    this.showBanner();
-    console.log("🚀 Initializing Yama V2...\n");
-
+  async initialize(
+    configPath?: string,
+    mode: ReviewMode = "pr",
+  ): Promise<void> {
     try {
-      // Step 1: Load configuration
-      this.config = await this.configLoader.loadConfig(configPath);
+      if (!this.initialized) {
+        console.log("🚀 Initializing Yama...\n");
 
-      // Step 2: Initialize NeuroLink with observability
-      console.log("🧠 Initializing NeuroLink AI engine...");
-      this.neurolink = this.initializeNeurolink();
-      console.log("✅ NeuroLink initialized\n");
+        // Step 1: Load configuration with SDK-style instance overrides
+        const resolvedConfigPath = configPath || this.initOptions.configPath;
+        this.config = await this.configLoader.loadConfig(
+          resolvedConfigPath,
+          this.initOptions.configOverrides,
+        );
 
-      // Step 3: Setup MCP servers
-      await this.mcpManager.setupMCPServers(
-        this.neurolink,
-        this.config.mcpServers,
-      );
-      console.log("✅ MCP servers ready (tools managed by NeuroLink)\n");
+        this.showBanner();
 
-      // Step 4: Validate configuration
-      await this.configLoader.validate();
+        // Step 2: Initialize NeuroLink
+        console.log("🧠 Initializing NeuroLink AI engine...");
+        this.neurolink = this.initializeNeurolink();
+        console.log("✅ NeuroLink initialized\n");
 
-      this.initialized = true;
-      console.log("✅ Yama V2 initialized successfully\n");
+        this.initialized = true;
+      }
+
+      // Step 3: Mode-specific setup
+      if (mode === "pr" && !this.mcpInitialized) {
+        await this.mcpManager.setupMCPServers(
+          this.neurolink,
+          this.config.mcpServers,
+        );
+        this.mcpInitialized = true;
+      } else if (mode === "local" && !this.localGitMcpInitialized) {
+        await this.mcpManager.setupLocalGitMCPServer(this.neurolink);
+        this.localGitMcpInitialized = true;
+      }
+
+      // Step 4: Mode-specific validation
+      await this.configLoader.validate(mode);
+
+      console.log("✅ Yama initialized successfully\n");
       console.log("═".repeat(60) + "\n");
     } catch (error) {
       console.error("\n❌ Initialization failed:", (error as Error).message);
@@ -81,7 +106,7 @@ export class YamaV2Orchestrator {
    * Start autonomous AI review
    */
   async startReview(request: ReviewRequest): Promise<ReviewResult> {
-    await this.ensureInitialized();
+    await this.ensureInitialized("pr", request.configPath);
 
     const startTime = Date.now();
     const sessionId = this.sessionManager.createSession(request);
@@ -127,6 +152,8 @@ export class YamaV2Orchestrator {
         temperature: this.config.ai.temperature,
         maxTokens: this.config.ai.maxTokens,
         timeout: this.config.ai.timeout,
+        skipToolPromptInjection: true,
+        ...this.getPRToolFilteringOptions(instructions),
         context: {
           sessionId,
           userId: this.generateUserId(request),
@@ -136,6 +163,7 @@ export class YamaV2Orchestrator {
         enableAnalytics: this.config.ai.enableAnalytics,
         enableEvaluation: this.config.ai.enableEvaluation,
       });
+      this.recordToolCallsFromResponse(sessionId, aiResponse);
 
       // Extract and parse results
       const result = this.parseReviewResult(aiResponse, startTime, sessionId);
@@ -154,12 +182,108 @@ export class YamaV2Orchestrator {
   }
 
   /**
+   * Unified review entry for SDK consumers.
+   */
+  async review(
+    request: UnifiedReviewRequest,
+  ): Promise<ReviewResult | LocalReviewResult> {
+    if (this.isLocalReviewRequest(request)) {
+      return this.reviewLocalDiff(request);
+    }
+    return this.startReview(request);
+  }
+
+  /**
+   * Local SDK mode review from git diff (no PR/MCP dependency).
+   */
+  async reviewLocalDiff(
+    request: LocalReviewRequest,
+  ): Promise<LocalReviewResult> {
+    await this.ensureInitialized("local", request.configPath);
+
+    const sessionSeed = request.repoPath || process.cwd();
+    const pseudoRequest: ReviewRequest = {
+      mode: "pr",
+      workspace: "local",
+      repository: sessionSeed.split("/").pop() || "local-repo",
+      dryRun: request.dryRun,
+      verbose: request.verbose,
+      configPath: request.configPath,
+    };
+    const sessionId = this.sessionManager.createSession(pseudoRequest);
+    const startTime = Date.now();
+
+    try {
+      const diffContext = this.localDiffSource.getDiffContext(request);
+      const instructions =
+        await this.promptBuilder.buildLocalReviewInstructions(
+          request,
+          this.config,
+          diffContext,
+        );
+
+      const aiResponse = await this.neurolink.generate({
+        input: { text: instructions },
+        provider: this.config.ai.provider,
+        model: this.config.ai.model,
+        temperature: this.config.ai.temperature,
+        maxTokens: Math.min(this.config.ai.maxTokens, 16_000),
+        maxSteps: 100,
+        prepareStep: async ({ stepNumber }) => {
+          if (stepNumber >= 5) {
+            return { toolChoice: "none" };
+          }
+          return undefined;
+        },
+        timeout: this.config.ai.timeout,
+        enableAnalytics: this.config.ai.enableAnalytics,
+        enableEvaluation: this.config.ai.enableEvaluation,
+        // Request JSON output at the provider level (prompt-level mode; safe alongside tools).
+        output: { format: "json" },
+        // Tools are passed natively; avoids huge duplicated tool-schema prompt injection.
+        skipToolPromptInjection: true,
+        ...this.getLocalToolFilteringOptions(),
+        context: {
+          sessionId,
+          userId: `local-${sessionId}`,
+          operation: "local-review",
+          metadata: {
+            repoPath: diffContext.repoPath,
+            diffSource: diffContext.diffSource,
+            baseRef: diffContext.baseRef,
+            headRef: diffContext.headRef,
+          },
+        },
+      });
+      this.recordToolCallsFromResponse(sessionId, aiResponse);
+
+      const result = this.parseLocalReviewResult(
+        aiResponse,
+        sessionId,
+        startTime,
+        request,
+        diffContext,
+      );
+
+      // Stored as generic session payload for debugging/export parity.
+      this.sessionManager.completeSession(
+        sessionId,
+        result as unknown as ReviewResult,
+      );
+      return result;
+    } catch (error) {
+      this.sessionManager.failSession(sessionId, error as Error);
+      throw error;
+    }
+  }
+
+  /**
    * Stream review with real-time updates (for verbose mode)
    */
   async *streamReview(
     request: ReviewRequest,
   ): AsyncIterableIterator<ReviewUpdate> {
-    await this.ensureInitialized();
+    await this.ensureInitialized("pr", request.configPath);
 
     const sessionId = this.sessionManager.createSession(request);
 
@@ -192,6 +316,8 @@ export class YamaV2Orchestrator {
         input: { text: instructions },
         provider: this.config.ai.provider,
         model: this.config.ai.model,
+        skipToolPromptInjection: true,
+        ...this.getPRToolFilteringOptions(instructions),
         context: {
           sessionId,
           userId: this.generateUserId(request),
@@ -220,7 +346,7 @@ export class YamaV2Orchestrator {
    * This allows the AI to use knowledge gained during review to write better descriptions
    */
   async startReviewAndEnhance(request: ReviewRequest): Promise<ReviewResult> {
-    await this.ensureInitialized();
+    await this.ensureInitialized("pr", request.configPath);
 
     const startTime = Date.now();
     const sessionId = this.sessionManager.createSession(request);
@@ -264,6 +390,8 @@ export class YamaV2Orchestrator {
         temperature: this.config.ai.temperature,
         maxTokens: this.config.ai.maxTokens,
         timeout: this.config.ai.timeout,
+        skipToolPromptInjection: true,
+        ...this.getPRToolFilteringOptions(reviewInstructions),
         context: {
           sessionId,
           userId: this.generateUserId(request),
@@ -273,6 +401,7 @@ export class YamaV2Orchestrator {
         enableAnalytics: this.config.ai.enableAnalytics,
         enableEvaluation: this.config.ai.enableEvaluation,
       });
+      this.recordToolCallsFromResponse(sessionId, reviewResponse);
 
       // Parse review results
       const reviewResult = this.parseReviewResult(
@@ -307,6 +436,8 @@ export class YamaV2Orchestrator {
           temperature: this.config.ai.temperature,
           maxTokens: this.config.ai.maxTokens,
           timeout: this.config.ai.timeout,
+          skipToolPromptInjection: true,
+          ...this.getPRToolFilteringOptions(enhanceInstructions),
           context: {
             sessionId, // SAME sessionId = AI remembers review context
             userId: this.generateUserId(request),
@@ -316,6 +447,7 @@ export class YamaV2Orchestrator {
           enableAnalytics: this.config.ai.enableAnalytics,
           enableEvaluation: this.config.ai.enableEvaluation,
         });
+        this.recordToolCallsFromResponse(sessionId, enhanceResponse);
 
         console.log("✅ Phase 2 complete: Description enhanced\n");
 
@@ -345,7 +477,7 @@ export class YamaV2Orchestrator {
    * Enhance PR description only (without full review)
    */
   async enhanceDescription(request: ReviewRequest): Promise<any> {
-    await this.ensureInitialized();
+    await this.ensureInitialized("pr", request.configPath);
 
     const sessionId = this.sessionManager.createSession(request);
 
@@ -365,6 +497,8 @@ export class YamaV2Orchestrator {
         input: { text: instructions },
         provider: this.config.ai.provider,
         model: this.config.ai.model,
+        skipToolPromptInjection: true,
+        ...this.getPRToolFilteringOptions(instructions),
         context: {
           sessionId,
           userId: this.generateUserId(request),
@@ -372,6 +506,7 @@ export class YamaV2Orchestrator {
         },
         enableAnalytics: true,
       });
+      this.recordToolCallsFromResponse(sessionId, aiResponse);
 
       console.log("✅ Description enhanced successfully\n");
 
@@ -419,7 +554,7 @@ export class YamaV2Orchestrator {
       branch: request.branch,
       dryRun: request.dryRun || false,
       metadata: {
-        yamaVersion: "2.0.0",
+        yamaVersion: "2.2.1",
         startTime: new Date().toISOString(),
       },
     };
@@ -443,19 +578,361 @@ export class YamaV2Orchestrator {
     const statistics = this.calculateStatistics(session);
 
     return {
+      mode: "pr",
       prId: session.request.pullRequestId || 0,
       decision,
       statistics,
       summary: this.extractSummary(aiResponse),
       duration,
       tokenUsage: {
-        input: aiResponse.usage?.inputTokens || 0,
-        output: aiResponse.usage?.outputTokens || 0,
-        total: aiResponse.usage?.totalTokens || 0,
+        input: this.toSafeNumber(aiResponse?.usage?.inputTokens),
+        output: this.toSafeNumber(aiResponse?.usage?.outputTokens),
+        total: this.toSafeNumber(aiResponse?.usage?.totalTokens),
       },
       costEstimate: this.calculateCost(aiResponse.usage),
       sessionId,
     };
+  }
+
+  private recordToolCallsFromResponse(
+    sessionId: string,
+    aiResponse: any,
+  ): void {
+    const toolCalls = Array.isArray(aiResponse?.toolCalls)
+      ? aiResponse.toolCalls
+      : [];
+    const toolResults = Array.isArray(aiResponse?.toolResults)
+      ? aiResponse.toolResults
+      : [];
+
+    for (const call of toolCalls) {
+      const toolName =
+        call?.toolName || call?.name || call?.tool || "unknown_tool";
+      const args = call?.parameters || call?.args || {};
+      const matchingResult =
+        toolResults.find(
+          (result: any) =>
+            result?.toolCallId === call?.id || result?.toolName === toolName,
+        ) || null;
+
+      this.sessionManager.recordToolCall(
+        sessionId,
+        toolName,
+        args,
+        matchingResult,
+        0,
+        matchingResult?.error,
+      );
+    }
+  }
+
+  /**
+   * Parse local SDK mode response into strict LocalReviewResult.
+   */
+  private parseLocalReviewResult(
+    aiResponse: any,
+    sessionId: string,
+    startTime: number,
+    request: LocalReviewRequest,
+    diffContext: LocalDiffContext,
+  ): LocalReviewResult {
+    const rawContent = aiResponse?.content || aiResponse?.outputs?.text || "";
+    const parsed = this.extractJsonPayload(rawContent);
+    const usage = aiResponse?.usage || {};
+    const tokenUsage: TokenUsage = {
+      input: this.toSafeNumber(usage.inputTokens),
+      output: this.toSafeNumber(usage.outputTokens),
+      total: this.toSafeNumber(usage.totalTokens),
+    };
+
+    if (!parsed) {
+      const fallbackIssue: LocalReviewFinding = {
+        id: "OUTPUT_FORMAT_VIOLATION",
+        severity: "MAJOR",
+        category: "review-engine",
+        title: "Model did not return structured JSON",
+        description:
+          "Local review response was unstructured (likely tool-call trace or partial output), so findings cannot be trusted.",
+        suggestion:
+          "Retry with a tool-calling capable model or reduce review scope (smaller diff / includePaths) to keep responses structured.",
+      };
+      const issuesBySeverity = this.countFindingsBySeverity([fallbackIssue]);
+
+      return {
+        mode: "local",
+        decision: "CHANGES_REQUESTED",
+        summary:
+          this.sanitizeLocalSummary(rawContent) ||
+          "Local review could not produce structured JSON output.",
+        issues: [fallbackIssue],
+        enhancements: [],
+        statistics: {
+          filesChanged: diffContext.changedFiles.length,
+          additions: diffContext.additions,
+          deletions: diffContext.deletions,
+          issuesFound: 1,
+          enhancementsFound: 0,
+          issuesBySeverity,
+        },
+        duration: Math.round((Date.now() - startTime) / 1000),
+        tokenUsage,
+        costEstimate: this.calculateCost(aiResponse?.usage),
+        sessionId,
+        schemaVersion: request.outputSchemaVersion || "1.0",
+        metadata: {
+          repoPath: diffContext.repoPath,
+          diffSource: diffContext.diffSource,
+          baseRef: diffContext.baseRef,
+          headRef: diffContext.headRef,
+          truncated: diffContext.truncated,
+        },
+      };
+    }
+
+    const issues = this.normalizeFindings(parsed?.issues, "issue");
+    const enhancements = this.normalizeFindings(
+      parsed?.enhancements,
+      "enhancement",
+    );
+    const issuesBySeverity = this.countFindingsBySeverity(issues);
+    const fallbackForTruncatedNoFindings =
+      diffContext.truncated && issues.length === 0 && enhancements.length === 0;
+    const decision = fallbackForTruncatedNoFindings
+      ? "CHANGES_REQUESTED"
+      : this.normalizeDecision(parsed?.decision, issuesBySeverity);
+
+    return {
+      mode: "local",
+      decision,
+      summary:
+        this.sanitizeLocalSummary(parsed?.summary) ||
+        this.sanitizeLocalSummary(this.extractSummary(aiResponse)) ||
+        "Local review completed",
+      issues,
+      enhancements,
+      statistics: {
+        filesChanged: diffContext.changedFiles.length,
+        additions: diffContext.additions,
+        deletions: diffContext.deletions,
+        issuesFound: issues.length,
+        enhancementsFound: enhancements.length,
+        issuesBySeverity,
+      },
+      duration: Math.round((Date.now() - startTime) / 1000),
+      tokenUsage,
+      costEstimate: this.calculateCost(aiResponse?.usage),
+      sessionId,
+      schemaVersion: request.outputSchemaVersion || "1.0",
+      metadata: {
+        repoPath: diffContext.repoPath,
+        diffSource: diffContext.diffSource,
+        baseRef: diffContext.baseRef,
+        headRef: diffContext.headRef,
+        truncated: diffContext.truncated,
+      },
+    };
+  }
+
+  private sanitizeLocalSummary(summary: unknown): string {
+    if (typeof summary !== "string") {
+      return "";
+    }
+    // Use string splitting instead of backtracking [\s\S]*? regex to avoid ReDoS.
+    let result = this.removeDelimitedSections(
+      summary,
+      "<|tool_calls_section_begin|>",
+      "<|tool_calls_section_end|>",
+    );
+    result = this.removeDelimitedSections(
+      result,
+      "<|tool_call_begin|>",
+      "<|tool_call_end|>",
+    );
+    return result.replace(/\s+/g, " ").trim();
+  }
+
+  private removeDelimitedSections(
+    text: string,
+    open: string,
+    close: string,
+  ): string {
+    let result = "";
+    let pos = 0;
+    while (pos < text.length) {
+      const start = text.indexOf(open, pos);
+      if (start === -1) {
+        result += text.slice(pos);
+        break;
+      }
+      result += text.slice(pos, start);
+      const end = text.indexOf(close, start + open.length);
+      pos = end === -1 ? text.length : end + close.length;
+    }
+    return result;
+  }
+
+  private extractJsonPayload(content: string): Record<string, any> | null {
+    if (!content || typeof content !== "string") {
+      return null;
+    }
+
+    const trimmed = content.trim();
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      // Fall through to extraction strategies
+    }
+
+    // Use indexOf instead of backtracking [\s\S]*? regex to avoid ReDoS.
+    const fenceOpen = trimmed.toLowerCase().indexOf("```json");
+    if (fenceOpen !== -1) {
+      let contentStart = fenceOpen + 7; // length of "```json"
+      while (
+        contentStart < trimmed.length &&
+        (trimmed[contentStart] === " " ||
+          trimmed[contentStart] === "\n" ||
+          trimmed[contentStart] === "\r")
+      ) {
+        contentStart++;
+      }
+      const fenceClose = trimmed.indexOf("```", contentStart);
+      if (fenceClose !== -1) {
+        try {
+          return JSON.parse(trimmed.slice(contentStart, fenceClose).trim());
+        } catch {
+          // Continue
+        }
+      }
+    }
+
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(trimmed.slice(start, end + 1));
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeFindings(
+    findings: unknown,
+    prefix: "issue" | "enhancement",
+  ): LocalReviewFinding[] {
+    if (!Array.isArray(findings)) {
+      return [];
+    }
+
+    return findings
+      .map((raw, index) => {
+        const value = (raw || {}) as Record<string, unknown>;
+        const severity = this.normalizeSeverity(value.severity);
+        if (!severity) {
+          return null;
+        }
+        const lineValue =
+          typeof value.line === "number" ? value.line : undefined;
+
+        const finding: LocalReviewFinding = {
+          id:
+            (typeof value.id === "string" && value.id.trim()) ||
+            `${prefix}-${index + 1}`,
+          severity,
+          category:
+            (typeof value.category === "string" && value.category.trim()) ||
+            "general",
+          title:
+            (typeof value.title === "string" && value.title.trim()) ||
+            "Untitled finding",
+          description:
+            (typeof value.description === "string" &&
+              value.description.trim()) ||
+            "",
+        };
+
+        if (typeof value.filePath === "string" && value.filePath.trim()) {
+          finding.filePath = value.filePath;
+        }
+        if (lineValue && lineValue > 0) {
+          finding.line = lineValue;
+        }
+        if (typeof value.suggestion === "string" && value.suggestion.trim()) {
+          finding.suggestion = value.suggestion;
+        }
+
+        return finding;
+      })
+      .filter((item): item is LocalReviewFinding => item !== null);
+  }
+
+  private normalizeSeverity(
+    severity: unknown,
+  ): LocalReviewFinding["severity"] | null {
+    if (typeof severity !== "string") {
+      return "MINOR";
+    }
+    const value = severity.toUpperCase();
+    if (
+      value === "CRITICAL" ||
+      value === "MAJOR" ||
+      value === "MINOR" ||
+      value === "SUGGESTION"
+    ) {
+      return value;
+    }
+    return "MINOR";
+  }
+
+  private countFindingsBySeverity(
+    findings: LocalReviewFinding[],
+  ): IssuesBySeverity {
+    const counts: IssuesBySeverity = {
+      critical: 0,
+      major: 0,
+      minor: 0,
+      suggestions: 0,
+    };
+
+    for (const finding of findings) {
+      if (finding.severity === "CRITICAL") {
+        counts.critical += 1;
+      } else if (finding.severity === "MAJOR") {
+        counts.major += 1;
+      } else if (finding.severity === "MINOR") {
+        counts.minor += 1;
+      } else {
+        counts.suggestions += 1;
+      }
+    }
+
+    return counts;
+  }
+
+  private normalizeDecision(
+    decision: unknown,
+    issuesBySeverity: IssuesBySeverity,
+  ): "APPROVED" | "CHANGES_REQUESTED" | "BLOCKED" {
+    if (typeof decision === "string") {
+      const upper = decision.toUpperCase();
+      if (
+        upper === "APPROVED" ||
+        upper === "CHANGES_REQUESTED" ||
+        upper === "BLOCKED"
+      ) {
+        return upper;
+      }
+    }
+
+    if (issuesBySeverity.critical > 0) {
+      return "BLOCKED";
+    }
+    if (issuesBySeverity.major + issuesBySeverity.minor > 0) {
+      return "CHANGES_REQUESTED";
+    }
+    return "APPROVED";
   }
 
   /**
@@ -465,21 +942,41 @@ export class YamaV2Orchestrator {
     aiResponse: any,
     session: any,
   ): "APPROVED" | "CHANGES_REQUESTED" | "BLOCKED" {
-    // Check if AI called approve_pull_request or request_changes
+    // Derive final review state from tool calls.
+    // Supports both current Bitbucket MCP tools and legacy names.
     const toolCalls = session.toolCalls || [];
 
-    const approveCall = toolCalls.find(
-      (tc: any) => tc.toolName === "approve_pull_request",
-    );
-    const requestChangesCall = toolCalls.find(
-      (tc: any) => tc.toolName === "request_changes",
-    );
+    let requestedChanges: boolean | undefined;
+    let approved: boolean | undefined;
 
-    if (approveCall) {
-      return "APPROVED";
+    for (const tc of toolCalls) {
+      const name = tc?.toolName;
+      const args = tc?.args || {};
+
+      if (name === "set_review_status") {
+        if (typeof args.request_changes === "boolean") {
+          requestedChanges = args.request_changes;
+        }
+      } else if (name === "request_changes") {
+        requestedChanges = true;
+      } else if (name === "remove_requested_changes") {
+        requestedChanges = false;
+      } else if (name === "set_pr_approval") {
+        if (typeof args.approved === "boolean") {
+          approved = args.approved;
+        }
+      } else if (name === "approve_pull_request") {
+        approved = true;
+      } else if (name === "unapprove_pull_request") {
+        approved = false;
+      }
     }
-    if (requestChangesCall) {
+
+    if (requestedChanges === true) {
       return "BLOCKED";
+    }
+    if (approved === true) {
+      return "APPROVED";
     }
 
     // Default to changes requested if unclear
@@ -566,10 +1063,19 @@ export class YamaV2Orchestrator {
     const inputCostPer1M = 0.25; // $0.25 per 1M input tokens (Gemini 2.0 Flash)
     const outputCostPer1M = 1.0; // $1.00 per 1M output tokens
 
-    const inputCost = (usage.inputTokens / 1_000_000) * inputCostPer1M;
-    const outputCost = (usage.outputTokens / 1_000_000) * outputCostPer1M;
+    const inputTokens = this.toSafeNumber(usage.inputTokens);
+    const outputTokens = this.toSafeNumber(usage.outputTokens);
 
-    return Number((inputCost + outputCost).toFixed(4));
+    const inputCost = (inputTokens / 1_000_000) * inputCostPer1M;
+    const outputCost = (outputTokens / 1_000_000) * outputCostPer1M;
+
+    const totalCost = inputCost + outputCost;
+    return Number.isFinite(totalCost) ? Number(totalCost.toFixed(4)) : 0;
+  }
+
+  private toSafeNumber(value: unknown): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   /**
@@ -579,6 +1085,106 @@ export class YamaV2Orchestrator {
     const repo = request.repository;
     const identifier = request.branch || `pr-${request.pullRequestId}`;
     return `${repo}-${identifier}`;
+  }
+
+  private isLocalReviewRequest(
+    request: UnifiedReviewRequest,
+  ): request is LocalReviewRequest {
+    return (
+      (request as LocalReviewRequest).mode === "local" ||
+      (!("workspace" in request) && !("repository" in request))
+    );
+  }
+
+  /**
+   * Query-level tool filtering for PR mode.
+   * Conservative strategy: only exclude Jira tools when there is no Jira signal.
+   */
+  private getPRToolFilteringOptions(inputText: string): {
+    excludeTools?: string[];
+  } {
+    if (!this.config.ai.enableToolFiltering) {
+      return {};
+    }
+
+    const mode = this.config.ai.toolFilteringMode || "active";
+    if (mode === "off") {
+      return {};
+    }
+
+    const hasJiraSignal =
+      /\b[A-Z]{2,}-\d+\b/.test(inputText) || /\bjira\b/i.test(inputText);
+
+    if (hasJiraSignal) {
+      return {};
+    }
+
+    try {
+      const externalTools = (this.neurolink as any).getExternalMCPTools?.();
+      const jiraToolNames = Array.isArray(externalTools)
+        ? externalTools
+            .filter((tool: any) => tool?.serverId === "jira")
+            .map((tool: any) => tool?.name)
+            .filter((name: unknown): name is string => typeof name === "string")
+        : [];
+
+      if (jiraToolNames.length === 0) {
+        return {};
+      }
+
+      if (mode === "log-only") {
+        console.log(
+          `   [tool-filter] log-only: would exclude ${jiraToolNames.length} Jira tools`,
+        );
+        return {};
+      }
+
+      return { excludeTools: jiraToolNames };
+    } catch {
+      // Non-fatal: fallback to all tools.
+      return {};
+    }
+  }
+
+  /**
+   * Query-level read-only filtering for local-git MCP tools.
+   * Uses regex-based mutation detection instead of hardcoded tool-name lists.
+   */
+  private getLocalToolFilteringOptions(): { excludeTools?: string[] } {
+    try {
+      const externalTools = (this.neurolink as any).getExternalMCPTools?.();
+      if (!Array.isArray(externalTools)) {
+        return {};
+      }
+
+      const mutatingGitToolPattern =
+        /^git_(commit|push|add|checkout|create_branch|merge|rebase|cherry_pick|reset|revert|tag|rm|clean|stash|apply)\b/i;
+      // High-volume read operations can flood context with huge payloads.
+      const highVolumeGitToolPattern =
+        /^git_(diff|diff_staged|diff_unstaged|log|show)\b/i;
+
+      const excludeTools = externalTools
+        .filter((tool: any) => tool?.serverId === "local-git")
+        .map((tool: any) => tool?.name)
+        .filter((name: unknown): name is string => typeof name === "string")
+        .filter(
+          (name: string) =>
+            mutatingGitToolPattern.test(this.normalizeToolName(name)) ||
+            highVolumeGitToolPattern.test(this.normalizeToolName(name)),
+        );
+
+      if (excludeTools.length === 0) {
+        return {};
+      }
+
+      return { excludeTools };
+    } catch {
+      return {};
+    }
+  }
+
+  private normalizeToolName(name: string): string {
+    return name.split(/[.:/]/).pop() || name;
   }
 
   /**
@@ -620,14 +1226,15 @@ export class YamaV2Orchestrator {
   /**
    * Ensure orchestrator is initialized
    */
-  private async ensureInitialized(): Promise<void> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
+  private async ensureInitialized(
+    mode: ReviewMode = "pr",
+    configPath?: string,
+  ): Promise<void> {
+    await this.initialize(configPath, mode);
   }
 
   /**
-   * Show Yama V2 banner
+   * Show Yama banner
    */
   private showBanner(): void {
     if (!this.config?.display?.showBanner) {
@@ -636,9 +1243,9 @@ export class YamaV2Orchestrator {
 
     console.log("\n" + "═".repeat(60));
     console.log(`
-    ⚔️  YAMA V2 - AI-Native Code Review Guardian
+    ⚔️  YAMA - AI-Native Code Review Guardian
 
-    Version: 2.0.0
+    Version: 2.2.1
     Mode: Autonomous AI-Powered Review
     Powered by: NeuroLink + MCP Tools
     `);
@@ -700,6 +1307,12 @@ export class YamaV2Orchestrator {
 }
 
 // Export factory function
-export function createYamaV2(): YamaV2Orchestrator {
-  return new YamaV2Orchestrator();
+export function createYamaV2(options: YamaInitOptions = {}): YamaOrchestrator {
+  return createYama(options);
 }
+
+export function createYama(options: YamaInitOptions = {}): YamaOrchestrator {
+  return new YamaOrchestrator(options);
+}
+
+export { YamaOrchestrator as YamaV2Orchestrator };

@@ -717,7 +717,7 @@ function migrateGitConfig(v1Config, report) {
       "V2 uses MCP servers (configured via environment variables)"
     );
     report.addWarning(
-      "Git credentials should be set via BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD env vars"
+      "Git credentials should be set via BITBUCKET_USERNAME, BITBUCKET_TOKEN, and BITBUCKET_BASE_URL env vars"
     );
   }
 }
@@ -963,7 +963,7 @@ function main() {
     console.log("\nNext steps:");
     console.log("   1. Review the generated config");
     console.log("   2. Set environment variables for MCP servers:");
-    console.log("      - BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD, BITBUCKET_BASE_URL");
+    console.log("      - BITBUCKET_USERNAME, BITBUCKET_TOKEN, BITBUCKET_BASE_URL");
     console.log("      - JIRA_EMAIL, JIRA_API_TOKEN, JIRA_BASE_URL (if using Jira)");
     console.log("   3. Test with: npx yama review --dry-run");
   }
