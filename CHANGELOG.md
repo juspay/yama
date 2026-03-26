@@ -1,3 +1,10 @@
+## [2.2.2](https://github.com/juspay/yama/compare/v2.2.1...v2.2.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* **core:** fix MCP timeout, local review output format, and ReDoS in JSON parser ([89dbc27](https://github.com/juspay/yama/commit/89dbc27bd35b738dc808ffa2eaa31807dceab2b5))
+
 ## [2.2.1](https://github.com/juspay/yama/compare/v2.2.0...v2.2.1) (2026-02-23)
 
 
