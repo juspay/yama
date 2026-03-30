@@ -92,12 +92,23 @@ export interface KnowledgeBase {
 /**
  * Request for the learn command
  */
+/**
+ * Controls which storage systems are committed after learning extraction.
+ * - "kb"     — commit only the knowledge base file (existing behavior)
+ * - "memory" — commit only per-repo memory files (via NeuroLink + git push)
+ * - "all"    — commit both knowledge base and per-repo memory
+ */
+export type LearnCommitMode = "kb" | "memory" | "all";
+
 export interface LearnRequest {
   workspace: string;
   repository: string;
   pullRequestId: number;
   dryRun?: boolean;
+  /** @deprecated Use commitMode instead */
   commit?: boolean;
+  /** Controls which storage systems are committed after extraction */
+  commitMode?: LearnCommitMode;
   summarize?: boolean;
   outputPath?: string;
   outputFormat?: "md" | "json";

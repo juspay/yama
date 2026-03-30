@@ -9,6 +9,7 @@ import { MCPServerManager } from "./MCPServerManager.js";
 import { ConfigLoader } from "../config/ConfigLoader.js";
 import { LangfusePromptManager } from "../prompts/LangfusePromptManager.js";
 import { KnowledgeBaseManager } from "../learning/KnowledgeBaseManager.js";
+import { MemoryManager } from "../memory/MemoryManager.js";
 import {
   LearnRequest,
   LearnResult,
@@ -43,6 +44,7 @@ export class LearningOrchestrator {
   private mcpManager: MCPServerManager;
   private configLoader: ConfigLoader;
   private promptManager: LangfusePromptManager;
+  private memoryManager: MemoryManager | null = null;
   private config!: YamaConfig;
   private initialized = false;
 
@@ -66,7 +68,17 @@ export class LearningOrchestrator {
       // Load configuration
       this.config = await this.configLoader.loadConfig(configPath);
 
-      // Initialize NeuroLink
+      // Initialize Memory Manager (if enabled) — must happen before NeuroLink
+      if (this.config.memory?.enabled) {
+        this.memoryManager = new MemoryManager(
+          this.config.memory,
+          this.config.ai.provider,
+          this.config.ai.model,
+        );
+        console.log("   🧠 Per-repo memory enabled\n");
+      }
+
+      // Initialize NeuroLink with memory config injected
       console.log("   🔧 Initializing NeuroLink AI engine...");
       this.neurolink = this.initializeNeurolink();
       console.log("   ✅ NeuroLink initialized\n");
@@ -198,6 +210,64 @@ export class LearningOrchestrator {
         console.log(`   ⏭️  Skipped ${duplicateCount} duplicates`);
       }
 
+      // Resolve commit mode: commitMode takes precedence, fall back to legacy commit flag
+      const commitMode =
+        request.commitMode ||
+        (request.commit || this.config.knowledgeBase.autoCommit
+          ? "kb"
+          : undefined);
+
+      const shouldCommitMemory =
+        commitMode === "memory" || commitMode === "all";
+      const shouldCommitKb = commitMode === "kb" || commitMode === "all";
+
+      // Store learnings in per-repo memory via NeuroLink
+      // read: false (we don't need to read memory here)
+      // write: true (condense learnings into memory file)
+      if (this.memoryManager && addedCount > 0 && shouldCommitMemory) {
+        try {
+          const byCategory = new Map<string, string[]>();
+          for (const l of learnings) {
+            const cat = l.category.replace(/_/g, " ");
+            if (!byCategory.has(cat)) {
+              byCategory.set(cat, []);
+            }
+            byCategory.get(cat)!.push(l.learning);
+          }
+          const parts: string[] = [];
+          for (const [category, items] of byCategory) {
+            parts.push(`${category}: ${items.join("; ")}`);
+          }
+
+          const ownerId = MemoryManager.buildOwnerId(
+            request.workspace,
+            request.repository,
+          );
+
+          await this.neurolink.generate({
+            input: { text: parts.join(". ") },
+            provider: this.config.ai.provider,
+            model: this.config.ai.model,
+            temperature: 0.1,
+            maxTokens: 100,
+            disableTools: true,
+            context: {
+              userId: ownerId,
+              operation: "memory-store-learnings",
+            },
+            memory: { read: false, write: true },
+          });
+          console.log(`   🧠 Learning memory stored for ${ownerId}`);
+
+          // Auto-commit and push memory files to repo
+          await this.memoryManager.commitMemoryChanges();
+        } catch (error) {
+          console.warn(
+            `   ⚠️ Failed to store learning memory: ${(error as Error).message}`,
+          );
+        }
+      }
+
       // Check if summarization is needed
       let summarized = false;
       if (request.summarize || (await kbManager.needsSummarization())) {
@@ -207,9 +277,9 @@ export class LearningOrchestrator {
         console.log("   ✅ Summarization complete");
       }
 
-      // Commit if requested
+      // Commit knowledge base if requested
       let committed = false;
-      if (request.commit || this.config.knowledgeBase.autoCommit) {
+      if (shouldCommitKb) {
         console.log("\n📤 Committing knowledge base...");
         await kbManager.commit(request.pullRequestId, addedCount);
         committed = true;
@@ -458,8 +528,16 @@ Analyze the PR data above and extract learnings.
   private initializeNeurolink(): NeuroLink {
     const observabilityConfig = buildObservabilityConfigFromEnv();
 
+    const conversationMemory: Record<string, unknown> = {
+      ...this.config.ai.conversationMemory,
+    };
+    if (this.memoryManager) {
+      conversationMemory.memory =
+        this.memoryManager.buildNeuroLinkMemoryConfig();
+    }
+
     const neurolinkConfig: Record<string, unknown> = {
-      conversationMemory: this.config.ai.conversationMemory,
+      conversationMemory,
     };
 
     if (

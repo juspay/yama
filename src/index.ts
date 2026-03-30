@@ -13,10 +13,15 @@ export {
   YamaOrchestrator as YamaV2Orchestrator,
   createYama as createYamaV2,
 } from "./v2/core/YamaV2Orchestrator.js";
+export {
+  LearningOrchestrator,
+  createLearningOrchestrator,
+} from "./v2/core/LearningOrchestrator.js";
 export { ConfigLoader } from "./v2/config/ConfigLoader.js";
 export { MCPServerManager } from "./v2/core/MCPServerManager.js";
 export { SessionManager } from "./v2/core/SessionManager.js";
 export { PromptBuilder } from "./v2/prompts/PromptBuilder.js";
+export { MemoryManager } from "./v2/memory/MemoryManager.js";
 
 // ============================================================================
 // Type Exports
@@ -45,6 +50,7 @@ export type {
   MCPServersConfig,
   ReviewConfig,
   DescriptionEnhancementConfig,
+  MemoryConfig,
 } from "./v2/types/config.types.js";
 
 export type {

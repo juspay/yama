@@ -7,7 +7,7 @@ import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { parse as parseYAML } from "yaml";
 import { resolve } from "path";
-import { YamaConfig } from "../types/config.types.js";
+import { YamaConfig, MemoryConfig } from "../types/config.types.js";
 import { ConfigurationError } from "../types/v2.types.js";
 import { DefaultConfig } from "./DefaultConfig.js";
 
@@ -41,6 +41,8 @@ export class ConfigLoader {
     } else {
       console.log("   Using default configuration (no config file found)");
     }
+
+    config.memory = this.applyMemoryOverrides(config.memory);
 
     // Layer 4: Apply SDK instance overrides (highest priority)
     if (instanceOverrides) {
@@ -245,6 +247,42 @@ export class ConfigLoader {
     }
 
     return config;
+  }
+
+  /**
+   * Apply memory-related environment variable overrides.
+   *
+   * Env vars (YAMA_MEMORY_*) take precedence over yaml config.
+   * If YAMA_MEMORY_ENABLED is set but no memory config exists in yaml,
+   * a default config is created so the other overrides have a target.
+   *
+   * Supported env vars:
+   *   YAMA_MEMORY_ENABLED       — "true" / "false"
+   *   YAMA_MEMORY_STORAGE_PATH  — e.g. "memory-bank/yama/memory"
+   *   YAMA_MEMORY_MAX_WORDS     — e.g. "200"
+   *   YAMA_MEMORY_AUTO_COMMIT   — "true" / "false"
+   *   YAMA_MEMORY_PROMPT        — custom condensation prompt
+   */
+  private applyMemoryOverrides(memory: MemoryConfig): MemoryConfig {
+    const env = process.env;
+
+    if (env.YAMA_MEMORY_ENABLED) {
+      memory.enabled = env.YAMA_MEMORY_ENABLED === "true";
+    }
+    if (env.YAMA_MEMORY_STORAGE_PATH) {
+      memory.storagePath = env.YAMA_MEMORY_STORAGE_PATH;
+    }
+    if (env.YAMA_MEMORY_MAX_WORDS) {
+      memory.maxWords = parseInt(env.YAMA_MEMORY_MAX_WORDS, 10);
+    }
+    if (env.YAMA_MEMORY_AUTO_COMMIT) {
+      memory.autoCommit = env.YAMA_MEMORY_AUTO_COMMIT === "true";
+    }
+    if (env.YAMA_MEMORY_PROMPT) {
+      memory.prompt = env.YAMA_MEMORY_PROMPT;
+    }
+
+    return memory;
   }
 
   /**

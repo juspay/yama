@@ -231,6 +231,21 @@ knowledgeBase:
   # Automatically commit knowledge base changes (with --commit flag)
   autoCommit: false
 
+# Per-repo condensed memory
+# Memory accumulates durable facts about each repository across reviews
+memory:
+  enabled: true
+  storagePath: ".yama/memory"
+  # Maximum word count for condensed memory per repository (default: 50)
+  maxWords: 200
+  # prompt: "Your custom condensation prompt here..."
+  # neurolink:
+  #   provider: google-ai
+  #   model: gemini-2.0-flash
+  #   temperature: 0.1
+  autoCommit: true # Auto-commit memory files to repo after each review (persists across CI builds)
+  # commitMessage: "chore: update yama review memory [skip ci]"
+
 # ============================================================================
 # Project-Specific Standards (Override in your repository)
 # ============================================================================

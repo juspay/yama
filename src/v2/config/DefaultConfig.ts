@@ -169,6 +169,12 @@ export class DefaultConfig {
         autoCommit: false,
       },
 
+      memory: {
+        enabled: false,
+        storagePath: ".yama/memory",
+        maxWords: 200,
+      },
+
       projectStandards: {
         customPromptsPath: "config/prompts/",
         additionalFocusAreas: [],

@@ -8,6 +8,7 @@ import { MCPServerManager } from "./MCPServerManager.js";
 import { ConfigLoader } from "../config/ConfigLoader.js";
 import { PromptBuilder } from "../prompts/PromptBuilder.js";
 import { SessionManager } from "./SessionManager.js";
+import { MemoryManager } from "../memory/MemoryManager.js";
 import { LocalDiffSource } from "./LocalDiffSource.js";
 import type { LocalDiffContext } from "./LocalDiffSource.js";
 import {
@@ -35,6 +36,7 @@ export class YamaOrchestrator {
   private configLoader: ConfigLoader;
   private promptBuilder: PromptBuilder;
   private sessionManager: SessionManager;
+  private memoryManager: MemoryManager | null = null;
   private localDiffSource: LocalDiffSource;
   private config!: YamaConfig;
   private initialized = false;
@@ -71,7 +73,17 @@ export class YamaOrchestrator {
 
         this.showBanner();
 
-        // Step 2: Initialize NeuroLink
+        // Step 2: Initialize
+        if (this.config.memory?.enabled) {
+          this.memoryManager = new MemoryManager(
+            this.config.memory,
+            this.config.ai.provider,
+            this.config.ai.model,
+          );
+          console.log("   🧠 Per-repo memory enabled\n");
+        }
+
+        // Step 3: Initialize NeuroLink with memory config injected
         console.log("🧠 Initializing NeuroLink AI engine...");
         this.neurolink = this.initializeNeurolink();
         console.log("✅ NeuroLink initialized\n");
@@ -79,7 +91,7 @@ export class YamaOrchestrator {
         this.initialized = true;
       }
 
-      // Step 3: Mode-specific setup
+      // Step 4: Mode-specific setup
       if (mode === "pr" && !this.mcpInitialized) {
         await this.mcpManager.setupMCPServers(
           this.neurolink,
@@ -91,7 +103,7 @@ export class YamaOrchestrator {
         this.localGitMcpInitialized = true;
       }
 
-      // Step 4: Mode-specific validation
+      // Step 5: Mode-specific validation
       await this.configLoader.validate(mode);
 
       console.log("✅ Yama initialized successfully\n");
@@ -145,6 +157,7 @@ export class YamaOrchestrator {
         "   AI will now make decisions and execute actions autonomously\n",
       );
 
+      // Review call: RETRIEVE memory (for context), but DON'T STORE
       const aiResponse = await this.neurolink.generate({
         input: { text: instructions },
         provider: this.config.ai.provider,
@@ -156,10 +169,11 @@ export class YamaOrchestrator {
         ...this.getPRToolFilteringOptions(instructions),
         context: {
           sessionId,
-          userId: this.generateUserId(request),
+          userId: this.getUserId(request),
           operation: "code-review",
           metadata: toolContext.metadata,
         },
+        memory: { read: true, write: false },
         enableAnalytics: this.config.ai.enableAnalytics,
         enableEvaluation: this.config.ai.enableEvaluation,
       });
@@ -320,8 +334,9 @@ export class YamaOrchestrator {
         ...this.getPRToolFilteringOptions(instructions),
         context: {
           sessionId,
-          userId: this.generateUserId(request),
+          userId: this.getUserId(request),
         },
+        memory: { enabled: false },
         enableAnalytics: true,
       });
 
@@ -394,10 +409,11 @@ export class YamaOrchestrator {
         ...this.getPRToolFilteringOptions(reviewInstructions),
         context: {
           sessionId,
-          userId: this.generateUserId(request),
+          userId: this.getUserId(request),
           operation: "code-review",
           metadata: toolContext.metadata,
         },
+        memory: { read: true, write: false },
         enableAnalytics: this.config.ai.enableAnalytics,
         enableEvaluation: this.config.ai.enableEvaluation,
       });
@@ -440,10 +456,11 @@ export class YamaOrchestrator {
           ...this.getPRToolFilteringOptions(enhanceInstructions),
           context: {
             sessionId, // SAME sessionId = AI remembers review context
-            userId: this.generateUserId(request),
+            userId: this.getUserId(request),
             operation: "description-enhancement",
             metadata: toolContext.metadata,
           },
+          memory: { enabled: false },
           enableAnalytics: this.config.ai.enableAnalytics,
           enableEvaluation: this.config.ai.enableEvaluation,
         });
@@ -501,9 +518,10 @@ export class YamaOrchestrator {
         ...this.getPRToolFilteringOptions(instructions),
         context: {
           sessionId,
-          userId: this.generateUserId(request),
+          userId: this.getUserId(request),
           operation: "description-enhancement",
         },
+        memory: { enabled: false },
         enableAnalytics: true,
       });
       this.recordToolCallsFromResponse(sessionId, aiResponse);
@@ -542,9 +560,10 @@ export class YamaOrchestrator {
     return this.sessionManager.exportSession(sessionId);
   }
 
-  /**
-   * Create tool context for AI
-   */
+  private getUserId(request: ReviewRequest): string {
+    return `${request.workspace}-${request.repository}`.toLowerCase();
+  }
+
   private createToolContext(sessionId: string, request: ReviewRequest): any {
     return {
       sessionId,
@@ -1078,15 +1097,6 @@ export class YamaOrchestrator {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  /**
-   * Generate userId for NeuroLink context from repository and branch/PR
-   */
-  private generateUserId(request: ReviewRequest): string {
-    const repo = request.repository;
-    const identifier = request.branch || `pr-${request.pullRequestId}`;
-    return `${repo}-${identifier}`;
-  }
-
   private isLocalReviewRequest(
     request: UnifiedReviewRequest,
   ): request is LocalReviewRequest {
@@ -1194,8 +1204,16 @@ export class YamaOrchestrator {
     try {
       const observabilityConfig = buildObservabilityConfigFromEnv();
 
-      const neurolinkConfig: any = {
-        conversationMemory: this.config.ai.conversationMemory,
+      const conversationMemory: Record<string, unknown> = {
+        ...this.config.ai.conversationMemory,
+      };
+      if (this.memoryManager) {
+        conversationMemory.memory =
+          this.memoryManager.buildNeuroLinkMemoryConfig();
+      }
+
+      const neurolinkConfig: Record<string, unknown> = {
+        conversationMemory,
       };
 
       if (observabilityConfig) {

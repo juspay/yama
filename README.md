@@ -28,6 +28,8 @@
 ```
 YamaOrchestrator
     ↓
+MemoryManager (per-repo condensed memory)
+    ↓
 NeuroLink AI Agent (Autonomous)
     ↓
 MCP Tools (Bitbucket + Jira)
@@ -38,6 +40,7 @@ Pull Request Operations
 ### AI Autonomous Workflow
 
 1. **Context Gathering** (AI-driven)
+   - Reads per-repo memory (past review learnings)
    - Reads PR details
    - Finds and reads Jira ticket
    - Loads project standards from memory-bank
@@ -310,6 +313,17 @@ AI uses tools to understand code:
 - `search_code()` - Find function definitions
 - `get_file_content()` - Read related files
 - `list_directory_content()` - Explore structure
+
+### Per-Repo Memory
+
+AI learns from past reviews and remembers across PRs:
+
+- Reads condensed memory before each review for context
+- Writes learnings after PR merge (false positives, missed issues, team conventions)
+- LLM-powered condensation keeps memory within a configurable word limit
+- Per-repo isolation — each repository gets independent memory keyed by `workspace-repository`
+- Storage as `.md` files at configurable path (e.g., `memory-bank/yama/memory/`)
+- Environment variable overrides for all settings (`YAMA_MEMORY_ENABLED`, `YAMA_MEMORY_MAX_WORDS`, etc.)
 
 ## Blocking Criteria
 
