@@ -18,6 +18,7 @@ export interface YamaConfig {
   descriptionEnhancement: DescriptionEnhancementConfig;
   memoryBank: MemoryBankConfig;
   knowledgeBase: KnowledgeBaseConfig;
+  memory: MemoryConfig;
   projectStandards?: ProjectStandardsConfig;
   monitoring: MonitoringConfig;
   performance: PerformanceConfig;
@@ -160,6 +161,59 @@ export interface KnowledgeBaseConfig {
   summaryRetentionCount: number;
   /** Auto-commit knowledge base changes (default for --commit flag) */
   autoCommit: boolean;
+}
+
+// ============================================================================
+// Memory Configuration (Per-Repo Condensed Memory via NeuroLink)
+// ============================================================================
+
+/** Storage backend configuration for Hippocampus memory */
+export type MemoryStorageConfig =
+  | { type: "sqlite"; path?: string }
+  | {
+      type: "redis";
+      host?: string;
+      port?: number;
+      password?: string;
+      db?: number;
+      keyPrefix?: string;
+      ttl?: number;
+    }
+  | { type: "s3"; bucket: string; prefix?: string }
+  | {
+      type: "custom";
+      onGet: (ownerId: string) => Promise<string | null>;
+      onSet: (ownerId: string, memory: string) => Promise<void>;
+      onDelete: (ownerId: string) => Promise<void>;
+      onClose?: () => Promise<void>;
+    };
+
+/**
+ * Yama-specific memory configuration.
+ * Mirrors NeuroLink's Memory type (HippocampusConfig & { enabled }) with
+ * Yama-specific fields for file-based storage.
+ */
+export interface MemoryConfig {
+  /** Enable per-repo condensed memory feature */
+  enabled: boolean;
+  /** Directory for file-based memory storage (relative to project root) */
+  storagePath: string;
+  /** Maximum word count for condensed memory per repository (default: 50) */
+  maxWords?: number;
+  /** Custom condensation prompt (overrides default review-specific prompt) */
+  prompt?: string;
+  /** Storage backend configuration (default: file-based custom storage managed by Yama) */
+  storage?: MemoryStorageConfig;
+  /** AI provider/model for memory condensation (defaults to main AI provider) */
+  neurolink?: {
+    provider?: string;
+    model?: string;
+    temperature?: number;
+  };
+  /** Auto-commit memory files to the repo after review (default: false) */
+  autoCommit?: boolean;
+  /** Git commit message for memory auto-commits (default: "chore: update yama review memory [skip ci]") */
+  commitMessage?: string;
 }
 
 // ============================================================================
