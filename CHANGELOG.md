@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/juspay/yama/compare/v2.2.2...v2.3.0) (2026-04-01)
+
+
+### Features
+
+* **memory:** add per-repo memory management and configuration ([0b1fd5d](https://github.com/juspay/yama/commit/0b1fd5de8f0e46402f3c54766a5e0c7bd937cca2))
+
 ## [2.2.2](https://github.com/juspay/yama/compare/v2.2.1...v2.2.2) (2026-03-26)
 
 
