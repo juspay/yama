@@ -36,6 +36,16 @@ ai:
     maxTurnsPerSession: 300 # Long reviews need many turns
     enableSummarization: false # Don't summarize mid-review
 
+  # Explore worker configuration
+  explore:
+    enabled: true
+    provider: "auto"
+    model: "gemini-2.5-flash"
+    temperature: 0.1
+    maxTokens: 32000
+    timeout: "5m"
+    cacheResults: true
+
 # ============================================================================
 # MCP Servers Configuration
 # ============================================================================

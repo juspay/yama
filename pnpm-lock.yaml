@@ -14,8 +14,8 @@ importers:
         specifier: ^9.42.0
         version: 9.42.0(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)
       "@nexus2520/bitbucket-mcp-server":
-        specifier: 2.0.1
-        version: 2.0.1(@cfworker/json-schema@4.1.1)(debug@4.4.1)(zod@4.3.6)
+        specifier: 2.0.3
+        version: 2.0.3(@cfworker/json-schema@4.1.1)(debug@4.4.1)(zod@4.3.6)
       "@nexus2520/jira-mcp-server":
         specifier: ^1.1.1
         version: 1.1.1(@cfworker/json-schema@4.1.1)(debug@4.4.1)(zod@4.3.6)
@@ -2465,10 +2465,10 @@ packages:
       }
     engines: { node: ">= 10" }
 
-  "@nexus2520/bitbucket-mcp-server@2.0.1":
+  "@nexus2520/bitbucket-mcp-server@2.0.3":
     resolution:
       {
-        integrity: sha512-W0qdm7AqmOwm8ubOIY42gzip9RmLRsuchiuKkrUQyf1UxLxnAGWZvN3NtsINxTkOTkJ2ftGG4icWJSySGJ8GXg==,
+        integrity: sha512-xJ2qcDwbYnXYXzkcFzWcaT2s0RJX+Se48vZg15ofY6HWd8jqh4FomVyfYT02QUgfmDIsdXEGYvR+EQ+E6Oe9Hw==,
       }
     engines: { node: ">=16.0.0" }
     hasBin: true
@@ -12829,9 +12829,9 @@ snapshots:
       "@napi-rs/canvas-win32-x64-msvc": 0.1.86
     optional: true
 
-  "@nexus2520/bitbucket-mcp-server@2.0.1(@cfworker/json-schema@4.1.1)(debug@4.4.1)(zod@4.3.6)":
+  "@nexus2520/bitbucket-mcp-server@2.0.3(@cfworker/json-schema@4.1.1)(debug@4.4.1)(zod@4.3.6)":
     dependencies:
-      "@modelcontextprotocol/sdk": 1.26.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
+      "@modelcontextprotocol/sdk": 1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
       axios: 1.11.0(debug@4.4.1)
       minimatch: 9.0.5
     transitivePeerDependencies:

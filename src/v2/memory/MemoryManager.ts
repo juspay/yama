@@ -147,6 +147,34 @@ export class MemoryManager {
   }
 
   /**
+   * Read persisted condensed memory for a repository owner ID.
+   */
+  async readMemory(ownerId: string): Promise<string | null> {
+    const storageDir = this.resolveStorageDir();
+    const filePath = this.ownerIdToFilePath(storageDir, ownerId);
+
+    if (!existsSync(filePath)) {
+      return null;
+    }
+
+    try {
+      return await readFile(filePath, "utf-8");
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Read persisted condensed memory for a workspace/repository pair.
+   */
+  async readRepositoryMemory(
+    workspace: string,
+    repository: string,
+  ): Promise<string | null> {
+    return this.readMemory(MemoryManager.buildOwnerId(workspace, repository));
+  }
+
+  /**
    * Commit memory files to the repository if autoCommit is enabled.
    *
    * Checks git status for changes in the storagePath directory,

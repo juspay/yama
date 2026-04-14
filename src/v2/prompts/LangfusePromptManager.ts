@@ -27,6 +27,17 @@ export class LangfusePromptManager {
    * Initialize Langfuse client if credentials are available
    */
   private initializeClient(): void {
+    const skipLangfusePrompts =
+      process.env.YAMA_SKIP_LANGFUSE_PROMPTS === "true" ||
+      process.env.YAMA_SKIP_LANGFUSE_PROMPTS === "1";
+
+    if (skipLangfusePrompts) {
+      console.log(
+        "   ⏭️  Langfuse prompt fetch disabled (YAMA_SKIP_LANGFUSE_PROMPTS) — using local prompts",
+      );
+      return;
+    }
+
     const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
     const secretKey = process.env.LANGFUSE_SECRET_KEY;
     const baseUrl = process.env.LANGFUSE_BASE_URL;

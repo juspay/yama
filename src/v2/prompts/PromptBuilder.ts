@@ -29,9 +29,10 @@ export class PromptBuilder {
   async buildReviewInstructions(
     request: ReviewRequest,
     config: YamaConfig,
+    bootstrapStandards?: string | null,
   ): Promise<string> {
     // Base system prompt - fetched from Langfuse or local fallback
-    const basePrompt = await this.langfuseManager.getReviewPrompt();
+    const basePromptRaw = await this.langfuseManager.getReviewPrompt();
 
     // Project-specific configuration in XML format
     const projectConfig = this.buildProjectConfigXML(config, request);
@@ -41,6 +42,32 @@ export class PromptBuilder {
 
     // Knowledge base learnings (reinforcement learning)
     const knowledgeBase = await this.loadKnowledgeBase(config);
+    const exploreEnabled = config.ai.explore.enabled;
+
+    // Strip explore_context references when the subagent is disabled.
+    const basePrompt = PromptBuilder.stripDisabledSections(
+      basePromptRaw,
+      exploreEnabled,
+    );
+
+    const workflowBlock = PromptBuilder.stripDisabledSections(
+      this.buildReviewWorkflow(request),
+      exploreEnabled,
+    );
+
+    const bootstrapBlock =
+      bootstrapStandards && bootstrapStandards.trim().length > 0
+        ? `<bootstrapped-standards>
+<!--
+Recurring reviewer patterns observed in recent merged PRs on this repo.
+These are runtime observations, not config rules. Treat them as guidance
+that ranks BELOW <blocking-criteria> but ABOVE generic suggestions.
+If they conflict with <project-standards> or <blocking-criteria>, the
+config wins.
+-->
+${bootstrapStandards.trim()}
+</bootstrapped-standards>`
+        : "";
 
     // Combine all parts
     return `
@@ -52,6 +79,8 @@ ${projectConfig}
 
 ${projectStandards ? `<project-standards>\n${projectStandards}\n</project-standards>` : ""}
 
+${bootstrapBlock}
+
 ${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` : ""}
 
 <review-task>
@@ -61,22 +90,119 @@ ${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` 
   <branch>${this.escapeXML(request.branch || "N/A")}</branch>
   <mode>${request.dryRun ? "dry-run" : "live"}</mode>
 
-  <instructions>
-    Begin your autonomous code review now.
-
-    1. Call get_pull_request() to read PR details and existing comments
-    2. Analyze files one by one using get_pull_request_diff()
-    3. Use search_code() BEFORE commenting on unfamiliar code
-    4. Post comments immediately with add_comment() using line_number and line_type from diff
-    5. Apply blocking criteria to make final decision
-    6. Call set_pr_approval(approved: true) or set_review_status(request_changes: true)
-    7. Post summary comment with statistics
-
-    ${request.dryRun ? "DRY RUN MODE: Simulate actions only, do not post real comments." : "LIVE MODE: Post real comments and make real decisions."}
-    ${request.prompt ? `ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}` : ""}
-  </instructions>
+${workflowBlock}
 </review-task>
     `.trim();
+  }
+
+  /**
+   * Per-PR workflow block. Standards-first, file-by-file, explore-on-uncertainty.
+   * The agent stays autonomous; this just choreographs the order it should follow.
+   */
+  private buildReviewWorkflow(request: ReviewRequest): string {
+    const modeLine = request.dryRun
+      ? "DRY RUN MODE: simulate actions only, do not post real comments or change PR state."
+      : "LIVE MODE: post real comments and make real decisions.";
+    const additional = request.prompt
+      ? `\n  ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}`
+      : "";
+
+    return `  <instructions>
+    Begin your autonomous review. Follow this order.
+
+    STEP 1 — Read project standards
+    Read the <project-standards> block above carefully. Treat any reviewer-expectation
+    entry with severity=BLOCKING as a blocking criterion for this PR. If the block is
+    missing or empty, fall back to <focus-areas> and <blocking-criteria>.
+
+    STEP 2 — Read the PR shell
+    Call get_pull_request once to get changed files, branch info, and existing comments.
+    Build a mental map of which files exist and which already have comments.
+    Do NOT request the full PR diff.
+
+    STEP 3 — Walk files one at a time
+    For each changed file, in order:
+      a. Call get_pull_request_diff(file_path=&lt;this file&gt;).
+      b. Cross-check the diff against project-standards and existing comments on this file.
+      c. If anything is non-trivial — multi-file impact, unfamiliar pattern, unclear intent,
+         history-dependent behavior — <!-- EXPLORE_BEGIN -->call explore_context with a precise
+         task and wait for its evidence before commenting<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN -->use search_code or get_file_content to verify before commenting<!-- EXPLORE_DISABLED_END -->.
+      d. For every confirmed issue, call add_comment immediately with line_number and
+         line_type from the diff JSON. Include a real-code suggestion for CRITICAL/MAJOR.
+      e. Move to the next file. Never request another file's diff before finishing the
+         current one. Never request a multi-file diff.
+
+    STEP 4 — Decision
+    After the last file, count issues by severity, apply <blocking-criteria>, and call
+    set_pr_approval(approved=true) OR set_review_status(request_changes=true).
+
+    STEP 5 — Summary comment
+    Post one summary comment with file count, issue counts by severity, and next steps.
+
+    Budget guidance: roughly 10 tool calls per file in the main loop. If you exceed
+    that on a single file, <!-- EXPLORE_BEGIN -->delegate the rest to explore_context<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN -->stop investigating<!-- EXPLORE_DISABLED_END --> and move on.
+
+    ${modeLine}${additional}
+  </instructions>`;
+  }
+
+  /**
+   * Strip sections that depend on explore_context being enabled.
+   * Keeps the prompt single-source and avoids forking files for the disabled case.
+   *
+   * - <!-- EXPLORE_BEGIN -->...<!-- EXPLORE_END --> is removed when explore is OFF.
+   * - <!-- EXPLORE_DISABLED_BEGIN -->...<!-- EXPLORE_DISABLED_END --> is removed when explore is ON.
+   * - The marker comments themselves are always stripped.
+   *
+   * Implementation uses linear indexOf/slice instead of regex to avoid any
+   * polynomial-backtracking risk on adversarial input.
+   */
+  static stripDisabledSections(
+    prompt: string,
+    exploreEnabled: boolean,
+  ): string {
+    const EXPLORE_BEGIN = "<!-- EXPLORE_BEGIN -->";
+    const EXPLORE_END = "<!-- EXPLORE_END -->";
+    const EXPLORE_DISABLED_BEGIN = "<!-- EXPLORE_DISABLED_BEGIN -->";
+    const EXPLORE_DISABLED_END = "<!-- EXPLORE_DISABLED_END -->";
+
+    const stripBlock = (text: string, start: string, end: string): string => {
+      let out = "";
+      let cursor = 0;
+      while (cursor <= text.length) {
+        const s = text.indexOf(start, cursor);
+        if (s === -1) {
+          out += text.slice(cursor);
+          break;
+        }
+        out += text.slice(cursor, s);
+        const e = text.indexOf(end, s + start.length);
+        if (e === -1) {
+          out += text.slice(s);
+          break;
+        }
+        cursor = e + end.length;
+      }
+      return out;
+    };
+
+    const removeAll = (text: string, marker: string): string =>
+      text.split(marker).join("");
+
+    if (exploreEnabled) {
+      let result = stripBlock(
+        prompt,
+        EXPLORE_DISABLED_BEGIN,
+        EXPLORE_DISABLED_END,
+      );
+      result = removeAll(result, EXPLORE_BEGIN);
+      result = removeAll(result, EXPLORE_END);
+      return result;
+    }
+    let result = stripBlock(prompt, EXPLORE_BEGIN, EXPLORE_END);
+    result = removeAll(result, EXPLORE_DISABLED_BEGIN);
+    result = removeAll(result, EXPLORE_DISABLED_END);
+    return result;
   }
 
   /**
@@ -301,23 +427,24 @@ ${enhancementConfigXML}
       diffContext.diff.length > diffPreviewMaxChars
         ? `${diffContext.diff.slice(0, diffPreviewMaxChars)}\n... [truncated preview]`
         : diffContext.diff;
+    const exploreEnabled = config.ai.explore.enabled;
 
-    return `
+    const projectStandards = await this.loadProjectStandards(config);
+
+    const rawPrompt = `
 You are Yama operating in LOCAL SDK MODE.
 Review the provided git changes and return a strict JSON object only.
 
-Rules:
-1. Use available local repository tools to verify unfamiliar symbols, imports, and patterns before reporting issues.
-2. Do not use PR/Jira MCP tools in local mode.
-3. Do not add markdown code fences.
-4. Output must start with "{" and end with "}".
-5. Keep findings actionable and file/line specific where possible.
-6. Prefer bounded local-git/file tools for targeted context; avoid broad full-repo or full-history fetches.
+${projectStandards ? `<project-standards>\n${projectStandards}\n</project-standards>\n` : ""}
 
-Context Verification Workflow:
-- Start from the diff.
-- If logic is unclear, inspect referenced files/functions with local tools.
-- Avoid assumptions when code context is missing.
+Workflow (follow in order):
+1. STANDARDS FIRST. Read <project-standards> above (if present). Treat any rule with severity=BLOCKING as a blocking criterion.
+2. WALK FILES ONE AT A TIME. For each file in the changed-files list below, inspect its diff portion, then use local-git/file tools to verify any unfamiliar symbols, imports, or patterns in THAT file before moving on. Never analyse multiple files in parallel.
+3. VERIFY BEFORE REPORTING.<!-- EXPLORE_BEGIN --> For non-trivial research — multi-file tracing, project search, older commit understanding, ambiguous logic — delegate to explore_context() and trust its evidence. Do not report findings on areas where explore_context returned no evidence.<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN --> Use bounded local-git/file tools (search_code, get_file_content) to verify before reporting. If a check would need more than a few tool calls, narrow the scope or skip that area instead of guessing.<!-- EXPLORE_DISABLED_END -->
+4. NEVER use PR/Jira MCP tools in local mode.
+5. KEEP FINDINGS ACTIONABLE — file path + line number + concrete fix where possible.
+6. BUDGET — roughly 10 tool calls per file in the main loop. If you exceed it,<!-- EXPLORE_BEGIN --> delegate the rest to explore_context<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN --> stop investigating that file<!-- EXPLORE_DISABLED_END --> and move to the next file.
+7. OUTPUT — return strict JSON only. No markdown code fences. Output must start with "{" and end with "}".
 
 Focus Areas:
 ${focusAreas.map((area) => `- ${area}`).join("\n")}
@@ -368,7 +495,11 @@ Output Schema (version ${schemaVersion}):
     }
   ]
 }
-    `.trim();
+`;
+    return PromptBuilder.stripDisabledSections(
+      rawPrompt,
+      exploreEnabled,
+    ).trim();
   }
 
   /**

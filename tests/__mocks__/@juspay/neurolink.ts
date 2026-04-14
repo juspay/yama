@@ -1,6 +1,41 @@
 // Mock for @juspay/neurolink
 export class NeuroLink {
+  private customTools = new Map<string, any>();
+  private toolContext: Record<string, unknown> | null = null;
+
   constructor() {}
+
+  registerTool(name: string, tool: any): void {
+    this.customTools.set(name, tool);
+  }
+
+  setToolContext(context: Record<string, unknown>): void {
+    this.toolContext = context;
+  }
+
+  getCustomTools(): Map<string, any> {
+    return this.customTools;
+  }
+
+  async addExternalMCPServer(): Promise<void> {}
+
+  async listMCPServers(): Promise<any[]> {
+    return [];
+  }
+
+  async getMCPStatus(): Promise<any> {
+    return { totalServers: 0, totalTools: 0 };
+  }
+
+  getExternalMCPTools(): any[] {
+    return [];
+  }
+
+  getExternalMCPServerTools(): any[] {
+    return [];
+  }
+
+  async removeExternalMCPServer(): Promise<void> {}
 
   async generate(options: any): Promise<any> {
     // Mock AI response for testing
@@ -36,6 +71,7 @@ export class NeuroLink {
         provider: "mock",
         responseTime: 100,
       },
+      toolContext: this.toolContext,
     };
   }
 }
