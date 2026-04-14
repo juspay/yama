@@ -169,6 +169,7 @@ export interface ReviewSession {
   result?: ReviewResult;
   error?: Error;
   metadata: SessionMetadata;
+  explorations?: ExplorationRecord[];
 }
 
 export interface ToolCallRecord {
@@ -188,6 +189,37 @@ export interface SessionMetadata {
   totalTokens: number;
   totalCost: number;
   cacheHitRatio: number;
+}
+
+export interface ExplorationRecord {
+  task: string;
+  cacheKey: string;
+  focus: string[];
+  result: ExplorationResult;
+  createdAt: Date;
+  cached: boolean;
+}
+
+export interface ExplorationResult {
+  task: string;
+  summary: string;
+  findings: ExplorationFinding[];
+  evidence: ExplorationEvidence[];
+  openQuestions: string[];
+  recommendedNextStep: "continue_review" | "explore_more" | "avoid_commenting";
+  completedAt: string;
+}
+
+export interface ExplorationFinding {
+  claim: string;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface ExplorationEvidence {
+  sourceType: "file" | "commit" | "diff" | "jira" | "memory" | "rules" | "kb";
+  ref: string;
+  snippet?: string;
+  reason: string;
 }
 
 // ============================================================================

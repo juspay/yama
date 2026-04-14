@@ -216,7 +216,7 @@ export class ConfigLoader {
   private applyEnvironmentOverrides(config: YamaConfig): YamaConfig {
     // Override AI provider if env var set
     if (process.env.AI_PROVIDER) {
-      config.ai.provider = process.env.AI_PROVIDER as any;
+      config.ai.provider = process.env.AI_PROVIDER;
     }
 
     // Override AI model if env var set
@@ -224,14 +224,20 @@ export class ConfigLoader {
       config.ai.model = process.env.AI_MODEL;
     }
 
-    // Override temperature if env var set
+    // Override temperature if env var set (ignore non-finite values)
     if (process.env.AI_TEMPERATURE) {
-      config.ai.temperature = parseFloat(process.env.AI_TEMPERATURE);
+      const temperature = Number(process.env.AI_TEMPERATURE);
+      if (Number.isFinite(temperature)) {
+        config.ai.temperature = temperature;
+      }
     }
 
-    // Override max tokens if env var set
+    // Override max tokens if env var set (ignore non-integer / non-positive values)
     if (process.env.AI_MAX_TOKENS) {
-      config.ai.maxTokens = parseInt(process.env.AI_MAX_TOKENS, 10);
+      const maxTokens = Number.parseInt(process.env.AI_MAX_TOKENS, 10);
+      if (Number.isInteger(maxTokens) && maxTokens > 0) {
+        config.ai.maxTokens = maxTokens;
+      }
     }
 
     if (process.env.AI_ENABLE_TOOL_FILTERING) {
@@ -244,6 +250,35 @@ export class ConfigLoader {
       if (mode === "off" || mode === "log-only" || mode === "active") {
         config.ai.toolFilteringMode = mode;
       }
+    }
+
+    if (process.env.AI_EXPLORE_ENABLED) {
+      config.ai.explore.enabled = process.env.AI_EXPLORE_ENABLED === "true";
+    }
+    if (process.env.AI_EXPLORE_PROVIDER) {
+      config.ai.explore.provider = process.env.AI_EXPLORE_PROVIDER;
+    }
+    if (process.env.AI_EXPLORE_MODEL) {
+      config.ai.explore.model = process.env.AI_EXPLORE_MODEL;
+    }
+    if (process.env.AI_EXPLORE_TEMPERATURE) {
+      const temperature = Number(process.env.AI_EXPLORE_TEMPERATURE);
+      if (Number.isFinite(temperature)) {
+        config.ai.explore.temperature = temperature;
+      }
+    }
+    if (process.env.AI_EXPLORE_MAX_TOKENS) {
+      const maxTokens = Number.parseInt(process.env.AI_EXPLORE_MAX_TOKENS, 10);
+      if (Number.isInteger(maxTokens) && maxTokens > 0) {
+        config.ai.explore.maxTokens = maxTokens;
+      }
+    }
+    if (process.env.AI_EXPLORE_TIMEOUT) {
+      config.ai.explore.timeout = process.env.AI_EXPLORE_TIMEOUT;
+    }
+    if (process.env.AI_EXPLORE_CACHE_RESULTS) {
+      config.ai.explore.cacheResults =
+        process.env.AI_EXPLORE_CACHE_RESULTS === "true";
     }
 
     return config;

@@ -36,6 +36,15 @@ export class DefaultConfig {
           maxTurnsPerSession: 300,
           enableSummarization: false,
         },
+        explore: {
+          enabled: true,
+          provider: "auto",
+          model: "gemini-2.5-flash",
+          temperature: 0.1,
+          maxTokens: 32000,
+          timeout: "5m",
+          cacheResults: true,
+        },
       },
 
       mcpServers: {

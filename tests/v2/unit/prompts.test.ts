@@ -17,6 +17,13 @@ describe("Review System Prompt", () => {
     expect(REVIEW_SYSTEM_PROMPT.length).toBeGreaterThan(100);
   });
 
+  it("should stay tight — guard against drift back to the long prompt", () => {
+    // The slimmed prompt is ~75 lines of content. Cap at 110 so trivial
+    // additions don't silently regrow it back toward the old ~295-line version.
+    const lineCount = REVIEW_SYSTEM_PROMPT.split("\n").length;
+    expect(lineCount).toBeLessThanOrEqual(110);
+  });
+
   it("should contain core XML structure", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("<yama-review-system>");
     expect(REVIEW_SYSTEM_PROMPT).toContain("</yama-review-system>");
@@ -28,19 +35,38 @@ describe("Review System Prompt", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("Autonomous Code Review Agent");
   });
 
-  it("should contain core rules", () => {
+  it("should contain core rules including the new standards-first and file-by-file rules", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("<core-rules>");
+    expect(REVIEW_SYSTEM_PROMPT).toContain('id="standards-first"');
     expect(REVIEW_SYSTEM_PROMPT).toContain('id="verify-before-comment"');
+    expect(REVIEW_SYSTEM_PROMPT).toContain('id="file-by-file"');
     expect(REVIEW_SYSTEM_PROMPT).toContain('id="accurate-commenting"');
   });
 
-  it("should contain tool usage instructions", () => {
+  it("should contain tool usage instructions for the tools the agent actually uses", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("<tool-usage>");
+    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="get_pull_request">');
+    expect(REVIEW_SYSTEM_PROMPT).toContain(
+      '<tool name="get_pull_request_diff">',
+    );
     expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="search_code">');
+    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="explore_context">');
     expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="add_comment">');
     expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="set_pr_approval">');
     expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="set_review_status">');
-    expect(REVIEW_SYSTEM_PROMPT).toContain("code_snippet");
+  });
+
+  it("should describe explore_context with use-when / do-not-use-when guidance", () => {
+    // The whole point of the rewrite — the model needs a clear decision rule.
+    const exploreBlockMatch = REVIEW_SYSTEM_PROMPT.match(
+      /<tool name="explore_context">[\s\S]*?<\/tool>/,
+    );
+    expect(exploreBlockMatch).not.toBeNull();
+    const block = exploreBlockMatch![0];
+    expect(block).toContain("<use-when>");
+    expect(block).toContain("<do-not-use-when>");
+    expect(block).toMatch(/example positive/);
+    expect(block).toMatch(/example negative/);
   });
 
   it("should contain severity levels", () => {
@@ -53,7 +79,7 @@ describe("Review System Prompt", () => {
 
   it("should contain anti-patterns", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("<anti-patterns>");
-    expect(REVIEW_SYSTEM_PROMPT).toContain("use lazy loading");
+    expect(REVIEW_SYSTEM_PROMPT).toContain("lazy loading");
     expect(REVIEW_SYSTEM_PROMPT).toContain("code_snippet");
   });
 
@@ -128,6 +154,15 @@ describe("PromptBuilder", () => {
         enableEvaluation: false,
         timeout: "10m",
         retryAttempts: 3,
+        explore: {
+          enabled: true,
+          provider: "google-ai",
+          model: "gemini-2.5-flash",
+          temperature: 0.1,
+          maxTokens: 32000,
+          timeout: "5m",
+          cacheResults: true,
+        },
         conversationMemory: {
           enabled: true,
           store: "memory",
@@ -293,6 +328,113 @@ describe("PromptBuilder", () => {
 
       expect(result).toContain("<mode>live</mode>");
       expect(result).toContain("LIVE MODE");
+    });
+
+    it("should follow the standards-first / file-by-file workflow", async () => {
+      const result = await builder.buildReviewInstructions(
+        mockRequest,
+        mockConfig,
+      );
+
+      expect(result).toContain("STEP 1 — Read project standards");
+      expect(result).toContain("STEP 2 — Read the PR shell");
+      expect(result).toContain("STEP 3 — Walk files one at a time");
+      expect(result).toContain("STEP 4 — Decision");
+      expect(result).toContain("STEP 5 — Summary comment");
+      // Ordering invariant — STEP 1 must come before STEP 3 in the rendered prompt.
+      expect(result.indexOf("STEP 1")).toBeLessThan(result.indexOf("STEP 3"));
+    });
+
+    it("should reference explore_context when explore is enabled", async () => {
+      mockConfig.ai.explore.enabled = true;
+      const result = await builder.buildReviewInstructions(
+        mockRequest,
+        mockConfig,
+      );
+
+      expect(result).toContain("explore_context");
+      // Markers themselves must always be stripped, regardless of mode.
+      expect(result).not.toContain("EXPLORE_BEGIN");
+      expect(result).not.toContain("EXPLORE_END");
+      expect(result).not.toContain("EXPLORE_DISABLED_BEGIN");
+      expect(result).not.toContain("EXPLORE_DISABLED_END");
+    });
+
+    it("should strip explore_context references when explore is disabled", async () => {
+      mockConfig.ai.explore.enabled = false;
+      const result = await builder.buildReviewInstructions(
+        mockRequest,
+        mockConfig,
+      );
+
+      // The dedicated tool block and the workflow callouts should be gone.
+      expect(result).not.toContain('<tool name="explore_context">');
+      // Markers themselves must always be stripped.
+      expect(result).not.toContain("EXPLORE_BEGIN");
+      expect(result).not.toContain("EXPLORE_END");
+      expect(result).not.toContain("EXPLORE_DISABLED_BEGIN");
+      expect(result).not.toContain("EXPLORE_DISABLED_END");
+      // The fallback wording for the disabled case should be present in the workflow.
+      expect(result).toContain("use search_code or get_file_content to verify");
+    });
+  });
+
+  describe("buildLocalReviewInstructions", () => {
+    const localRequest = {
+      mode: "local" as const,
+      repoPath: "/tmp/repo",
+      dryRun: false,
+      verbose: false,
+    };
+    const diffContext = {
+      repoPath: "/tmp/repo",
+      diffSource: "uncommitted" as const,
+      diff: "diff --git a/foo.ts b/foo.ts\n+const x = 1;\n",
+      changedFiles: ["foo.ts"],
+      additions: 1,
+      deletions: 0,
+      truncated: false,
+    };
+
+    it("should render the standards-first / file-by-file local workflow", async () => {
+      const result = await builder.buildLocalReviewInstructions(
+        localRequest,
+        mockConfig,
+        diffContext,
+      );
+
+      expect(result).toContain("STANDARDS FIRST");
+      expect(result).toContain("WALK FILES ONE AT A TIME");
+      expect(result).toContain("VERIFY BEFORE REPORTING");
+      expect(result).toContain("BUDGET");
+      expect(result).toContain("OUTPUT");
+    });
+
+    it("should reference explore_context in local mode when enabled", async () => {
+      mockConfig.ai.explore.enabled = true;
+      const result = await builder.buildLocalReviewInstructions(
+        localRequest,
+        mockConfig,
+        diffContext,
+      );
+
+      expect(result).toContain("explore_context");
+      expect(result).not.toContain("EXPLORE_BEGIN");
+      expect(result).not.toContain("EXPLORE_DISABLED_BEGIN");
+    });
+
+    it("should strip explore_context from local mode when disabled", async () => {
+      mockConfig.ai.explore.enabled = false;
+      const result = await builder.buildLocalReviewInstructions(
+        localRequest,
+        mockConfig,
+        diffContext,
+      );
+
+      expect(result).not.toContain("explore_context");
+      expect(result).not.toContain("EXPLORE_BEGIN");
+      expect(result).not.toContain("EXPLORE_DISABLED_BEGIN");
+      expect(result).toContain("Use bounded local-git/file tools");
     });
   });
 

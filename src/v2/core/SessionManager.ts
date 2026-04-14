@@ -10,6 +10,7 @@ import {
   ReviewResult,
   ToolCallRecord,
   SessionMetadata,
+  ExplorationResult,
 } from "../types/v2.types.js";
 
 export class SessionManager {
@@ -36,6 +37,7 @@ export class SessionManager {
         totalCost: 0,
         cacheHitRatio: 0,
       },
+      explorations: [],
     };
 
     this.sessions.set(sessionId, session);
@@ -93,6 +95,38 @@ export class SessionManager {
       ...session.metadata,
       ...updates,
     };
+  }
+
+  recordExploration(
+    sessionId: string,
+    cacheKey: string,
+    task: string,
+    focus: string[],
+    result: ExplorationResult,
+    cached = false,
+  ): void {
+    const session = this.getSession(sessionId);
+    session.explorations = session.explorations || [];
+    session.explorations.push({
+      task,
+      cacheKey,
+      focus,
+      result,
+      createdAt: new Date(),
+      cached,
+    });
+  }
+
+  findExploration(
+    sessionId: string,
+    cacheKey: string,
+  ): ExplorationResult | null {
+    const session = this.getSession(sessionId);
+    const match = (session.explorations || [])
+      .slice()
+      .reverse()
+      .find((exploration) => exploration.cacheKey === cacheKey);
+    return match?.result || null;
   }
 
   /**
@@ -213,6 +247,15 @@ export class SessionManager {
         error: tc.error,
         // Don't include full result in export (can be very large)
         resultSummary: this.summarizeToolResult(tc.result),
+      })),
+      explorations: (session.explorations || []).map((exploration) => ({
+        task: exploration.task,
+        cacheKey: exploration.cacheKey,
+        focus: exploration.focus,
+        createdAt: exploration.createdAt.toISOString(),
+        cached: exploration.cached,
+        // Don't include full result in export (can be very large / may contain sensitive data)
+        resultSummary: this.summarizeToolResult(exploration.result),
       })),
     };
   }

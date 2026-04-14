@@ -11,6 +11,7 @@ import { SessionManager } from "./SessionManager.js";
 import { MemoryManager } from "../memory/MemoryManager.js";
 import { LocalDiffSource } from "./LocalDiffSource.js";
 import type { LocalDiffContext } from "./LocalDiffSource.js";
+import { ContextExplorerService } from "../exploration/ContextExplorerService.js";
 import {
   LocalReviewFinding,
   LocalReviewRequest,
@@ -32,6 +33,7 @@ import {
 
 export class YamaOrchestrator {
   private neurolink!: NeuroLink;
+  private explorer: ContextExplorerService | null = null;
   private mcpManager: MCPServerManager;
   private configLoader: ConfigLoader;
   private promptBuilder: PromptBuilder;
@@ -42,7 +44,10 @@ export class YamaOrchestrator {
   private initialized = false;
   private mcpInitialized = false;
   private localGitMcpInitialized = false;
+  private exploreToolRegistered = false;
+  private currentToolContext: Record<string, unknown> | null = null;
   private initOptions: YamaInitOptions;
+  private bootstrapStandardsCache: Map<string, string> = new Map();
 
   constructor(options: YamaInitOptions = {}) {
     this.initOptions = options;
@@ -86,6 +91,12 @@ export class YamaOrchestrator {
         // Step 3: Initialize NeuroLink with memory config injected
         console.log("🧠 Initializing NeuroLink AI engine...");
         this.neurolink = this.initializeNeurolink();
+        this.explorer = new ContextExplorerService(
+          this.config,
+          this.sessionManager,
+          this.memoryManager,
+        );
+        this.registerExploreTool();
         console.log("✅ NeuroLink initialized\n");
 
         this.initialized = true;
@@ -97,9 +108,15 @@ export class YamaOrchestrator {
           this.neurolink,
           this.config.mcpServers,
         );
+        if (this.explorer && this.config.ai.explore.enabled) {
+          await this.explorer.initialize("pr");
+        }
         this.mcpInitialized = true;
       } else if (mode === "local" && !this.localGitMcpInitialized) {
         await this.mcpManager.setupLocalGitMCPServer(this.neurolink);
+        if (this.explorer && this.config.ai.explore.enabled) {
+          await this.explorer.initialize("local");
+        }
         this.localGitMcpInitialized = true;
       }
 
@@ -126,10 +143,16 @@ export class YamaOrchestrator {
     this.logReviewStart(request, sessionId);
 
     try {
+      const bootstrapStandards = await this.getBootstrappedStandards(
+        request,
+        sessionId,
+      );
+
       // Build comprehensive AI instructions
       const instructions = await this.promptBuilder.buildReviewInstructions(
         request,
         this.config,
+        bootstrapStandards,
       );
 
       if (this.config.display.verboseToolCalls) {
@@ -143,7 +166,7 @@ export class YamaOrchestrator {
       const toolContext = this.createToolContext(sessionId, request);
 
       // Set tool context in NeuroLink (using type assertion as setToolContext is documented but may not be in type definitions)
-      (this.neurolink as any).setToolContext(toolContext);
+      this.setToolContext(toolContext);
 
       // Update session metadata
       this.sessionManager.updateMetadata(sessionId, {
@@ -176,7 +199,7 @@ export class YamaOrchestrator {
         memory: { read: true, write: false },
         enableAnalytics: this.config.ai.enableAnalytics,
         enableEvaluation: this.config.ai.enableEvaluation,
-      });
+      } as unknown as Parameters<NeuroLink["generate"]>[0]);
       this.recordToolCallsFromResponse(sessionId, aiResponse);
 
       // Extract and parse results
@@ -236,19 +259,19 @@ export class YamaOrchestrator {
           diffContext,
         );
 
+      const toolContext = this.createLocalToolContext(
+        sessionId,
+        pseudoRequest,
+        diffContext,
+      );
+      this.setToolContext(toolContext);
+
       const aiResponse = await this.neurolink.generate({
         input: { text: instructions },
         provider: this.config.ai.provider,
         model: this.config.ai.model,
         temperature: this.config.ai.temperature,
         maxTokens: Math.min(this.config.ai.maxTokens, 16_000),
-        maxSteps: 100,
-        prepareStep: async ({ stepNumber }) => {
-          if (stepNumber >= 5) {
-            return { toolChoice: "none" };
-          }
-          return undefined;
-        },
         timeout: this.config.ai.timeout,
         enableAnalytics: this.config.ai.enableAnalytics,
         enableEvaluation: this.config.ai.enableEvaluation,
@@ -259,7 +282,7 @@ export class YamaOrchestrator {
         ...this.getLocalToolFilteringOptions(),
         context: {
           sessionId,
-          userId: `local-${sessionId}`,
+          userId: this.getUserId(pseudoRequest),
           operation: "local-review",
           metadata: {
             repoPath: diffContext.repoPath,
@@ -268,7 +291,7 @@ export class YamaOrchestrator {
             headRef: diffContext.headRef,
           },
         },
-      });
+      } as unknown as Parameters<NeuroLink["generate"]>[0]);
       this.recordToolCallsFromResponse(sessionId, aiResponse);
 
       const result = this.parseLocalReviewResult(
@@ -302,15 +325,21 @@ export class YamaOrchestrator {
     const sessionId = this.sessionManager.createSession(request);
 
     try {
+      const bootstrapStandards = await this.getBootstrappedStandards(
+        request,
+        sessionId,
+      );
+
       // Build instructions
       const instructions = await this.promptBuilder.buildReviewInstructions(
         request,
         this.config,
+        bootstrapStandards,
       );
 
       // Create tool context
       const toolContext = this.createToolContext(sessionId, request);
-      (this.neurolink as any).setToolContext(toolContext);
+      this.setToolContext(toolContext);
 
       // Stream AI execution
       yield {
@@ -338,7 +367,7 @@ export class YamaOrchestrator {
         },
         memory: { enabled: false },
         enableAnalytics: true,
-      });
+      } as unknown as Parameters<NeuroLink["generate"]>[0]);
 
       yield {
         type: "progress",
@@ -373,9 +402,18 @@ export class YamaOrchestrator {
       // PHASE 1: Code Review
       // ========================================================================
 
+      const bootstrapStandards = await this.getBootstrappedStandards(
+        request,
+        sessionId,
+      );
+
       // Build review instructions
       const reviewInstructions =
-        await this.promptBuilder.buildReviewInstructions(request, this.config);
+        await this.promptBuilder.buildReviewInstructions(
+          request,
+          this.config,
+          bootstrapStandards,
+        );
 
       if (this.config.display.verboseToolCalls) {
         console.log("\n📝 Review instructions built:");
@@ -386,7 +424,7 @@ export class YamaOrchestrator {
 
       // Create tool context
       const toolContext = this.createToolContext(sessionId, request);
-      (this.neurolink as any).setToolContext(toolContext);
+      this.setToolContext(toolContext);
 
       // Update session metadata
       this.sessionManager.updateMetadata(sessionId, {
@@ -416,7 +454,7 @@ export class YamaOrchestrator {
         memory: { read: true, write: false },
         enableAnalytics: this.config.ai.enableAnalytics,
         enableEvaluation: this.config.ai.enableEvaluation,
-      });
+      } as unknown as Parameters<NeuroLink["generate"]>[0]);
       this.recordToolCallsFromResponse(sessionId, reviewResponse);
 
       // Parse review results
@@ -463,7 +501,7 @@ export class YamaOrchestrator {
           memory: { enabled: false },
           enableAnalytics: this.config.ai.enableAnalytics,
           enableEvaluation: this.config.ai.enableEvaluation,
-        });
+        } as unknown as Parameters<NeuroLink["generate"]>[0]);
         this.recordToolCallsFromResponse(sessionId, enhanceResponse);
 
         console.log("✅ Phase 2 complete: Description enhanced\n");
@@ -508,7 +546,7 @@ export class YamaOrchestrator {
         );
 
       const toolContext = this.createToolContext(sessionId, request);
-      (this.neurolink as any).setToolContext(toolContext);
+      this.setToolContext(toolContext);
 
       const aiResponse = await this.neurolink.generate({
         input: { text: instructions },
@@ -523,7 +561,7 @@ export class YamaOrchestrator {
         },
         memory: { enabled: false },
         enableAnalytics: true,
-      });
+      } as unknown as Parameters<NeuroLink["generate"]>[0]);
       this.recordToolCallsFromResponse(sessionId, aiResponse);
 
       console.log("✅ Description enhanced successfully\n");
@@ -567,6 +605,7 @@ export class YamaOrchestrator {
   private createToolContext(sessionId: string, request: ReviewRequest): any {
     return {
       sessionId,
+      mode: "pr",
       workspace: request.workspace,
       repository: request.repository,
       pullRequestId: request.pullRequestId,
@@ -577,6 +616,33 @@ export class YamaOrchestrator {
         startTime: new Date().toISOString(),
       },
     };
+  }
+
+  private createLocalToolContext(
+    sessionId: string,
+    request: ReviewRequest,
+    diffContext: LocalDiffContext,
+  ): any {
+    return {
+      sessionId,
+      mode: "local",
+      workspace: request.workspace,
+      repository: request.repository,
+      dryRun: request.dryRun || false,
+      metadata: {
+        yamaVersion: "2.2.1",
+        startTime: new Date().toISOString(),
+        repoPath: diffContext.repoPath,
+        diffSource: diffContext.diffSource,
+        baseRef: diffContext.baseRef,
+        headRef: diffContext.headRef,
+      },
+    };
+  }
+
+  private setToolContext(context: Record<string, unknown>): void {
+    this.currentToolContext = context;
+    (this.neurolink as any).setToolContext(context);
   }
 
   /**
@@ -1238,6 +1304,182 @@ export class YamaOrchestrator {
         (error as Error).message,
       );
       throw new Error(`NeuroLink initialization failed: ${error}`);
+    }
+  }
+
+  private registerExploreTool(): void {
+    if (this.exploreToolRegistered || !this.config.ai.explore.enabled) {
+      return;
+    }
+
+    this.neurolink.registerTool("explore_context", {
+      name: "explore_context",
+      description:
+        "Delegate non-trivial research to an isolated Explore worker. Use it for function definitions, project-wide search, logic tracing, commit history, rules/context lookup, or any analysis that would otherwise require broad manual scanning.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task: {
+            type: "string",
+            description:
+              "The exact research task for Explore to investigate and answer.",
+          },
+          focus: {
+            type: "array",
+            description:
+              "Optional list of files, symbols, commits, tickets, or context areas Explore should prioritize.",
+            items: {
+              type: "string",
+            },
+          },
+        },
+        required: ["task"],
+      },
+      execute: async (params: unknown, context?: unknown) => {
+        if (!this.explorer) {
+          throw new Error("Explore service is not initialized");
+        }
+
+        const rawParams = (params || {}) as Record<string, unknown>;
+        const mergedContext = {
+          ...(this.currentToolContext || {}),
+          ...((context && typeof context === "object"
+            ? (context as Record<string, unknown>)
+            : {}) as Record<string, unknown>),
+        };
+
+        const runtimeMode: "pr" | "local" =
+          mergedContext.mode === "local" ? "local" : "pr";
+
+        const runtimeContext = {
+          sessionId: String(
+            mergedContext.sessionId || this.currentToolContext?.sessionId || "",
+          ),
+          mode: runtimeMode,
+          workspace: String(mergedContext.workspace || "local"),
+          repository: String(mergedContext.repository || "repository"),
+          pullRequestId:
+            typeof mergedContext.pullRequestId === "number"
+              ? mergedContext.pullRequestId
+              : undefined,
+          branch:
+            typeof mergedContext.branch === "string"
+              ? mergedContext.branch
+              : undefined,
+          dryRun:
+            typeof mergedContext.dryRun === "boolean"
+              ? mergedContext.dryRun
+              : false,
+          metadata:
+            mergedContext.metadata &&
+            typeof mergedContext.metadata === "object" &&
+            !Array.isArray(mergedContext.metadata)
+              ? (mergedContext.metadata as Record<string, unknown>)
+              : {},
+        };
+
+        const focus = Array.isArray(rawParams.focus)
+          ? rawParams.focus.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : undefined;
+
+        const { result, cached } = await this.explorer.explore(
+          {
+            task: String(rawParams.task || "").trim(),
+            focus,
+          },
+          runtimeContext,
+        );
+
+        return {
+          success: true,
+          data: {
+            ...result,
+            cached,
+          },
+        };
+      },
+    });
+
+    this.exploreToolRegistered = true;
+  }
+
+  /**
+   * Bootstrap repo-level standards by delegating to explore_context.
+   * Runs once per (workspace/repository) per process lifetime.
+   * Output is injected into the review prompt as <bootstrapped-standards>.
+   * Graceful: any failure returns empty and the review proceeds without it.
+   */
+  private async getBootstrappedStandards(
+    request: ReviewRequest,
+    sessionId: string,
+  ): Promise<string> {
+    if (!this.config.ai.explore.enabled || !this.explorer) {
+      return "";
+    }
+
+    const cacheKey = `${request.workspace}/${request.repository}`.toLowerCase();
+    const cached = this.bootstrapStandardsCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const task = `Bootstrap repo review standards for ${request.workspace}/${request.repository}. Inspect the last 15 merged pull requests on this repository. For each, collect inline and summary comments left by HUMAN reviewers (ignore bot authors like "Yama", "yama-bot", "yama-review", "euler.bot"). Focus on comments that asked for code changes, flagged bugs, pushed back on an approach, or cited a convention. Distill the recurring patterns and anti-patterns the human reviewers care about — especially things that a static config rule set would miss (naming, error-handling idioms, module boundaries, test expectations, migration rules, review etiquette). Return a concise bullet list of 10-20 patterns. Each bullet: one sentence stating the pattern, optionally one sentence of rationale. Do NOT include PR numbers, author names, or raw quotes — just distilled patterns.`;
+
+    try {
+      console.log(
+        `   🧭 Bootstrapping repo standards from recent PRs (one-time per process)...`,
+      );
+      const { result } = await this.explorer.explore(
+        { task, focus: [request.repository] },
+        {
+          sessionId,
+          mode: "pr",
+          workspace: request.workspace,
+          repository: request.repository,
+          pullRequestId: request.pullRequestId,
+          branch: request.branch,
+          dryRun: request.dryRun || false,
+          metadata: { bootstrap: true },
+        },
+      );
+
+      const parts: string[] = [];
+      if (result.summary && result.summary.trim().length > 0) {
+        parts.push(result.summary.trim());
+      }
+      if (result.findings && result.findings.length > 0) {
+        const bullets = result.findings.map((f) => `- ${f.claim}`).join("\n");
+        parts.push(bullets);
+      }
+      const combined = parts.join("\n\n").trim();
+
+      if (combined.length > 0) {
+        console.log(
+          `   ✅ Bootstrap standards ready (${combined.length} chars)`,
+        );
+        if (this.config.display.verboseToolCalls) {
+          console.log("   ───────── bootstrapped-standards ─────────");
+          for (const line of combined.split("\n")) {
+            console.log(`   ${line}`);
+          }
+          console.log("   ──────────────────────────────────────────");
+        }
+      } else {
+        console.log(
+          `   ⚠️  Bootstrap returned no standards — proceeding without them`,
+        );
+      }
+
+      this.bootstrapStandardsCache.set(cacheKey, combined);
+      return combined;
+    } catch (error) {
+      console.warn(
+        `   ⚠️  Bootstrap standards failed, proceeding without: ${(error as Error).message}`,
+      );
+      this.bootstrapStandardsCache.set(cacheKey, "");
+      return "";
     }
   }
 

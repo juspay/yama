@@ -42,8 +42,17 @@ export interface DisplayConfig {
 // AI Configuration
 // ============================================================================
 
+/**
+ * AI provider identifier. Yama does not maintain its own provider allow-list —
+ * the value is forwarded verbatim to NeuroLink, which owns the real list
+ * (vertex, google-ai, anthropic, openai, bedrock, azure, litellm, ollama,
+ * huggingface, mistral, sagemaker, auto, ...). Typed as `string` so new
+ * NeuroLink providers work without a type bump here.
+ */
+export type AIProvider = string;
+
 export interface AIConfig {
-  provider: "auto" | "google-ai" | "anthropic" | "openai" | "bedrock" | "azure";
+  provider: AIProvider;
   model: string;
   temperature: number;
   maxTokens: number;
@@ -54,6 +63,17 @@ export interface AIConfig {
   enableToolFiltering?: boolean;
   toolFilteringMode?: "off" | "log-only" | "active";
   conversationMemory: ConversationMemoryConfig;
+  explore: ExploreAIConfig;
+}
+
+export interface ExploreAIConfig {
+  enabled: boolean;
+  provider?: AIProvider;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeout?: string;
+  cacheResults?: boolean;
 }
 
 export interface ConversationMemoryConfig {

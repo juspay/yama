@@ -256,7 +256,7 @@ export class LearningOrchestrator {
               operation: "memory-store-learnings",
             },
             memory: { read: false, write: true },
-          });
+          } as unknown as Parameters<NeuroLink["generate"]>[0]);
           console.log(`   🧠 Learning memory stored for ${ownerId}`);
 
           // Auto-commit and push memory files to repo
