@@ -1,3 +1,10 @@
+# [2.4.0](https://github.com/juspay/yama/compare/v2.3.0...v2.4.0) (2026-04-15)
+
+
+### Features
+
+* **v2:** bootstrap repo standards from recent PRs before review ([8c5b1cd](https://github.com/juspay/yama/commit/8c5b1cdd38b684397e7445e04b4db4bc45b5f2a8))
+
 # [2.3.0](https://github.com/juspay/yama/compare/v2.2.2...v2.3.0) (2026-04-01)
 
 
