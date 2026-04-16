@@ -6,6 +6,7 @@ settings:
 
 overrides:
   "@semantic-release/npm": ^13.1.2
+  undici: ^5.28.5
 
 importers:
   .:
@@ -10253,13 +10254,6 @@ packages:
       }
     engines: { node: ">=14.0" }
 
-  undici@7.24.6:
-    resolution:
-      {
-        integrity: sha512-Xi4agocCbRzt0yYMZGMA6ApD7gvtUFaxm4ZmeacWI4cZxaF6C+8I8QfofC20NAePiB/IcvZmzkJ7XPa471AEtA==,
-      }
-    engines: { node: ">=20.18.1" }
-
   unicode-emoji-modifier-base@1.0.0:
     resolution:
       {
@@ -12588,7 +12582,7 @@ snapshots:
       pptxgenjs: 4.0.1
       redis: 5.11.0
       tar-stream: 3.1.8
-      undici: 7.24.6
+      undici: 5.28.5
       uuid: 13.0.0
       ws: 8.20.0
       xml2js: 0.6.2
@@ -17911,8 +17905,6 @@ snapshots:
   undici@5.28.5:
     dependencies:
       "@fastify/busboy": 2.1.1
-
-  undici@7.24.6: {}
 
   unicode-emoji-modifier-base@1.0.0: {}
 
