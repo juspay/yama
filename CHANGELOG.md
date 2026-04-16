@@ -1,3 +1,10 @@
+## [2.4.1](https://github.com/juspay/yama/compare/v2.4.0...v2.4.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **deps:** pin undici to 5.x for Node 20 compatibility ([c8f92de](https://github.com/juspay/yama/commit/c8f92de3009f20f451d1848a568912d4c752a024))
+
 # [2.4.0](https://github.com/juspay/yama/compare/v2.3.0...v2.4.0) (2026-04-15)
 
 
