@@ -1,3 +1,10 @@
+## [2.4.2](https://github.com/juspay/yama/compare/v2.4.1...v2.4.2) (2026-04-24)
+
+
+### Bug Fixes
+
+* **docs:** list get_file_blame in Bitbucket MCP tools ([c5f2ab6](https://github.com/juspay/yama/commit/c5f2ab6315fa4ac76b9dc6ec34631409e1647ffa))
+
 ## [2.4.1](https://github.com/juspay/yama/compare/v2.4.0...v2.4.1) (2026-04-16)
 
 
