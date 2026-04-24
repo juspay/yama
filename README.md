@@ -350,7 +350,7 @@ Yama uses MCP (Model Context Protocol) servers for tool access:
 ### Bitbucket MCP
 
 - **Package**: `@nexus2520/bitbucket-mcp-server`
-- **Tools**: get_pull_request, add_comment, search_code, etc.
+- **Tools**: get_pull_request, add_comment, search_code, get_file_blame, etc.
 - **Status**: Production ready
 
 ### Jira MCP
