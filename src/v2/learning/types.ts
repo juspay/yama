@@ -3,6 +3,8 @@
  * Type definitions for the knowledge base and learning extraction system
  */
 
+import type { VCSProviderName } from "../providers/ProviderToolset.js";
+
 // ============================================================================
 // Learning Categories
 // ============================================================================
@@ -104,6 +106,7 @@ export interface LearnRequest {
   workspace: string;
   repository: string;
   pullRequestId: number;
+  provider?: VCSProviderName; // "github" | "bitbucket" (defaults to "bitbucket" for backward compatibility)
   dryRun?: boolean;
   /** @deprecated Use commitMode instead */
   commit?: boolean;

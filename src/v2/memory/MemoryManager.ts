@@ -139,10 +139,34 @@ export class MemoryManager {
   }
 
   /**
-   * Build a deterministic owner ID from workspace and repository.
+   * Build a deterministic owner ID from provider, workspace, and repository.
+   * Isolates memory per platform to prevent collisions between same repo names
+   * on different platforms (e.g., "repo" on GitHub vs Bitbucket).
+   *
+   * Format:
+   *   - GitHub: github-{owner}-{repo}
+   *   - Bitbucket: bitbucket-{workspace}-{repo}
+   *
    * This value is passed as `context.userId` in generate() calls.
    */
-  static buildOwnerId(workspace: string, repository: string): string {
+  static buildOwnerId(
+    workspace: string,
+    repository: string,
+    provider: string = "bitbucket",
+  ): string {
+    const providerPrefix = provider.toLowerCase();
+    return `${providerPrefix}-${workspace}-${repository}`.toLowerCase();
+  }
+
+  /**
+   * Build the legacy (unprefixed) owner ID used before provider isolation.
+   *
+   * Format: {workspace}-{repository}
+   *
+   * Used as a read-time fallback so memory written before the provider-prefix
+   * upgrade keeps working. New writes always use the provider-prefixed key.
+   */
+  static buildLegacyOwnerId(workspace: string, repository: string): string {
     return `${workspace}-${repository}`.toLowerCase();
   }
 
@@ -165,13 +189,25 @@ export class MemoryManager {
   }
 
   /**
-   * Read persisted condensed memory for a workspace/repository pair.
+   * Read persisted condensed memory for a workspace/repository pair on a specific provider.
    */
   async readRepositoryMemory(
     workspace: string,
     repository: string,
+    provider: string = "bitbucket",
   ): Promise<string | null> {
-    return this.readMemory(MemoryManager.buildOwnerId(workspace, repository));
+    const prefixed = await this.readMemory(
+      MemoryManager.buildOwnerId(workspace, repository, provider),
+    );
+    if (prefixed !== null) {
+      return prefixed;
+    }
+
+    // Fall back to the legacy unprefixed key so memory written before the
+    // provider-prefix upgrade is not silently dropped after upgrading.
+    return this.readMemory(
+      MemoryManager.buildLegacyOwnerId(workspace, repository),
+    );
   }
 
   /**

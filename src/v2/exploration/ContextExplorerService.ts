@@ -16,6 +16,7 @@ import {
   buildObservabilityConfigFromEnv,
   validateObservabilityConfig,
 } from "../utils/ObservabilityConfig.js";
+import { getProviderToolset } from "../providers/ProviderToolset.js";
 import { ExplorerPromptBuilder } from "./ExplorerPromptBuilder.js";
 import { RulesContextLoader } from "./RulesContextLoader.js";
 import {
@@ -116,8 +117,7 @@ export class ContextExplorerService {
       ...this.getToolFilteringOptions(runtimeContext.mode),
       context: {
         sessionId: runtimeContext.sessionId,
-        userId:
-          `${runtimeContext.workspace}-${runtimeContext.repository}`.toLowerCase(),
+        userId: this.getUserId(runtimeContext),
         operation: "explore-context-research",
         metadata: runtimeContext.metadata || {},
       },
@@ -143,8 +143,7 @@ export class ContextExplorerService {
       disableTools: true,
       context: {
         sessionId: runtimeContext.sessionId,
-        userId:
-          `${runtimeContext.workspace}-${runtimeContext.repository}`.toLowerCase(),
+        userId: this.getUserId(runtimeContext),
         operation: "explore-context-extraction",
         metadata: runtimeContext.metadata || {},
       },
@@ -193,15 +192,59 @@ export class ContextExplorerService {
     input: ExploreContextInput,
     runtimeContext: ExploreRuntimeContext,
   ): string {
+    // Validate required string parameters
+    const task =
+      typeof input.task === "string" ? input.task.trim().toLowerCase() : "";
+    const workspace =
+      typeof runtimeContext.workspace === "string"
+        ? runtimeContext.workspace.trim()
+        : "";
+    const repository =
+      typeof runtimeContext.repository === "string"
+        ? runtimeContext.repository.trim()
+        : "";
+
+    if (!task) {
+      throw new Error("Invalid cache key: task must be a non-empty string");
+    }
+    if (!workspace || !repository) {
+      throw new Error(
+        "Invalid cache key: workspace and repository must be non-empty strings",
+      );
+    }
+
     return JSON.stringify({
       mode: runtimeContext.mode,
-      workspace: runtimeContext.workspace,
-      repository: runtimeContext.repository,
+      provider:
+        typeof runtimeContext.provider === "string"
+          ? runtimeContext.provider.trim().toLowerCase()
+          : "bitbucket",
+      workspace,
+      repository,
       pullRequestId: runtimeContext.pullRequestId || null,
-      branch: runtimeContext.branch || null,
-      task: input.task.toLowerCase(),
-      focus: (input.focus || []).map((item) => item.toLowerCase()),
+      branch:
+        typeof runtimeContext.branch === "string"
+          ? runtimeContext.branch.trim()
+          : null,
+      task,
+      focus: Array.isArray(input.focus)
+        ? input.focus
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => item.trim().toLowerCase())
+        : [],
     });
+  }
+
+  private getUserId(runtimeContext: ExploreRuntimeContext): string {
+    const workspace =
+      typeof runtimeContext.workspace === "string"
+        ? runtimeContext.workspace.trim()
+        : "unknown";
+    const repository =
+      typeof runtimeContext.repository === "string"
+        ? runtimeContext.repository.trim()
+        : "unknown";
+    return `${workspace}-${repository}`.toLowerCase();
   }
 
   private getToolFilteringOptions(mode: "pr" | "local"): {
@@ -224,13 +267,26 @@ export class ContextExplorerService {
     }
   }
 
+  /**
+   * Provider-agnostic mutation block list for the read-only explore subagent.
+   * Derived once from each provider toolset's mutationToolNames (Bitbucket +
+   * GitHub) so the source of truth stays in ProviderToolset, not re-hardcoded
+   * here. Names are lower-cased for case-insensitive matching against the
+   * normalized tool name.
+   */
+  private static readonly MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set(
+    (["bitbucket", "github"] as const).flatMap((provider) =>
+      getProviderToolset(provider).mutationToolNames.map((name) =>
+        name.toLowerCase(),
+      ),
+    ),
+  );
+
   private shouldExcludeTool(mode: "pr" | "local", toolName: string): boolean {
     const normalized = this.normalizeToolName(toolName);
 
     if (
-      /^(add_comment|set_pr_approval|set_review_status|approve_pull_request|unapprove_pull_request|request_changes|remove_requested_changes|update_pull_request|merge_pull_request|delete_branch)$/i.test(
-        normalized,
-      )
+      ContextExplorerService.MUTATION_TOOL_NAMES.has(normalized.toLowerCase())
     ) {
       return true;
     }
@@ -589,6 +645,7 @@ Rules:
     return this.memoryManager.readRepositoryMemory(
       runtimeContext.workspace,
       runtimeContext.repository,
+      runtimeContext.provider || "bitbucket",
     );
   }
 

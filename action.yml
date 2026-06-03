@@ -1,0 +1,152 @@
+name: "Yama PR Review"
+description: "AI-powered PR review for GitHub with MCP tools"
+author: "Juspay Technologies"
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  github-token:
+    description: "GitHub token used by the GitHub MCP server for API access"
+    required: false
+    default: ${{ github.token }}
+  config-path:
+    description: "Path to the Yama config file"
+    required: false
+  dry-run:
+    description: "Run the review without posting comments or submitting the review"
+    required: false
+    default: "false"
+  ai-provider:
+    description: "AI provider to use (e.g. anthropic, openai, google-ai)"
+    required: false
+  ai-model:
+    description: "Model name for the selected AI provider"
+    required: false
+  focus-areas:
+    description: "Comma-separated focus areas for the review (e.g. security,performance)"
+    required: false
+  custom-prompt:
+    description: "Additional custom prompt instructions for the review"
+    required: false
+  verbose:
+    description: "Enable verbose logging"
+    required: false
+    default: "false"
+  skip-description-enhance:
+    description: "Run the review only and skip PR description enhancement"
+    required: false
+    default: "false"
+
+outputs:
+  decision:
+    description: "Review decision (APPROVED, CHANGES_REQUESTED, or BLOCKED)"
+    value: ${{ steps.review.outputs.decision }}
+  summary:
+    description: "Review summary text"
+    value: ${{ steps.review.outputs.summary }}
+  critical-issues:
+    description: "Number of critical issues found"
+    value: ${{ steps.review.outputs.critical-issues }}
+  major-issues:
+    description: "Number of major issues found"
+    value: ${{ steps.review.outputs.major-issues }}
+  minor-issues:
+    description: "Number of minor issues found"
+    value: ${{ steps.review.outputs.minor-issues }}
+  total-comments:
+    description: "Total number of inline comments posted by the review"
+    value: ${{ steps.review.outputs.total-comments }}
+
+# Composite action that runs the built Yama CLI (`node dist/cli/cli.js review`)
+# with the GitHub PR context wired through environment variables and CLI flags.
+#
+# Why composite instead of a bundled `node20` JavaScript action:
+# The orchestrator depends on @juspay/neurolink, which imports `interceptors`
+# from `undici`. The repository pins `undici` to the 5.x line for Node 20
+# runtime compatibility, but the `interceptors` named export only exists in
+# undici 6.x. As a result, `ncc` cannot statically bundle the action entry
+# (`Error: export 'interceptors' was not found in 'undici'`). Marking undici as
+# `--external` would build but ship a runner with no undici at all (node20
+# actions get no `npm install`), silently breaking the action at runtime.
+# Running the already-built CLI via a composite action avoids the bundler
+# entirely while preserving full review behavior and parity with the CLI path.
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+
+    - name: Install dependencies and build CLI
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        if [ ! -f "dist/cli/cli.js" ]; then
+          if [ -f "pnpm-lock.yaml" ]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+            pnpm run build
+          else
+            npm ci
+            npm run build
+          fi
+        fi
+
+    - name: Run Yama review
+      id: review
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        # GitHub MCP server authenticates via GITHUB_TOKEN.
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        # Surface AI provider/model selection to the orchestrator + NeuroLink.
+        AI_PROVIDER: ${{ inputs.ai-provider }}
+        AI_MODEL: ${{ inputs.ai-model }}
+        # GitHub PR context, consumed by ProviderDetector + the review request.
+        YAMA_ACTION_PATH: ${{ github.action_path }}
+        EVENT_PATH: ${{ github.event_path }}
+        REPO_OWNER: ${{ github.repository_owner }}
+        REPO_FULL: ${{ github.repository }}
+        CONFIG_PATH: ${{ inputs.config-path }}
+        FOCUS_AREAS: ${{ inputs.focus-areas }}
+        CUSTOM_PROMPT: ${{ inputs.custom-prompt }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        VERBOSE: ${{ inputs.verbose }}
+        SKIP_DESC_ENHANCE: ${{ inputs.skip-description-enhance }}
+      run: |
+        set -euo pipefail
+
+        # Resolve PR number from the event payload.
+        PR_NUMBER="$(node -e 'try{const e=require(process.env.EVENT_PATH);const n=(e.pull_request&&e.pull_request.number)||(e.issue&&e.issue.number);process.stdout.write(n?String(n):"")}catch(_){process.stdout.write("")}')"
+
+        if [ -z "$PR_NUMBER" ]; then
+          echo "::warning::Action triggered outside of a pull request context. Skipping review."
+          echo "decision=SKIPPED" >> "$GITHUB_OUTPUT"
+          echo "summary=Not a pull request event" >> "$GITHUB_OUTPUT"
+          echo "critical-issues=0" >> "$GITHUB_OUTPUT"
+          echo "major-issues=0" >> "$GITHUB_OUTPUT"
+          echo "minor-issues=0" >> "$GITHUB_OUTPUT"
+          echo "total-comments=0" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        OWNER="${REPO_FULL%%/*}"
+        REPO="${REPO_FULL#*/}"
+
+        ARGS=(review --owner "$OWNER" --repo "$REPO" --pr "$PR_NUMBER")
+
+        [ -n "${CONFIG_PATH}" ] && ARGS+=(--config "$CONFIG_PATH")
+        [ -n "${FOCUS_AREAS}" ] && ARGS+=(--focus "$FOCUS_AREAS")
+        [ -n "${CUSTOM_PROMPT}" ] && ARGS+=(--prompt "$CUSTOM_PROMPT")
+        [ "${SKIP_DESC_ENHANCE}" = "true" ] && ARGS+=(--review-only)
+        [ "${DRY_RUN}" = "true" ] && ARGS+=(--dry-run)
+        [ "${VERBOSE}" = "true" ] && ARGS+=(--verbose)
+
+        echo "::group::Yama review (PR #$PR_NUMBER in $OWNER/$REPO)"
+        node "$YAMA_ACTION_PATH/dist/cli/cli.js" "${ARGS[@]}"
+        STATUS=$?
+        echo "::endgroup::"
+        exit $STATUS

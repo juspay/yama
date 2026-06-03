@@ -13,7 +13,14 @@ import { YamaConfig } from "../types/config.types.js";
 import { LocalReviewRequest, ReviewRequest } from "../types/v2.types.js";
 import type { LocalDiffContext } from "../core/LocalDiffSource.js";
 import { LangfusePromptManager } from "./LangfusePromptManager.js";
+import { buildReviewSystemPrompt } from "./ReviewSystemPrompt.js";
 import { KnowledgeBaseManager } from "../learning/KnowledgeBaseManager.js";
+import {
+  getProviderToolset,
+  type ProviderToolset,
+  type ReviewPromptParams,
+  type VCSProviderName,
+} from "../providers/ProviderToolset.js";
 
 export class PromptBuilder {
   private langfuseManager: LangfusePromptManager;
@@ -23,16 +30,77 @@ export class PromptBuilder {
   }
 
   /**
+   * Build the provider-agnostic params object the ProviderToolset consumes.
+   * Carries both Bitbucket (workspace/repository/pullRequestId) and GitHub
+   * (owner/repo/prNumber) identifiers plus the shared branch; each toolset
+   * reads only the fields it needs.
+   */
+  private toToolsetParams(request: ReviewRequest): ReviewPromptParams {
+    const params: ReviewPromptParams = {};
+
+    const workspace = (request.workspace || "").trim();
+    const repository = (request.repository || "").trim();
+    const branch = (request.branch || "N/A").trim();
+
+    params.workspace = workspace;
+    params.repository = repository;
+    params.branch = branch;
+
+    // Coalesce the PR identifier across both field names so the toolset always
+    // receives the PR number regardless of which one the caller populated.
+    // GitHub's identifierXml reads params.prNumber while Bitbucket's reads
+    // params.pullRequestId; CLI callers set request.pullRequestId even for
+    // GitHub, so without this a GitHub run would lose the PR number and fall
+    // back to 'find-by-branch'. No-op for existing Bitbucket behavior.
+    const resolvedPrNumber =
+      request.prNumber ??
+      (typeof request.pullRequestId === "number"
+        ? request.pullRequestId
+        : undefined);
+    const resolvedPullRequestId = request.pullRequestId ?? request.prNumber;
+
+    if (resolvedPullRequestId !== undefined) {
+      params.pullRequestId = resolvedPullRequestId;
+    }
+    if (request.owner !== undefined) {
+      params.owner = request.owner.trim();
+    }
+    // Coalesce the repo name across the GitHub-specific 'repo' field and the
+    // shared 'repository' field, mirroring the prNumber<->pullRequestId
+    // coalescing above. A GitHub caller may populate the shared 'repository'
+    // field instead of 'repo'; without this the toolset would receive GitHub
+    // identifiers with no repo name. No-op for existing Bitbucket behavior,
+    // which never sets request.repo.
+    const resolvedRepo = request.repo ?? request.repository;
+    if (resolvedRepo !== undefined) {
+      params.repo = resolvedRepo.trim();
+    }
+    if (resolvedPrNumber !== undefined) {
+      params.prNumber = resolvedPrNumber;
+    }
+
+    return params;
+  }
+
+  /**
    * Build complete review instructions for AI
    * Combines generic base prompt + project-specific config
    */
   async buildReviewInstructions(
     request: ReviewRequest,
     config: YamaConfig,
-    bootstrapStandards?: string | null,
+    bootstrapStandards: string | null | undefined,
+    provider: VCSProviderName,
   ): Promise<string> {
-    // Base system prompt - fetched from Langfuse or local fallback
-    const basePromptRaw = await this.langfuseManager.getReviewPrompt();
+    const toolset = getProviderToolset(provider);
+
+    // Base system prompt. Prefer a Langfuse-managed prompt when one is
+    // configured (provider-agnostic remote override); otherwise fall back to
+    // the provider-aware local prompt so the <tool-usage> section matches the
+    // active provider's tool idiom.
+    const basePromptRaw = this.langfuseManager.isEnabled()
+      ? await this.langfuseManager.getReviewPrompt()
+      : buildReviewSystemPrompt(toolset);
 
     // Project-specific configuration in XML format
     const projectConfig = this.buildProjectConfigXML(config, request);
@@ -50,8 +118,10 @@ export class PromptBuilder {
       exploreEnabled,
     );
 
+    const toolsetParams = this.toToolsetParams(request);
+
     const workflowBlock = PromptBuilder.stripDisabledSections(
-      this.buildReviewWorkflow(request),
+      this.buildReviewWorkflow(request, toolset, toolsetParams),
       exploreEnabled,
     );
 
@@ -84,10 +154,7 @@ ${bootstrapBlock}
 ${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` : ""}
 
 <review-task>
-  <workspace>${this.escapeXML(request.workspace)}</workspace>
-  <repository>${this.escapeXML(request.repository)}</repository>
-  <pull_request_id>${request.pullRequestId || "find-by-branch"}</pull_request_id>
-  <branch>${this.escapeXML(request.branch || "N/A")}</branch>
+${toolset.identifierXml(toolsetParams)}
   <mode>${request.dryRun ? "dry-run" : "live"}</mode>
 
 ${workflowBlock}
@@ -99,7 +166,11 @@ ${workflowBlock}
    * Per-PR workflow block. Standards-first, file-by-file, explore-on-uncertainty.
    * The agent stays autonomous; this just choreographs the order it should follow.
    */
-  private buildReviewWorkflow(request: ReviewRequest): string {
+  private buildReviewWorkflow(
+    request: ReviewRequest,
+    toolset: ProviderToolset,
+    params: ReviewPromptParams,
+  ): string {
     const modeLine = request.dryRun
       ? "DRY RUN MODE: simulate actions only, do not post real comments or change PR state."
       : "LIVE MODE: post real comments and make real decisions.";
@@ -107,40 +178,11 @@ ${workflowBlock}
       ? `\n  ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}`
       : "";
 
+    // The numbered review steps (tool names + workflow prose) come from the
+    // provider toolset; the <instructions> wrapper and the dynamic mode/
+    // additional tail stay here so they apply to every provider unchanged.
     return `  <instructions>
-    Begin your autonomous review. Follow this order.
-
-    STEP 1 — Read project standards
-    Read the <project-standards> block above carefully. Treat any reviewer-expectation
-    entry with severity=BLOCKING as a blocking criterion for this PR. If the block is
-    missing or empty, fall back to <focus-areas> and <blocking-criteria>.
-
-    STEP 2 — Read the PR shell
-    Call get_pull_request once to get changed files, branch info, and existing comments.
-    Build a mental map of which files exist and which already have comments.
-    Do NOT request the full PR diff.
-
-    STEP 3 — Walk files one at a time
-    For each changed file, in order:
-      a. Call get_pull_request_diff(file_path=&lt;this file&gt;).
-      b. Cross-check the diff against project-standards and existing comments on this file.
-      c. If anything is non-trivial — multi-file impact, unfamiliar pattern, unclear intent,
-         history-dependent behavior — <!-- EXPLORE_BEGIN -->call explore_context with a precise
-         task and wait for its evidence before commenting<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN -->use search_code or get_file_content to verify before commenting<!-- EXPLORE_DISABLED_END -->.
-      d. For every confirmed issue, call add_comment immediately with line_number and
-         line_type from the diff JSON. Include a real-code suggestion for CRITICAL/MAJOR.
-      e. Move to the next file. Never request another file's diff before finishing the
-         current one. Never request a multi-file diff.
-
-    STEP 4 — Decision
-    After the last file, count issues by severity, apply <blocking-criteria>, and call
-    set_pr_approval(approved=true) OR set_review_status(request_changes=true).
-
-    STEP 5 — Summary comment
-    Post one summary comment with file count, issue counts by severity, and next steps.
-
-    Budget guidance: roughly 10 tool calls per file in the main loop. If you exceed
-    that on a single file, <!-- EXPLORE_BEGIN -->delegate the rest to explore_context<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN -->stop investigating<!-- EXPLORE_DISABLED_END --> and move on.
+${toolset.reviewWorkflowInstructions(params)}
 
     ${modeLine}${additional}
   </instructions>`;
@@ -365,7 +407,11 @@ ${loadedStandards.join("\n\n---\n\n")}
   async buildDescriptionEnhancementInstructions(
     request: ReviewRequest,
     config: YamaConfig,
+    provider: VCSProviderName,
   ): Promise<string> {
+    const toolset = getProviderToolset(provider);
+    const toolsetParams = this.toToolsetParams(request);
+
     // Base enhancement prompt - fetched from Langfuse or local fallback
     const basePrompt = await this.langfuseManager.getEnhancementPrompt();
 
@@ -380,25 +426,11 @@ ${enhancementConfigXML}
 </project-configuration>
 
 <enhancement-task>
-  <workspace>${this.escapeXML(request.workspace)}</workspace>
-  <repository>${this.escapeXML(request.repository)}</repository>
-  <pull_request_id>${request.pullRequestId || "find-by-branch"}</pull_request_id>
-  <branch>${this.escapeXML(request.branch || "N/A")}</branch>
+${toolset.identifierXml(toolsetParams)}
   <mode>${request.dryRun ? "dry-run" : "live"}</mode>
 
   <instructions>
-    Enhance the PR description now.
-
-    1. Call get_pull_request() to read current PR and description
-    2. Call get_pull_request_diff() to analyze code changes
-    3. Use search_code() to find configuration patterns, API changes
-    4. Extract information for each required section
-    5. Build enhanced description following section structure
-    6. Call update_pull_request() with enhanced description
-
-    CRITICAL: Return ONLY the enhanced description markdown.
-    Do NOT include meta-commentary or explanations.
-    Start directly with section content.
+${toolset.descriptionEnhancementInstructions(toolsetParams)}
 
     ${request.dryRun ? "DRY RUN MODE: Simulate only, do not actually update PR." : "LIVE MODE: Update the actual PR description."}
     ${request.prompt ? `ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}` : ""}

@@ -13,6 +13,11 @@ import { LocalDiffSource } from "./LocalDiffSource.js";
 import type { LocalDiffContext } from "./LocalDiffSource.js";
 import { ContextExplorerService } from "../exploration/ContextExplorerService.js";
 import {
+  ProviderDetector,
+  type VCSProvider,
+} from "../utils/ProviderDetector.js";
+import { getProviderToolset } from "../providers/ProviderToolset.js";
+import {
   LocalReviewFinding,
   LocalReviewRequest,
   LocalReviewResult,
@@ -43,11 +48,16 @@ export class YamaOrchestrator {
   private config!: YamaConfig;
   private initialized = false;
   private mcpInitialized = false;
+  // Provider the PR-mode MCP servers were last set up for. Lets one orchestrator
+  // instance switch providers mid-process (Bitbucket PR then GitHub PR) by
+  // re-running setup when the detected provider no longer matches.
+  private mcpProvider: VCSProvider | null = null;
   private localGitMcpInitialized = false;
   private exploreToolRegistered = false;
   private currentToolContext: Record<string, unknown> | null = null;
   private initOptions: YamaInitOptions;
   private bootstrapStandardsCache: Map<string, string> = new Map();
+  private detectedProvider: VCSProvider = "bitbucket";
 
   constructor(options: YamaInitOptions = {}) {
     this.initOptions = options;
@@ -64,6 +74,7 @@ export class YamaOrchestrator {
   async initialize(
     configPath?: string,
     mode: ReviewMode = "pr",
+    request?: ReviewRequest,
   ): Promise<void> {
     try {
       if (!this.initialized) {
@@ -77,6 +88,30 @@ export class YamaOrchestrator {
         );
 
         this.showBanner();
+
+        // Step 1.5: Detect provider BEFORE MCP setup so the correct provider's
+        // MCP server is wired up. When the real request is threaded in, detect
+        // from it; otherwise fall back to a preliminary detection (for logging
+        // and env/config-default driven runs).
+        if (request) {
+          this.detectedProvider = ProviderDetector.detect(
+            request,
+            process.env,
+            this.config.defaultProvider,
+          );
+        } else {
+          const preliminaryRequest: ReviewRequest = {
+            mode: "pr",
+            workspace: "",
+            repository: "",
+          };
+          this.detectedProvider = ProviderDetector.detect(
+            preliminaryRequest,
+            process.env,
+            this.config.defaultProvider,
+          );
+        }
+        console.log(`🔌 Provider detected: ${this.detectedProvider}\n`);
 
         // Step 2: Initialize
         if (this.config.memory?.enabled) {
@@ -103,15 +138,38 @@ export class YamaOrchestrator {
       }
 
       // Step 4: Mode-specific setup
-      if (mode === "pr" && !this.mcpInitialized) {
-        await this.mcpManager.setupMCPServers(
-          this.neurolink,
-          this.config.mcpServers,
-        );
-        if (this.explorer && this.config.ai.explore.enabled) {
-          await this.explorer.initialize("pr");
+      if (mode === "pr") {
+        // If MCP was already set up for a DIFFERENT provider (one instance
+        // reviewing a Bitbucket PR then a GitHub PR), tear down the previous
+        // provider's server and re-register for the new one. Single-provider
+        // runs never hit this branch, so their behaviour is unchanged.
+        if (
+          this.mcpInitialized &&
+          this.mcpProvider !== null &&
+          this.mcpProvider !== this.detectedProvider
+        ) {
+          console.log(
+            `🔄 Provider changed (${this.mcpProvider} → ${this.detectedProvider}); re-registering MCP servers...`,
+          );
+          await this.mcpManager.resetForProviderSwitch(
+            this.neurolink,
+            this.mcpProvider,
+          );
+          this.mcpInitialized = false;
         }
-        this.mcpInitialized = true;
+
+        if (!this.mcpInitialized) {
+          await this.mcpManager.setupMCPServers(
+            this.neurolink,
+            this.config.mcpServers,
+            this.detectedProvider,
+          );
+          if (this.explorer && this.config.ai.explore.enabled) {
+            await this.explorer.initialize("pr");
+          }
+          this.mcpInitialized = true;
+          this.mcpProvider = this.detectedProvider;
+        }
       } else if (mode === "local" && !this.localGitMcpInitialized) {
         await this.mcpManager.setupLocalGitMCPServer(this.neurolink);
         if (this.explorer && this.config.ai.explore.enabled) {
@@ -120,8 +178,9 @@ export class YamaOrchestrator {
         this.localGitMcpInitialized = true;
       }
 
-      // Step 5: Mode-specific validation
-      await this.configLoader.validate(mode);
+      // Step 5: Mode-specific validation (provider-aware: GitHub runs skip the
+      // Bitbucket env requirement, Bitbucket runs are unchanged)
+      await this.configLoader.validate(mode, this.detectedProvider);
 
       console.log("✅ Yama initialized successfully\n");
       console.log("═".repeat(60) + "\n");
@@ -135,7 +194,14 @@ export class YamaOrchestrator {
    * Start autonomous AI review
    */
   async startReview(request: ReviewRequest): Promise<ReviewResult> {
-    await this.ensureInitialized("pr", request.configPath);
+    await this.ensureInitialized("pr", request.configPath, request);
+
+    // Detect the provider based on request and environment
+    this.detectedProvider = ProviderDetector.detect(
+      request,
+      process.env,
+      this.config.defaultProvider,
+    );
 
     const startTime = Date.now();
     const sessionId = this.sessionManager.createSession(request);
@@ -153,6 +219,7 @@ export class YamaOrchestrator {
         request,
         this.config,
         bootstrapStandards,
+        this.detectedProvider,
       );
 
       if (this.config.display.verboseToolCalls) {
@@ -320,7 +387,7 @@ export class YamaOrchestrator {
   async *streamReview(
     request: ReviewRequest,
   ): AsyncIterableIterator<ReviewUpdate> {
-    await this.ensureInitialized("pr", request.configPath);
+    await this.ensureInitialized("pr", request.configPath, request);
 
     const sessionId = this.sessionManager.createSession(request);
 
@@ -335,6 +402,7 @@ export class YamaOrchestrator {
         request,
         this.config,
         bootstrapStandards,
+        this.detectedProvider,
       );
 
       // Create tool context
@@ -390,7 +458,7 @@ export class YamaOrchestrator {
    * This allows the AI to use knowledge gained during review to write better descriptions
    */
   async startReviewAndEnhance(request: ReviewRequest): Promise<ReviewResult> {
-    await this.ensureInitialized("pr", request.configPath);
+    await this.ensureInitialized("pr", request.configPath, request);
 
     const startTime = Date.now();
     const sessionId = this.sessionManager.createSession(request);
@@ -413,6 +481,7 @@ export class YamaOrchestrator {
           request,
           this.config,
           bootstrapStandards,
+          this.detectedProvider,
         );
 
       if (this.config.display.verboseToolCalls) {
@@ -480,6 +549,7 @@ export class YamaOrchestrator {
           await this.promptBuilder.buildDescriptionEnhancementInstructions(
             request,
             this.config,
+            this.detectedProvider,
           );
 
         // Continue the SAME session - AI remembers everything from review
@@ -532,7 +602,7 @@ export class YamaOrchestrator {
    * Enhance PR description only (without full review)
    */
   async enhanceDescription(request: ReviewRequest): Promise<any> {
-    await this.ensureInitialized("pr", request.configPath);
+    await this.ensureInitialized("pr", request.configPath, request);
 
     const sessionId = this.sessionManager.createSession(request);
 
@@ -543,6 +613,7 @@ export class YamaOrchestrator {
         await this.promptBuilder.buildDescriptionEnhancementInstructions(
           request,
           this.config,
+          this.detectedProvider,
         );
 
       const toolContext = this.createToolContext(sessionId, request);
@@ -599,16 +670,29 @@ export class YamaOrchestrator {
   }
 
   private getUserId(request: ReviewRequest): string {
-    return `${request.workspace}-${request.repository}`.toLowerCase();
+    // Coalesce provider-specific identifiers: Bitbucket uses workspace/repository,
+    // GitHub uses owner/repo. Bitbucket behavior is unchanged when those are set.
+    const workspace = request.workspace || request.owner || "";
+    const repository = request.repository || request.repo || "";
+    return `${workspace}-${repository}`.toLowerCase();
   }
 
   private createToolContext(sessionId: string, request: ReviewRequest): any {
     return {
       sessionId,
       mode: "pr",
-      workspace: request.workspace,
-      repository: request.repository,
-      pullRequestId: request.pullRequestId,
+      // Carry the detected provider so explore_context / tool runtime context
+      // knows which provider's toolset to use (GitHub reviews otherwise saw
+      // provider=undefined and defaulted to Bitbucket).
+      provider: this.detectedProvider,
+      // Coalesce provider-specific identifiers (GitHub owner/repo, Bitbucket
+      // workspace/repository) into the existing context fields. No-op for
+      // Bitbucket where workspace/repository are already set.
+      workspace: request.workspace || request.owner,
+      repository: request.repository || request.repo,
+      // GitHub passes the PR number via prNumber; coalesce so the runtime
+      // context has a PR number for both providers.
+      pullRequestId: request.pullRequestId ?? request.prNumber,
       branch: request.branch,
       dryRun: request.dryRun || false,
       metadata: {
@@ -626,8 +710,12 @@ export class YamaOrchestrator {
     return {
       sessionId,
       mode: "local",
-      workspace: request.workspace,
-      repository: request.repository,
+      // Carry the detected provider for explore_context toolset selection.
+      provider: this.detectedProvider,
+      // Coalesce provider-specific identifiers (GitHub owner/repo, Bitbucket
+      // workspace/repository). No-op for Bitbucket where they are already set.
+      workspace: request.workspace || request.owner,
+      repository: request.repository || request.repo,
       dryRun: request.dryRun || false,
       metadata: {
         yamaVersion: "2.2.1",
@@ -664,7 +752,9 @@ export class YamaOrchestrator {
 
     return {
       mode: "pr",
-      prId: session.request.pullRequestId || 0,
+      // GitHub passes the PR number via prNumber; coalesce so GitHub reviews
+      // report the real PR number instead of 0.
+      prId: session.request.pullRequestId ?? session.request.prNumber ?? 0,
       decision,
       statistics,
       summary: this.extractSummary(aiResponse),
@@ -1027,33 +1117,26 @@ export class YamaOrchestrator {
     aiResponse: any,
     session: any,
   ): "APPROVED" | "CHANGES_REQUESTED" | "BLOCKED" {
-    // Derive final review state from tool calls.
-    // Supports both current Bitbucket MCP tools and legacy names.
+    // Derive final review state from tool calls, delegating provider-specific
+    // signal interpretation to the detected provider's toolset. The Bitbucket
+    // toolset replicates the previous hardcoded logic (set_review_status /
+    // set_pr_approval + legacy names) byte-for-byte.
     const toolCalls = session.toolCalls || [];
+    const ts = getProviderToolset(this.detectedProvider);
 
     let requestedChanges: boolean | undefined;
     let approved: boolean | undefined;
 
     for (const tc of toolCalls) {
-      const name = tc?.toolName;
-      const args = tc?.args || {};
+      const decision = ts.interpretDecision({
+        toolName: tc?.toolName,
+        args: tc?.args || {},
+      });
 
-      if (name === "set_review_status") {
-        if (typeof args.request_changes === "boolean") {
-          requestedChanges = args.request_changes;
-        }
-      } else if (name === "request_changes") {
+      if (decision === "BLOCKED") {
         requestedChanges = true;
-      } else if (name === "remove_requested_changes") {
-        requestedChanges = false;
-      } else if (name === "set_pr_approval") {
-        if (typeof args.approved === "boolean") {
-          approved = args.approved;
-        }
-      } else if (name === "approve_pull_request") {
+      } else if (decision === "APPROVED") {
         approved = true;
-      } else if (name === "unapprove_pull_request") {
-        approved = false;
       }
     }
 
@@ -1073,15 +1156,15 @@ export class YamaOrchestrator {
    */
   private calculateStatistics(session: any): ReviewStatistics {
     const toolCalls = session.toolCalls || [];
+    const ts = getProviderToolset(this.detectedProvider);
 
-    // Count file diffs read
-    const filesReviewed = toolCalls.filter(
-      (tc: any) => tc.toolName === "get_pull_request_diff",
-    ).length;
+    // Count the changed files actually reviewed. Provider-specific because the
+    // diff-tool semantics differ.
+    const filesReviewed = this.countFilesReviewed(toolCalls);
 
-    // Try to extract issue counts from comments
-    const commentCalls = toolCalls.filter(
-      (tc: any) => tc.toolName === "add_comment",
+    // Try to extract issue counts from comments (provider-specific comment tools)
+    const commentCalls = toolCalls.filter((tc: any) =>
+      ts.commentToolNames.includes(tc.toolName),
     );
     const issuesFound = this.extractIssueCountsFromComments(commentCalls);
 
@@ -1094,6 +1177,61 @@ export class YamaOrchestrator {
       cacheHits: 0,
       totalComments: commentCalls.length,
     };
+  }
+
+  /**
+   * Count the changed files actually reviewed, from the session tool calls.
+   *
+   * Bitbucket: get_pull_request_diff is called once per file by design, so the
+   * raw count of diff-tool calls already equals the files reviewed. This path is
+   * byte-for-byte identical to the previous behaviour.
+   *
+   * GitHub: pull_request_read is overloaded — the SAME tool name serves
+   * method="get" (PR shell), "get_files" (changed-file list) and "get_diff"
+   * (unified diff). Counting every pull_request_read call therefore inflates the
+   * number. Instead, count DISTINCT file paths the review actually touched, taken
+   * from the inline pending-review comments (add_comment_to_pending_review →
+   * args.path). Fall back to the number of distinct get_files/get_diff reads when
+   * no inline comments were posted (e.g. a clean approval), so a reviewed-but-
+   * clean PR is not reported as 0 files.
+   */
+  private countFilesReviewed(toolCalls: any[]): number {
+    const ts = getProviderToolset(this.detectedProvider);
+
+    if (this.detectedProvider !== "github") {
+      // Bitbucket (and any non-GitHub provider): one diff fetch per file.
+      return toolCalls.filter((tc: any) =>
+        ts.diffToolNames.includes(tc.toolName),
+      ).length;
+    }
+
+    // GitHub: prefer distinct paths from inline comments.
+    const commentedPaths = new Set<string>();
+    for (const tc of toolCalls) {
+      if (tc?.toolName !== "add_comment_to_pending_review") {
+        continue;
+      }
+      const path = tc?.args?.path;
+      if (typeof path === "string" && path.length > 0) {
+        commentedPaths.add(path);
+      }
+    }
+    if (commentedPaths.size > 0) {
+      return commentedPaths.size;
+    }
+
+    // Fallback for clean PRs with no inline comments: count the distinct
+    // changed-file / diff reads (pull_request_read with method get_files/get_diff)
+    // rather than every pull_request_read (which includes the single "get").
+    const diffReads = toolCalls.filter((tc: any) => {
+      if (!ts.diffToolNames.includes(tc?.toolName)) {
+        return false;
+      }
+      const method = tc?.args?.method;
+      return method === "get_files" || method === "get_diff";
+    }).length;
+
+    return diffReads;
   }
 
   /**
@@ -1358,6 +1496,10 @@ export class YamaOrchestrator {
           mode: runtimeMode,
           workspace: String(mergedContext.workspace || "local"),
           repository: String(mergedContext.repository || "repository"),
+          provider:
+            typeof mergedContext.provider === "string"
+              ? mergedContext.provider
+              : undefined,
           pullRequestId:
             typeof mergedContext.pullRequestId === "number"
               ? mergedContext.pullRequestId
@@ -1419,26 +1561,37 @@ export class YamaOrchestrator {
       return "";
     }
 
-    const cacheKey = `${request.workspace}/${request.repository}`.toLowerCase();
+    // Validate required parameters for bootstrap. Coalesce provider-specific
+    // identifiers so GitHub (owner/repo) also gets bootstrap standards; no-op
+    // for Bitbucket where workspace/repository are already set.
+    const workspace = (request.workspace || request.owner || "").trim();
+    const repository = (request.repository || request.repo || "").trim();
+
+    if (workspace.length === 0 || repository.length === 0) {
+      return "";
+    }
+
+    const cacheKey = `${workspace}/${repository}`.toLowerCase();
     const cached = this.bootstrapStandardsCache.get(cacheKey);
     if (cached !== undefined) {
       return cached;
     }
 
-    const task = `Bootstrap repo review standards for ${request.workspace}/${request.repository}. Inspect the last 15 merged pull requests on this repository. For each, collect inline and summary comments left by HUMAN reviewers (ignore bot authors like "Yama", "yama-bot", "yama-review", "euler.bot"). Focus on comments that asked for code changes, flagged bugs, pushed back on an approach, or cited a convention. Distill the recurring patterns and anti-patterns the human reviewers care about — especially things that a static config rule set would miss (naming, error-handling idioms, module boundaries, test expectations, migration rules, review etiquette). Return a concise bullet list of 10-20 patterns. Each bullet: one sentence stating the pattern, optionally one sentence of rationale. Do NOT include PR numbers, author names, or raw quotes — just distilled patterns.`;
+    const task = `Bootstrap repo review standards for ${workspace}/${repository}. Inspect the last 15 merged pull requests on this repository. For each, collect inline and summary comments left by HUMAN reviewers (ignore bot authors like "Yama", "yama-bot", "yama-review", "euler.bot"). Focus on comments that asked for code changes, flagged bugs, pushed back on an approach, or cited a convention. Distill the recurring patterns and anti-patterns the human reviewers care about — especially things that a static config rule set would miss (naming, error-handling idioms, module boundaries, test expectations, migration rules, review etiquette). Return a concise bullet list of 10-20 patterns. Each bullet: one sentence stating the pattern, optionally one sentence of rationale. Do NOT include PR numbers, author names, or raw quotes — just distilled patterns.`;
 
     try {
       console.log(
         `   🧭 Bootstrapping repo standards from recent PRs (one-time per process)...`,
       );
       const { result } = await this.explorer.explore(
-        { task, focus: [request.repository] },
+        { task, focus: [repository] },
         {
           sessionId,
           mode: "pr",
-          workspace: request.workspace,
-          repository: request.repository,
-          pullRequestId: request.pullRequestId,
+          provider: this.detectedProvider,
+          workspace,
+          repository,
+          pullRequestId: request.pullRequestId ?? request.prNumber,
           branch: request.branch,
           dryRun: request.dryRun || false,
           metadata: { bootstrap: true },
@@ -1489,8 +1642,9 @@ export class YamaOrchestrator {
   private async ensureInitialized(
     mode: ReviewMode = "pr",
     configPath?: string,
+    request?: ReviewRequest,
   ): Promise<void> {
-    await this.initialize(configPath, mode);
+    await this.initialize(configPath, mode, request);
   }
 
   /**
