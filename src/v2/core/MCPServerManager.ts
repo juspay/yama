@@ -34,6 +34,16 @@ const DEFAULT_GITHUB_BLOCKED_TOOLS: string[] = [
  * blockedTools + optional stdio command/args), typed explicitly to avoid `any`
  * for the new config object.
  */
+/**
+ * Minimal shape of an entry returned by NeuroLink's `listMCPServers()`,
+ * used to verify a server connected without resorting to `any`.
+ */
+interface MCPServerStatus {
+  name: string;
+  status?: string;
+  tools?: Array<{ name?: string }>;
+}
+
 interface GitHubMCPRegistration {
   transport: "http" | "stdio";
   url?: string;
@@ -352,24 +362,34 @@ export class MCPServerManager {
 
       await neurolink.addExternalMCPServer("github", config);
 
-      // Verify the server actually connected — NeuroLink resolves the promise
-      // even on timeout, so we must check the status explicitly (same pattern
-      // as the Bitbucket path).
-      const servers = await neurolink.listMCPServers();
-      const ghServer = (servers || []).find((s: any) => s.name === "github");
-      if (
-        !ghServer ||
-        ghServer.status !== "connected" ||
-        ghServer.tools?.length === 0
-      ) {
+      // The remote HTTP endpoint (api.githubcopilot.com) connects asynchronously
+      // — TLS handshake + auth + tool discovery take ~3-4s, and NeuroLink may only
+      // finish discovery lazily on the first generate() call. Poll briefly for a
+      // healthy status, but for the HTTP transport DO NOT hard-fail if it is not
+      // yet "connected": the tools are resolved when the review runs (this mirrors
+      // Curator's proven pattern). For a local stdio server we keep the strict
+      // check, since a local process should connect promptly.
+      const ghServer = await this.waitForMCPServer(neurolink, "github", 12000);
+      const connected =
+        ghServer?.status === "connected" && (ghServer?.tools?.length ?? 0) > 0;
+
+      if (transport === "stdio" && !connected) {
         throw new MCPServerError(
           `GitHub MCP server registered but not connected (status: ${ghServer?.status ?? "unknown"}, tools: ${ghServer?.tools?.length ?? 0}). Possible startup timeout.`,
         );
       }
 
-      console.log(
-        `   ✅ GitHub MCP server registered and tools available (transport: ${transport})`,
-      );
+      if (connected) {
+        console.log(
+          `   ✅ GitHub MCP server registered and tools available (transport: ${transport})`,
+        );
+      } else {
+        console.warn(
+          `   ⚠️  GitHub MCP server registered but not yet reporting connected ` +
+            `(status: ${ghServer?.status ?? "unknown"}, tools: ${ghServer?.tools?.length ?? 0}). ` +
+            `Remote tools are discovered on first use; continuing.`,
+        );
+      }
       if (transport === "http") {
         console.log(`   🌐 Remote endpoint: ${config.url}`);
       }
@@ -379,6 +399,33 @@ export class MCPServerManager {
         `Failed to setup GitHub MCP server: ${(error as Error).message}`,
       );
     }
+  }
+
+  /**
+   * Poll {@link listMCPServers} until the named server reports "connected" with
+   * at least one tool, or the timeout elapses. Returns the last-seen server
+   * entry (possibly not-yet-connected) so the caller can decide how to proceed.
+   *
+   * Bounded by `timeoutMs` via the loop condition — it cannot run indefinitely.
+   */
+  private async waitForMCPServer(
+    neurolink: any,
+    name: string,
+    timeoutMs: number,
+  ): Promise<MCPServerStatus | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    let last: MCPServerStatus | undefined;
+    while (Date.now() < deadline) {
+      const servers: MCPServerStatus[] = await neurolink
+        .listMCPServers()
+        .catch(() => []);
+      last = (servers || []).find((server) => server.name === name);
+      if (last?.status === "connected" && (last.tools?.length ?? 0) > 0) {
+        return last;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return last;
   }
 
   /**

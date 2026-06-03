@@ -321,7 +321,8 @@ class GitHubToolset implements ProviderToolset {
   systemPromptToolsSection(): string {
     return `  <tool-usage>
     <tool name="pull_request_read">
-      <use-when>Read PR state. method="get" once at the start for PR metadata and existing comments; method="get_files" to list changed files; method="get_diff" for the unified diff. Always pass owner, repo, pullNumber.</use-when>
+      <use-when>Read PR state by method: "get" for PR metadata; "get_review_comments" to load EXISTING inline review comments (each thread carries isResolved/isOutdated) so you never repeat an already-raised point; "get_reviews" for prior submitted reviews; "get_files" to list changed files; "get_diff" for the unified diff. Always pass owner, repo, pullNumber.</use-when>
+      <important>method="get" does NOT include review comments on GitHub — you MUST call method="get_review_comments" to see them.</important>
     </tool>
 
     <tool name="search_code">
@@ -372,11 +373,16 @@ class GitHubToolset implements ProviderToolset {
     entry with severity=BLOCKING as a blocking criterion for this PR. If the block is
     missing or empty, fall back to <focus-areas> and <blocking-criteria>.
 
-    STEP 2 — Read the PR shell
-    Call pull_request_read(method="get", owner, repo, pullNumber) once to get PR
-    metadata and existing comments, then pull_request_read(method="get_files", ...)
-    to list the changed files. Build a mental map of which files exist and which
-    already have comments. Do NOT request the full PR diff yet.
+    STEP 2 — Read the PR shell + EXISTING review comments
+    Call pull_request_read(method="get", owner, repo, pullNumber) for PR metadata,
+    then pull_request_read(method="get_review_comments", owner, repo, pullNumber) to
+    load existing inline review comments. (On GitHub, method="get" does NOT include
+    review comments — you MUST call get_review_comments.) Build a map of which
+    file+line locations already have comments. Treat any point an existing comment
+    already raises as ALREADY HANDLED: do NOT post a duplicate, and do NOT re-raise it
+    in your decision — especially threads marked isResolved or isOutdated. Then call
+    pull_request_read(method="get_files", ...) to list the changed files. Do NOT
+    request the full PR diff yet.
 
     STEP 3 — Open ONE pending review
     Call pull_request_review_write(method="create", owner, repo, pullNumber) to open a
@@ -396,9 +402,13 @@ class GitHubToolset implements ProviderToolset {
       e. Move to the next file. Never jump between files mid-review.
 
     STEP 5 — Decision (submit the review)
-    After the last file, count issues by severity, apply <blocking-criteria>, and call
-    pull_request_review_write(method="submit", owner, repo, pullNumber, body=&lt;summary&gt;)
-    with event="APPROVE" when clean OR event="REQUEST_CHANGES" when blocking criteria are met.
+    Count ONLY the NEW issues you raised this run — exclude any point already covered by
+    an existing review comment (from STEP 2), and exclude resolved/outdated threads. Apply
+    <blocking-criteria> to that NEW set only. A concern that was already raised and
+    answered/justified in an existing comment thread is NOT grounds to block again.
+    Then call pull_request_review_write(method="submit", owner, repo, pullNumber,
+    body=&lt;summary&gt;) with event="APPROVE" when there are no NEW blocking issues, or
+    event="REQUEST_CHANGES" only when NEW blocking criteria are met this run.
 
     STEP 6 — Summary comment
     Use the submit body above for the summary (file count, issue counts by severity, next

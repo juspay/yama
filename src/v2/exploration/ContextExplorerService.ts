@@ -16,7 +16,10 @@ import {
   buildObservabilityConfigFromEnv,
   validateObservabilityConfig,
 } from "../utils/ObservabilityConfig.js";
-import { getProviderToolset } from "../providers/ProviderToolset.js";
+import {
+  getProviderToolset,
+  type VCSProviderName,
+} from "../providers/ProviderToolset.js";
 import { ExplorerPromptBuilder } from "./ExplorerPromptBuilder.js";
 import { RulesContextLoader } from "./RulesContextLoader.js";
 import {
@@ -47,11 +50,18 @@ export class ContextExplorerService {
     this.neurolink = this.initializeNeurolink();
   }
 
-  async initialize(mode: "pr" | "local"): Promise<void> {
+  async initialize(
+    mode: "pr" | "local",
+    provider: VCSProviderName = "bitbucket",
+  ): Promise<void> {
     if (mode === "pr" && !this.prMcpInitialized) {
+      // The explore subagent gets its own MCP servers; they MUST match the
+      // detected provider, otherwise a GitHub run would try to start Bitbucket
+      // MCP (and fail on missing Bitbucket credentials).
       await this.mcpManager.setupMCPServers(
         this.neurolink,
         this.config.mcpServers,
+        provider,
       );
       this.prMcpInitialized = true;
       return;
@@ -67,7 +77,16 @@ export class ContextExplorerService {
     input: ExploreContextInput,
     runtimeContext: ExploreRuntimeContext,
   ): Promise<ExploreExecutionResult> {
-    await this.initialize(runtimeContext.mode);
+    // Pass the runtime provider through when it is a known VCS provider;
+    // otherwise fall back to the read-only default. VCSProviderName is the
+    // single source of truth for supported providers, so adding one there is
+    // all that's needed for the explore subagent to honour it.
+    const explorerProvider: VCSProviderName =
+      runtimeContext.provider === "github" ||
+      runtimeContext.provider === "bitbucket"
+        ? runtimeContext.provider
+        : "bitbucket";
+    await this.initialize(runtimeContext.mode, explorerProvider);
 
     const normalizedInput = this.normalizeInput(input);
     const cacheKey = this.buildCacheKey(normalizedInput, runtimeContext);

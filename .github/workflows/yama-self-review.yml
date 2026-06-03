@@ -1,0 +1,77 @@
+# Yama dogfoods itself: reviews juspay/yama's own PRs using the local action.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   - YAMA_GITHUB_TOKEN : a GitHub PAT (repo / pull_requests scope) for the
+#                         hosted GitHub MCP endpoint (api.githubcopilot.com)
+#   - LITELLM_BASE_URL  : LiteLLM proxy base URL
+#   - LITELLM_API_KEY   : LiteLLM proxy API key
+# Until all three are set, the preflight job skips the review (the check stays green).
+name: Yama Self Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+concurrency:
+  group: yama-self-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Least privilege at the workflow level; only the review job is granted
+# pull-requests: write (it posts the review). preflight just reads.
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          PAT: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+        run: |
+          if [ -n "$PAT" ] && [ -n "$LITELLM_BASE_URL" ] && [ -n "$LITELLM_API_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Yama self-review skipped — set repo secrets YAMA_GITHUB_TOKEN, LITELLM_BASE_URL and LITELLM_API_KEY to enable."
+          fi
+
+  review:
+    needs: preflight
+    # Run only when secrets are configured and the PR is from this repo (forks
+    # have no access to secrets, so preflight already skips them).
+    if: >-
+      needs.preflight.outputs.enabled == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Yama Review
+        # `uses: ./` runs the action from THIS checkout — required to bootstrap the
+        # action (it doesn't exist on `main` until this PR merges). The job is gated
+        # to same-repo PRs (forks, which can't read secrets, are skipped), so only
+        # trusted collaborators reach it. After merge, pin this to the published
+        # action at a fixed ref (e.g. juspay/yama@<sha>) so PR-modified action code
+        # can't run with secrets.
+        uses: ./
+        with:
+          github-token: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          ai-provider: litellm
+          ai-model: private-large
+          litellm-base-url: ${{ secrets.LITELLM_BASE_URL }}
+          litellm-api-key: ${{ secrets.LITELLM_API_KEY }}
+          focus-areas: security,performance,codeQuality
+          # Review only (skip PR-description enhancement) — the reviewer posts
+          # inline comments + a verdict; it does not rewrite PR descriptions.
+          skip-description-enhance: "true"

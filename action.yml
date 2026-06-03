@@ -24,6 +24,31 @@ inputs:
   ai-model:
     description: "Model name for the selected AI provider"
     required: false
+  anthropic-api-key:
+    description: "Anthropic API key (used when ai-provider: anthropic)"
+    required: false
+  openai-api-key:
+    description: "OpenAI API key (used when ai-provider: openai)"
+    required: false
+  google-ai-api-key:
+    description: "Google AI Studio API key (used when ai-provider: google-ai)"
+    required: false
+  google-vertex-project:
+    description: "GCP project ID for Vertex AI (auto-derived from the credentials JSON when omitted)"
+    required: false
+  google-vertex-location:
+    description: "Vertex AI location/region"
+    required: false
+    default: "us-central1"
+  google-application-credentials:
+    description: "Vertex AI service-account credentials JSON content (written to a temp file at runtime)"
+    required: false
+  litellm-base-url:
+    description: "LiteLLM proxy base URL (used when ai-provider: litellm)"
+    required: false
+  litellm-api-key:
+    description: "LiteLLM proxy API key (used when ai-provider: litellm)"
+    required: false
   focus-areas:
     description: "Comma-separated focus areas for the review (e.g. security,performance)"
     required: false
@@ -75,24 +100,31 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # Pin pnpm to the version that generated pnpm-lock.yaml. Bare `corepack
+    # enable` picks an arbitrary pnpm whose `overrides` serialization differs
+    # from the lockfile (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH on frozen install).
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.14.0
+
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: "20"
+        # Node 24: NeuroLink's memory layer requires the `node:sqlite` built-in,
+        # which does not exist on Node 20 and is flag-gated on Node 22. Node 24
+        # ships node:sqlite without an experimental flag. actions/setup-node
+        # downloads and provisions this version on any runner, so it does not
+        # depend on the runner's pre-installed Node.
+        node-version: "24"
 
     - name: Install dependencies and build CLI
       shell: bash
       working-directory: ${{ github.action_path }}
       run: |
         if [ ! -f "dist/cli/cli.js" ]; then
-          if [ -f "pnpm-lock.yaml" ]; then
-            corepack enable
-            pnpm install --frozen-lockfile
-            pnpm run build
-          else
-            npm ci
-            npm run build
-          fi
+          pnpm install --frozen-lockfile
+          pnpm run build
         fi
 
     - name: Run Yama review
@@ -103,8 +135,33 @@ runs:
         # GitHub MCP server authenticates via GITHUB_TOKEN.
         GITHUB_TOKEN: ${{ inputs.github-token }}
         # Surface AI provider/model selection to the orchestrator + NeuroLink.
+        # Yama's ConfigLoader reads AI_PROVIDER/AI_MODEL; NeuroLink's own provider
+        # factory keys off NEUROLINK_PROVIDER/NEUROLINK_MODEL (defaults to 'vertex'
+        # otherwise). Set both so provider selection is unambiguous — this mirrors
+        # the proven euler-api-dashboard Jenkins setup.
         AI_PROVIDER: ${{ inputs.ai-provider }}
         AI_MODEL: ${{ inputs.ai-model }}
+        NEUROLINK_PROVIDER: ${{ inputs.ai-provider }}
+        NEUROLINK_MODEL: ${{ inputs.ai-model }}
+        # The explore/bootstrap subagent should use the same provider/model as the
+        # main review (otherwise it falls back to a config default like vertex and
+        # fails when only one provider's credentials are present).
+        AI_EXPLORE_PROVIDER: ${{ inputs.ai-provider }}
+        AI_EXPLORE_MODEL: ${{ inputs.ai-model }}
+        # AI provider credentials (pass the one matching ai-provider). Forwarded
+        # as env explicitly because step-level env does NOT propagate into a
+        # composite action's steps.
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        GOOGLE_AI_API_KEY: ${{ inputs.google-ai-api-key }}
+        GOOGLE_VERTEX_PROJECT: ${{ inputs.google-vertex-project }}
+        GOOGLE_VERTEX_LOCATION: ${{ inputs.google-vertex-location }}
+        VERTEX_CREDENTIALS_JSON: ${{ inputs.google-application-credentials }}
+        # LiteLLM proxy (self-hosted / custom models). LITELLM_MODEL mirrors
+        # ai-model so NeuroLink's litellm provider resolves the right model.
+        LITELLM_BASE_URL: ${{ inputs.litellm-base-url }}
+        LITELLM_API_KEY: ${{ inputs.litellm-api-key }}
+        LITELLM_MODEL: ${{ inputs.ai-model }}
         # GitHub PR context, consumed by ProviderDetector + the review request.
         YAMA_ACTION_PATH: ${{ github.action_path }}
         EVENT_PATH: ${{ github.event_path }}
@@ -135,6 +192,28 @@ runs:
 
         OWNER="${REPO_FULL%%/*}"
         REPO="${REPO_FULL#*/}"
+
+        # Vertex AI: materialize the service-account JSON to a temp file and
+        # point GOOGLE_APPLICATION_CREDENTIALS at it (NeuroLink uses ADC). The
+        # GCP project is derived from the JSON's project_id when not supplied.
+        if [ -n "${VERTEX_CREDENTIALS_JSON:-}" ]; then
+          CRED_FILE="$(mktemp "${RUNNER_TEMP:-/tmp}/vertex-creds-XXXXXX.json")"
+          # Delete the materialized service-account key when this step exits
+          # (success OR failure), so the credentials are never left on the runner.
+          trap 'rm -f "$CRED_FILE"' EXIT
+          # Write the secret from the environment via node — it is never passed
+          # as a shell/process argument, so it cannot appear in a process listing.
+          node -e 'require("fs").writeFileSync(process.argv[1], process.env.VERTEX_CREDENTIALS_JSON || "")' "$CRED_FILE"
+          chmod 600 "$CRED_FILE"
+          export GOOGLE_APPLICATION_CREDENTIALS="$CRED_FILE"
+          if [ -z "${GOOGLE_VERTEX_PROJECT:-}" ]; then
+            GOOGLE_VERTEX_PROJECT="$(node -e 'try{process.stdout.write(JSON.parse(require("fs").readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,"utf8")).project_id||"")}catch(_){process.stdout.write("")}')"
+            export GOOGLE_VERTEX_PROJECT
+            if [ -z "${GOOGLE_VERTEX_PROJECT}" ]; then
+              echo "::warning::Could not derive GOOGLE_VERTEX_PROJECT from the credentials JSON (missing or unreadable project_id). Pass the google-vertex-project input explicitly when using the Vertex provider."
+            fi
+          fi
+        fi
 
         ARGS=(review --owner "$OWNER" --repo "$REPO" --pr "$PR_NUMBER")
 
