@@ -165,7 +165,7 @@ export class YamaOrchestrator {
             this.detectedProvider,
           );
           if (this.explorer && this.config.ai.explore.enabled) {
-            await this.explorer.initialize("pr");
+            await this.explorer.initialize("pr", this.detectedProvider);
           }
           this.mcpInitialized = true;
           this.mcpProvider = this.detectedProvider;

@@ -39,79 +39,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: 🤖 AI-Powered Code Review
-        uses: coderabbitai/openai-pr-reviewer@latest
-        with:
-          debug: false
-          review_simple_changes: true
-          review_comment_lgtm: true
-          openai_light_model: gpt-4o-mini
-          openai_heavy_model: gpt-4o
-          openai_timeout_ms: 120000
-          language: en-US
-          path_filters: |
-            src/**/*.ts
-            src/**/*.tsx
-            src/**/*.js
-            src/**/*.jsx
-            tests/**/*.ts
-            tests/**/*.tsx
-            scripts/**/*.js
-            scripts/**/*.cjs
-            .github/workflows/*.yml
-            *.md
-            package.json
-            tsconfig.json
-            eslint.config.js
-            !node_modules/**
-            !dist/**
-            !build/**
-            !coverage/**
-            !*.min.js
-            !*.bundle.js
-          system_message: |
-            You are an expert code reviewer for Yama (Yama), an enterprise-grade Pull Request automation toolkit with AI-powered code review capabilities.
-
-            FOCUS AREAS:
-            1. **Security**: Check for API key leaks, unsafe patterns, vulnerability risks
-            2. **Type Safety**: Ensure proper TypeScript usage, avoid 'any' types
-            3. **Code Quality**: Follow established patterns, proper error handling
-            4. **Performance**: Identify potential bottlenecks or inefficient code
-            5. **Documentation**: Verify JSDoc comments and inline documentation
-            6. **Testing**: Suggest test improvements or missing test cases
-            7. **Semantic Commits**: Verify commit messages follow type(scope): description format
-            8. **PR Automation**: Check for proper integration with Bitbucket/GitHub APIs
-
-            PROJECT CONTEXT:
-            - PR automation toolkit supporting Bitbucket, GitHub, GitLab
-            - AI-powered code review and description enhancement
-            - TypeScript with strict mode enabled
-            - Enterprise-grade security requirements
-            - Integration with multiple AI providers (OpenAI, Anthropic, etc.)
-
-            REVIEW GUIDELINES:
-            - Be constructive and educational
-            - Prioritize security and type safety issues
-            - Suggest specific improvements with code examples
-            - Focus on PR automation best practices
-            - Consider maintainability and scalability
-            - Check for proper logging instead of console statements
-
-            CRITICAL ITEMS TO FLAG:
-            - Any console.log statements in production code
-            - Missing or incorrect TypeScript types
-            - Potential security vulnerabilities in API integrations
-            - Non-semantic commit messages
-            - Missing error handling for external API calls
-            - Hardcoded secrets or API keys
-            - ESLint rule violations
-            - Missing tests for new PR automation features
-            - Improper handling of sensitive PR data
-
-            Provide constructive, actionable feedback with specific code examples.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # NOTE: The AI code-review step previously used `coderabbitai/openai-pr-reviewer`,
+      # which was removed upstream and no longer resolves on GitHub Actions
+      # (causing this job to fail on every PR). AI review is now handled by the
+      # dedicated `Yama Self Review` workflow (yama-self-review.yml). The remaining
+      # steps here keep build-rule validation + the status comment.
 
       - name: 🔍 Validate PR Against Build Rules
         run: |
