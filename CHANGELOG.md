@@ -1,3 +1,10 @@
+# [2.5.0](https://github.com/juspay/yama/compare/v2.4.2...v2.5.0) (2026-06-03)
+
+
+### Features
+
+* **github:** add GitHub provider for PR reviews ([0b8e45f](https://github.com/juspay/yama/commit/0b8e45f30a95a30988c0dc6f84e929d2338108fe))
+
 ## [2.4.2](https://github.com/juspay/yama/compare/v2.4.1...v2.4.2) (2026-04-24)
 
 
