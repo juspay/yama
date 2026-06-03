@@ -54,6 +54,7 @@
   ],
   "scripts": {
     "build": "rimraf dist && tsc && tsc-alias",
+    "build:action": "npm run build",
     "dev": "tsx watch src/cli/cli.ts",
     "dev:run": "tsx src/cli/cli.ts",
     "mcp:git:server": "uvx mcp-server-git || npx -y @modelcontextprotocol/server-git",

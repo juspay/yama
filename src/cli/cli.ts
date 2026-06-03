@@ -8,7 +8,11 @@ import { Command } from "commander";
 import dotenv from "dotenv";
 import { VERSION, createYama } from "../index.js";
 import { createLearningOrchestrator } from "../v2/core/LearningOrchestrator.js";
-import type { LocalReviewRequest, ReviewRequest } from "../index.js";
+import type {
+  LocalReviewRequest,
+  ReviewRequest,
+  ReviewResult,
+} from "../index.js";
 import type { LearnRequest } from "../v2/learning/types.js";
 
 // Load environment variables
@@ -57,6 +61,8 @@ function setupReviewCommand(): void {
     .option("--mode <mode>", "Review mode (pr|local)", "pr")
     .option("-w, --workspace <workspace>", "Bitbucket workspace")
     .option("-r, --repository <repository>", "Repository name")
+    .option("--owner <owner>", "GitHub owner/organization")
+    .option("--repo <repo>", "GitHub repository (alternative to --repository)")
     .option("-p, --pr <id>", "Pull request ID")
     .option("-b, --branch <branch>", "Branch name (finds PR automatically)")
     .option("--repo-path <path>", "Local repository path (local mode)")
@@ -129,11 +135,52 @@ function setupReviewCommand(): void {
           process.exit(result.decision === "BLOCKED" ? 1 : 0);
         }
 
-        if (!options.workspace || !options.repository) {
+        // Auto-detect provider and validate required parameters.
+        // --repo is GitHub-only; Bitbucket uses --repository so that
+        // 'yama review --workspace acme --repo service' is not misread as mixed.
+        const hasGitHub = options.owner || options.repo;
+        const hasBitbucket = options.workspace || options.repository;
+
+        if (hasGitHub && hasBitbucket) {
           console.error(
-            "❌ Error: --workspace and --repository are required in pr mode",
+            "❌ Error: Cannot mix GitHub (--owner/--repo) and Bitbucket (--workspace/--repository) parameters",
           );
           process.exit(1);
+        }
+
+        if (!hasGitHub && !hasBitbucket) {
+          console.error(
+            "❌ Error: Either GitHub (--owner and --repo) or Bitbucket (--workspace and --repository) parameters are required",
+          );
+          process.exit(1);
+        }
+
+        if (hasGitHub) {
+          if (!options.owner) {
+            console.error(
+              "❌ Error: --owner is required when using GitHub parameters",
+            );
+            process.exit(1);
+          }
+          if (!options.repo) {
+            console.error(
+              "❌ Error: --repo is required when using GitHub parameters",
+            );
+            process.exit(1);
+          }
+        } else {
+          if (!options.workspace) {
+            console.error(
+              "❌ Error: --workspace is required when using Bitbucket parameters",
+            );
+            process.exit(1);
+          }
+          if (!options.repository) {
+            console.error(
+              "❌ Error: --repository is required when using Bitbucket parameters",
+            );
+            process.exit(1);
+          }
         }
 
         if (!options.pr && !options.branch) {
@@ -154,9 +201,18 @@ function setupReviewCommand(): void {
 
         const request: ReviewRequest = {
           mode: "pr",
+          provider: hasGitHub ? "github" : "bitbucket",
+          owner: options.owner,
+          repo: options.repo,
           workspace: options.workspace,
           repository: options.repository,
           pullRequestId,
+          // GitHub SDK/prompt paths read prNumber; mirror pullRequestId for
+          // GitHub only so Bitbucket behavior stays unchanged.
+          prNumber:
+            hasGitHub && typeof pullRequestId === "number"
+              ? pullRequestId
+              : undefined,
           branch: options.branch,
           dryRun: globalOpts.dryRun || false,
           verbose: globalOpts.verbose || false,
@@ -166,7 +222,9 @@ function setupReviewCommand(): void {
           outputSchemaVersion: options.outputSchemaVersion,
         };
 
-        await yama.initialize(request.configPath);
+        // Thread the request into initialize so MCP servers are set up for the
+        // correct provider (GitHub vs Bitbucket) before review starts.
+        await yama.initialize(request.configPath, "pr", request);
 
         console.log("🚀 Starting autonomous AI review...\n");
 
@@ -195,6 +253,9 @@ function setupReviewCommand(): void {
           console.log(JSON.stringify(result, null, 2));
         }
 
+        // Surface outputs for the composite GitHub Action (provider-agnostic).
+        await writeGitHubOutputs(result);
+
         process.exit(result.decision === "BLOCKED" ? 1 : 0);
       } catch (error) {
         console.error("\n❌ Review failed:", (error as Error).message);
@@ -205,6 +266,40 @@ function setupReviewCommand(): void {
         process.exit(1);
       }
     });
+}
+
+/**
+ * Append PR review outputs to the GitHub Actions output file so a composite
+ * Action can expose them as step outputs. No-op outside GitHub Actions (when
+ * GITHUB_OUTPUT is unset). Provider-agnostic: works for Bitbucket too.
+ */
+async function writeGitHubOutputs(result: ReviewResult): Promise<void> {
+  const outputPath = process.env.GITHUB_OUTPUT;
+  if (!outputPath) {
+    return;
+  }
+
+  const issues = result.statistics?.issuesFound;
+  const summary = (result.summary || "").trim();
+
+  const lines = [
+    `decision=${result.decision}`,
+    `summary<<EOF\n${summary}\nEOF`,
+    `critical-issues=${issues?.critical ?? 0}`,
+    `major-issues=${issues?.major ?? 0}`,
+    `minor-issues=${issues?.minor ?? 0}`,
+    `total-comments=${result.statistics?.totalComments ?? 0}`,
+  ];
+
+  try {
+    const fs = await import("fs/promises");
+    await fs.appendFile(outputPath, `${lines.join("\n")}\n`, "utf8");
+  } catch (error) {
+    console.error(
+      "⚠️  Failed to write GitHub Action outputs:",
+      (error as Error).message,
+    );
+  }
 }
 
 /**

@@ -9,10 +9,25 @@
 
 export interface ReviewRequest {
   mode: "pr";
-  workspace: string;
-  repository: string;
+
+  // Auto-detected or explicitly set
+  provider?: "github" | "bitbucket";
+
+  // Bitbucket parameters (backward compatible)
+  workspace?: string;
+  repository?: string;
+
+  // GitHub parameters (new)
+  owner?: string;
+  repo?: string;
+  prNumber?: number;
+
+  // Alternative: use pull request ID (Bitbucket) or issue number (GitHub)
   pullRequestId?: number;
+
+  // Both
   branch?: string;
+  cloneUrl?: string;
   dryRun?: boolean;
   verbose?: boolean;
   configPath?: string;

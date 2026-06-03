@@ -51,6 +51,19 @@ export class DefaultConfig {
         bitbucket: {
           blockedTools: [],
         },
+        github: {
+          enabled: true,
+          url: "https://api.githubcopilot.com/mcp/",
+          transport: "http",
+          blockedTools: [
+            "push_files",
+            "create_or_update_file",
+            "create_branch",
+            "delete_file",
+            "create_pull_request_with_copilot",
+            "assign_copilot_to_issue",
+          ],
+        },
         jira: {
           enabled: false, // Opt-in: users must explicitly enable Jira integration
           blockedTools: [],

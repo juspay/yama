@@ -10,6 +10,7 @@ export interface ExploreRuntimeContext {
   mode: "pr" | "local";
   workspace: string;
   repository: string;
+  provider?: string; // "github" | "bitbucket" (defaults to "bitbucket" for backward compatibility)
   pullRequestId?: number;
   branch?: string;
   dryRun?: boolean;

@@ -18,6 +18,10 @@ import {
 } from "../learning/types.js";
 import { YamaConfig } from "../types/config.types.js";
 import {
+  getProviderToolset,
+  type VCSProviderName,
+} from "../providers/ProviderToolset.js";
+import {
   buildObservabilityConfigFromEnv,
   validateObservabilityConfig,
 } from "../utils/ObservabilityConfig.js";
@@ -242,6 +246,7 @@ export class LearningOrchestrator {
           const ownerId = MemoryManager.buildOwnerId(
             request.workspace,
             request.repository,
+            request.provider || "bitbucket",
           );
 
           await this.neurolink.generate({
@@ -324,17 +329,36 @@ export class LearningOrchestrator {
   private buildFetchCommentsInstructions(request: LearnRequest): string {
     const aiPatterns = this.config.knowledgeBase.aiAuthorPatterns.join(", ");
 
+    // Derive the PR-read tool name and identifier format from the provider
+    // toolset so a GitHub learn run asks for the tool it actually has.
+    // The learn flow's only provider signal is request.provider; default to
+    // bitbucket to preserve existing behavior.
+    const provider: VCSProviderName =
+      request.provider === "github" ? "github" : "bitbucket";
+    const toolset = getProviderToolset(provider);
+    const prReadTool = toolset.prReadToolName;
+
+    // Bitbucket: workspace/repository/pull_request_id (byte-identical to before).
+    // GitHub: owner/repo/pull_number — the same repository identifiers carried
+    // by the Bitbucket-shaped request, relabelled to GitHub's vocabulary.
+    const prDetails =
+      provider === "github"
+        ? `  <owner>${request.workspace}</owner>
+  <repo>${request.repository}</repo>
+  <pull_number>${request.pullRequestId}</pull_number>`
+        : `  <workspace>${request.workspace}</workspace>
+  <repository>${request.repository}</repository>
+  <pull_request_id>${request.pullRequestId}</pull_request_id>`;
+
     return `
 <task>Fetch and analyze ALL PR comments for learning extraction</task>
 
 <pr-details>
-  <workspace>${request.workspace}</workspace>
-  <repository>${request.repository}</repository>
-  <pull_request_id>${request.pullRequestId}</pull_request_id>
+${prDetails}
 </pr-details>
 
 <instructions>
-1. Use get_pull_request tool to fetch the PR details including all comments/activities
+1. Use ${prReadTool} tool to fetch the PR details including all comments/activities
 2. Look through ALL comments on the PR (both active and resolved if available)
 3. Identify AI-generated comments by:
    - Author patterns: ${aiPatterns}

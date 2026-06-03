@@ -1,0 +1,35 @@
+version: 2
+configType: "yama"
+
+ai:
+  provider: anthropic
+  model: claude-opus-4-1
+  temperature: 0.7
+  maxTokens: 4096
+
+mcpServers:
+  github:
+    enabled: true
+    # transport defaults to "http" (GitHub's hosted remote MCP server).
+    # Use "stdio" only for a self-hosted / Docker GitHub MCP server.
+    # transport: http
+    # url: https://api.githubcopilot.com/mcp/
+    # blockedTools EXTENDS (does not replace) the built-in write-block denylist
+    # (push_files, create_or_update_file, create_branch, delete_file,
+    # create_pull_request_with_copilot, assign_copilot_to_issue). Entries listed
+    # here are added on top of those defaults; the defaults can never be un-blocked.
+    # blockedTools:
+    #   - delete_file
+  jira:
+    enabled: false
+
+review:
+  focusAreas:
+    - security
+    - performance
+    - codeQuality
+    - testing
+    - documentation
+  maxIssues: 10
+  autoApprove: false
+  requireApproval: true

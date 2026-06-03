@@ -1,0 +1,42 @@
+# Example workflow — copy this into YOUR repository's .github/workflows/ to run
+# Yama on its PRs. It lives under examples/ (not .github/workflows/) so it does
+# NOT execute inside the Yama repo itself. Replace `juspay/yama@v1` with a
+# published tag and set the ANTHROPIC_API_KEY + GitHub PAT secrets first.
+# Full setup: GITHUB_SETUP.md
+name: Yama AI Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: yama-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Don't leave the auto-injected GITHUB_TOKEN in .git/config; Yama
+          # uses its own PAT for the GitHub MCP endpoint (see below).
+          persist-credentials: false
+      - name: Yama Review
+        # Production users should pin to an immutable commit SHA
+        # (e.g. juspay/yama@<sha>) instead of a movable tag for supply-chain
+        # safety. The readable tag is kept here for example clarity.
+        uses: juspay/yama@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          # A GitHub PAT (repo / pull_requests scope) — the hosted GitHub MCP
+          # endpoint needs a real PAT, not the ephemeral Actions GITHUB_TOKEN.
+          # See GITHUB_SETUP.md §6.
+          github-token: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          ai-provider: anthropic
+          ai-model: claude-opus-4-8
+          focus-areas: security,performance

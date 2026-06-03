@@ -71,9 +71,17 @@ export class ConfigLoader {
   }
 
   /**
-   * Validate configuration completeness and correctness
+   * Validate configuration completeness and correctness.
+   *
+   * @param mode      "pr" requires VCS credentials; "local" is SDK-first and skips them.
+   * @param provider  Detected VCS provider. When "github", Bitbucket env vars are
+   *                  NOT required (a GitHub token is required instead); otherwise
+   *                  Bitbucket credentials are validated as before.
    */
-  async validate(mode: "pr" | "local" = "pr"): Promise<void> {
+  async validate(
+    mode: "pr" | "local" = "pr",
+    provider?: "github" | "bitbucket",
+  ): Promise<void> {
     if (!this.config) {
       throw new ConfigurationError("No configuration to validate");
     }
@@ -91,15 +99,32 @@ export class ConfigLoader {
 
     // Local mode is SDK-first and does not require MCP credentials.
     if (mode === "pr") {
-      // Check environment variables for Bitbucket (required in PR mode)
-      if (!process.env.BITBUCKET_USERNAME) {
-        errors.push("BITBUCKET_USERNAME environment variable not set");
-      }
-      if (!process.env.BITBUCKET_TOKEN) {
-        errors.push("BITBUCKET_TOKEN environment variable not set");
-      }
-      if (!process.env.BITBUCKET_BASE_URL) {
-        errors.push("BITBUCKET_BASE_URL environment variable not set");
+      if (provider === "github") {
+        // GitHub provider: require a GitHub token instead of Bitbucket creds.
+        // Token resolution order mirrors MCPServerManager: GITHUB_TOKEN →
+        // GH_TOKEN → GITHUB_PERSONAL_ACCESS_TOKEN → GITHUB_ACCESS_TOKEN
+        // (GITHUB_ACCESS_TOKEN is the dedicated PAT used in Curator/DNV).
+        if (
+          !process.env.GITHUB_TOKEN &&
+          !process.env.GH_TOKEN &&
+          !process.env.GITHUB_PERSONAL_ACCESS_TOKEN &&
+          !process.env.GITHUB_ACCESS_TOKEN
+        ) {
+          errors.push(
+            "GitHub provider selected but no GitHub token found. Set GITHUB_TOKEN (or GH_TOKEN / GITHUB_PERSONAL_ACCESS_TOKEN / GITHUB_ACCESS_TOKEN).",
+          );
+        }
+      } else {
+        // Bitbucket provider (default): require Bitbucket credentials.
+        if (!process.env.BITBUCKET_USERNAME) {
+          errors.push("BITBUCKET_USERNAME environment variable not set");
+        }
+        if (!process.env.BITBUCKET_TOKEN) {
+          errors.push("BITBUCKET_TOKEN environment variable not set");
+        }
+        if (!process.env.BITBUCKET_BASE_URL) {
+          errors.push("BITBUCKET_BASE_URL environment variable not set");
+        }
       }
 
       if (this.config.mcpServers.jira.enabled) {

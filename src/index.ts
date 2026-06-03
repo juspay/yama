@@ -7,6 +7,10 @@
 // Core Exports
 // ============================================================================
 
+// `YamaOrchestrator` is exported below as a class, which exposes it to SDK
+// consumers as BOTH a value and a type (with all of its public methods). A
+// separate `export type { YamaOrchestrator }` is intentionally omitted because
+// it would collide with this value export (TS2300: Duplicate identifier).
 export {
   YamaOrchestrator,
   createYama,

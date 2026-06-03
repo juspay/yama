@@ -22,6 +22,12 @@ export interface YamaConfig {
   projectStandards?: ProjectStandardsConfig;
   monitoring: MonitoringConfig;
   performance: PerformanceConfig;
+  /**
+   * Optional explicit default VCS provider used as the lowest-priority
+   * fallback by ProviderDetector when neither the request nor the
+   * environment indicate a provider. Defaults to Bitbucket when unset.
+   */
+  defaultProvider?: "github" | "bitbucket";
 }
 
 // Backward-compatible alias.
@@ -97,16 +103,44 @@ export interface RedisConfig {
 // MCP Servers Configuration
 // ============================================================================
 
+export interface BitbucketConfig {
+  enabled?: boolean;
+  /** List of tool names to block from Bitbucket MCP server */
+  blockedTools?: string[];
+}
+
+export interface GitHubConfig {
+  enabled: boolean;
+  /** List of tool names to block from GitHub MCP server */
+  blockedTools?: string[];
+  /**
+   * Transport for the GitHub MCP server.
+   * Defaults to "http" (GitHub's hosted remote MCP server). Use "stdio" only
+   * for a self-hosted / Docker GitHub MCP server (requires `command`/`args`).
+   */
+  transport?: "http" | "stdio";
+  /**
+   * Endpoint for the remote HTTP GitHub MCP server.
+   * Defaults to "https://api.githubcopilot.com/mcp/". Override to point at a
+   * self-hosted / enterprise remote MCP endpoint.
+   */
+  url?: string;
+  /** Command to launch a self-hosted stdio GitHub MCP server (transport: "stdio"). */
+  command?: string;
+  /** Arguments for the self-hosted stdio GitHub MCP server command. */
+  args?: string[];
+}
+
+export interface JiraConfig {
+  enabled: boolean;
+  /** List of tool names to block from Jira MCP server */
+  blockedTools?: string[];
+}
+
 export interface MCPServersConfig {
-  bitbucket?: {
-    /** List of tool names to block from Bitbucket MCP server */
-    blockedTools?: string[];
-  };
-  jira: {
-    enabled: boolean;
-    /** List of tool names to block from Jira MCP server */
-    blockedTools?: string[];
-  };
+  bitbucket?: BitbucketConfig;
+  github?: GitHubConfig;
+  jira: JiraConfig;
 }
 
 // ============================================================================
