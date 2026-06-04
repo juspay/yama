@@ -1,3 +1,10 @@
+# [2.6.0](https://github.com/juspay/yama/compare/v2.5.0...v2.6.0) (2026-06-04)
+
+
+### Features
+
+* **action:** add Yama self-review workflow with LiteLLM/Vertex auth ([5ebb73f](https://github.com/juspay/yama/commit/5ebb73f2450951b5f97d97a6a3caa89377a150af))
+
 # [2.5.0](https://github.com/juspay/yama/compare/v2.4.2...v2.5.0) (2026-06-03)
 
 
