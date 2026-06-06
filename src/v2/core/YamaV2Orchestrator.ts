@@ -29,6 +29,7 @@ import {
   TokenUsage,
   UnifiedReviewRequest,
   IssuesBySeverity,
+  CreatedTask,
 } from "../types/v2.types.js";
 import { YamaConfig, YamaInitOptions } from "../types/config.types.js";
 import {
@@ -750,6 +751,9 @@ export class YamaOrchestrator {
     // Calculate statistics from session tool calls
     const statistics = this.calculateStatistics(session);
 
+    // Collect any Jira tasks created during the review
+    const tasks = this.extractCreatedTasks(session);
+
     return {
       mode: "pr",
       // GitHub passes the PR number via prNumber; coalesce so GitHub reviews
@@ -766,6 +770,7 @@ export class YamaOrchestrator {
       },
       costEstimate: this.calculateCost(aiResponse.usage),
       sessionId,
+      ...(tasks.length > 0 ? { tasks } : {}),
     };
   }
 
@@ -1168,6 +1173,37 @@ export class YamaOrchestrator {
     );
     const issuesFound = this.extractIssueCountsFromComments(commentCalls);
 
+    // Count Bitbucket tasks created (convert_pr_item to_task + create_pr_task calls
+    // that returned a task id)
+    const tasksCreated = toolCalls.filter((tc: any) => {
+      if (tc?.toolName === "convert_pr_item") {
+        // convert_pr_item returns plain text on success (no JSON id); count any
+        // successful to_task call (no error string in result).
+        if (tc?.args?.direction !== "to_task") {
+          return false;
+        }
+        const res = tc?.result;
+        if (!res) {
+          return false;
+        }
+        // If result is a string, it's the success message (no error)
+        if (typeof res === "string") {
+          return !res.toLowerCase().includes("error");
+        }
+        // If result is an object, check it's not an error object
+        return !(res?.error ?? res?.isError);
+      }
+      if (tc?.toolName === "create_pr_task") {
+        // create_pr_task returns { message, task: { id, ... } }
+        return !!(
+          tc?.result?.task?.id ??
+          tc?.result?.id ??
+          tc?.result?.data?.id
+        );
+      }
+      return false;
+    }).length;
+
     return {
       filesReviewed,
       issuesFound,
@@ -1176,6 +1212,7 @@ export class YamaOrchestrator {
       toolCallsMade: toolCalls.length,
       cacheHits: 0,
       totalComments: commentCalls.length,
+      tasksCreated,
     };
   }
 
@@ -1272,6 +1309,199 @@ export class YamaOrchestrator {
    */
   private extractSummary(aiResponse: any): string {
     return aiResponse.content || aiResponse.text || "Review completed";
+  }
+
+  /**
+   * Extract Bitbucket tasks created during the review from the session tool calls.
+   *
+   * Two creation paths are tracked:
+   *   1. convert_pr_item(direction="to_task") — converts an inline comment into a task.
+   *      The result carries the task id; the source comment id is in args.id.
+   *   2. create_pr_task — creates a standalone PR-level task.
+   *      The result carries the task id and text.
+   *
+   * When the source comment body contains the configured task keyword (default "[TASK]"),
+   * the task is flagged as triggeredByKeyword=true.
+   */
+  private extractCreatedTasks(session: any): CreatedTask[] {
+    const toolCalls: any[] = session?.toolCalls ?? [];
+    const tasks: CreatedTask[] = [];
+    const taskKeyword =
+      this.config?.mcpServers?.bitbucket?.taskCreation?.taskKeyword ?? "[TASK]";
+
+    for (const tc of toolCalls) {
+      const toolName: string = tc?.toolName ?? "";
+
+      // ── Path 1: convert_pr_item(direction="to_task") ──────────────────────
+      if (toolName === "convert_pr_item") {
+        const args = tc?.args ?? {};
+        if (args?.direction !== "to_task") {
+          continue; // Only care about comment→task conversions
+        }
+        const result = tc?.result ?? {};
+        const rawId =
+          result?.id ?? result?.data?.id ?? result?.task?.id ?? args?.id;
+        if (rawId === null || rawId === undefined) {
+          continue;
+        }
+
+        const taskId = String(rawId);
+        const sourceCommentId =
+          typeof args?.id === "number" ? args.id : undefined;
+
+        // Infer severity from the closest preceding add_comment for this id
+        const { severity, commentText } =
+          this.inferSeverityAndTextFromCommentId(toolCalls, sourceCommentId);
+
+        // Check whether the AI used the keyword to escalate this comment
+        const triggeredByKeyword =
+          taskKeyword.length > 0 &&
+          typeof commentText === "string" &&
+          commentText.includes(taskKeyword);
+
+        const task: CreatedTask = {
+          taskId,
+          summary: result?.text ?? result?.data?.text ?? "Review finding",
+          severity,
+          sourceCommentId,
+        };
+        if (triggeredByKeyword) {
+          task.triggeredByKeyword = true;
+        }
+        tasks.push(task);
+        continue;
+      }
+
+      // ── Path 2: create_pr_task (standalone task) ──────────────────────────
+      if (toolName === "create_pr_task") {
+        const result = tc?.result ?? {};
+        const rawId = result?.id ?? result?.data?.id ?? result?.task?.id;
+        if (rawId === null || rawId === undefined) {
+          continue;
+        }
+
+        const taskId = String(rawId);
+        const args = tc?.args ?? {};
+        const text: string = args?.text ?? result?.text ?? "Review finding";
+
+        // Infer severity from the task text (the AI formats it with severity)
+        const severity = this.inferSeverityFromText(text);
+
+        // Check whether the task text contains the keyword (AI may include it)
+        const triggeredByKeyword =
+          taskKeyword.length > 0 && text.includes(taskKeyword);
+
+        // Check whether this create_pr_task was triggered by a conditional rule.
+        // Match by comparing the task text against each configured rule's createTask.text.
+        const matchedRule = (
+          this.config?.mcpServers?.bitbucket?.taskCreation
+            ?.conditionalTaskRules ?? []
+        ).find((rule) => rule.createTask.text === text);
+
+        // Parse file path and line from task text:
+        // The AI is instructed to format: "[SEVERITY] file:line — description"
+        const fileMatch = text.match(/([^\s[\]]+\.[a-zA-Z0-9]+):(\d+)/);
+
+        const task: CreatedTask = {
+          taskId,
+          summary:
+            text
+              .replace(/^\[.*?\]\s*/, "")
+              .split("—")[0]
+              ?.trim() ?? text,
+          severity,
+          filePath: fileMatch ? fileMatch[1] : undefined,
+          line: fileMatch ? parseInt(fileMatch[2], 10) : undefined,
+        };
+        if (triggeredByKeyword) {
+          task.triggeredByKeyword = true;
+        }
+        if (matchedRule) {
+          task.triggeredByRule = matchedRule.name;
+        }
+        tasks.push(task);
+      }
+    }
+
+    return tasks;
+  }
+
+  /**
+   * Walk backward through tool calls to find the add_comment that immediately
+   * preceded convert_pr_item for a given comment ID, and return both the
+   * inferred severity and the raw comment text (for keyword detection).
+   */
+  private inferSeverityAndTextFromCommentId(
+    toolCalls: any[],
+    commentId: number | undefined,
+  ): { severity: CreatedTask["severity"]; commentText: string } {
+    for (let i = toolCalls.length - 1; i >= 0; i--) {
+      const tc = toolCalls[i];
+      if (tc?.toolName !== "add_comment") {
+        continue;
+      }
+      const resultId =
+        tc?.result?.id ?? tc?.result?.data?.id ?? tc?.result?.comment?.id;
+      if (
+        commentId !== undefined &&
+        resultId !== null &&
+        resultId !== undefined &&
+        resultId !== commentId
+      ) {
+        continue;
+      }
+      const commentText: string = tc?.args?.comment_text ?? "";
+      return {
+        severity: this.inferSeverityFromText(commentText),
+        commentText,
+      };
+    }
+    return { severity: "MAJOR", commentText: "" };
+  }
+
+  /**
+   * @deprecated Use inferSeverityAndTextFromCommentId instead.
+   * Kept for backward compatibility with any callers that only need severity.
+   */
+  private inferSeverityFromCommentId(
+    toolCalls: any[],
+    commentId: number | undefined,
+  ): CreatedTask["severity"] {
+    return this.inferSeverityAndTextFromCommentId(toolCalls, commentId)
+      .severity;
+  }
+
+  /** Infer a severity level from a comment/task text containing emoji markers. */
+  private inferSeverityFromText(text: string): CreatedTask["severity"] {
+    if (
+      text.includes("🔒 CRITICAL") ||
+      text.includes("CRITICAL:") ||
+      text.includes("[CRITICAL]")
+    ) {
+      return "CRITICAL";
+    }
+    if (
+      text.includes("⚠️ MAJOR") ||
+      text.includes("MAJOR:") ||
+      text.includes("[MAJOR]")
+    ) {
+      return "MAJOR";
+    }
+    if (
+      text.includes("💡 MINOR") ||
+      text.includes("MINOR:") ||
+      text.includes("[MINOR]")
+    ) {
+      return "MINOR";
+    }
+    if (
+      text.includes("💬 SUGGESTION") ||
+      text.includes("SUGGESTION:") ||
+      text.includes("[SUGGESTION]")
+    ) {
+      return "SUGGESTION";
+    }
+    return "MAJOR"; // safe default for task-worthy findings
   }
 
   /**

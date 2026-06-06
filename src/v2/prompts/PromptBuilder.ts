@@ -112,10 +112,18 @@ export class PromptBuilder {
     const knowledgeBase = await this.loadKnowledgeBase(config);
     const exploreEnabled = config.ai.explore.enabled;
 
-    // Strip explore_context references when the subagent is disabled.
+    // Bitbucket native task creation: enabled only when provider is bitbucket
+    // and bitbucket.taskCreation.enabled = true.
+    const taskCreationEnabled =
+      provider === "bitbucket" &&
+      config.mcpServers.bitbucket?.taskCreation?.enabled === true;
+
+    // Strip explore_context references when the subagent is disabled,
+    // and task creation references when that feature is disabled.
     const basePrompt = PromptBuilder.stripDisabledSections(
       basePromptRaw,
       exploreEnabled,
+      taskCreationEnabled,
     );
 
     const toolsetParams = this.toToolsetParams(request);
@@ -123,7 +131,12 @@ export class PromptBuilder {
     const workflowBlock = PromptBuilder.stripDisabledSections(
       this.buildReviewWorkflow(request, toolset, toolsetParams),
       exploreEnabled,
+      taskCreationEnabled,
     );
+
+    const taskCreationBlock = taskCreationEnabled
+      ? this.buildBitbucketTaskCreationBlock(config)
+      : "";
 
     const bootstrapBlock =
       bootstrapStandards && bootstrapStandards.trim().length > 0
@@ -157,6 +170,7 @@ ${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` 
 ${toolset.identifierXml(toolsetParams)}
   <mode>${request.dryRun ? "dry-run" : "live"}</mode>
 
+${taskCreationBlock}
 ${workflowBlock}
 </review-task>
     `.trim();
@@ -189,12 +203,16 @@ ${toolset.reviewWorkflowInstructions(params)}
   }
 
   /**
-   * Strip sections that depend on explore_context being enabled.
+   * Strip sections that depend on explore_context being enabled, and sections
+   * that depend on Bitbucket task creation being enabled.
    * Keeps the prompt single-source and avoids forking files for the disabled case.
    *
-   * - <!-- EXPLORE_BEGIN -->...<!-- EXPLORE_END --> is removed when explore is OFF.
-   * - <!-- EXPLORE_DISABLED_BEGIN -->...<!-- EXPLORE_DISABLED_END --> is removed when explore is ON.
-   * - The marker comments themselves are always stripped.
+   * Markers and their semantics:
+   *   <!-- EXPLORE_BEGIN -->...<!-- EXPLORE_END -->         — kept when explore ON, removed when OFF.
+   *   <!-- EXPLORE_DISABLED_BEGIN -->...<!-- EXPLORE_DISABLED_END --> — removed when explore ON.
+   *   <!-- TASK_CREATE_BEGIN -->...<!-- TASK_CREATE_END -->  — kept when task creation ON, removed when OFF.
+   *
+   * The marker comments themselves are always stripped.
    *
    * Implementation uses linear indexOf/slice instead of regex to avoid any
    * polynomial-backtracking risk on adversarial input.
@@ -202,11 +220,14 @@ ${toolset.reviewWorkflowInstructions(params)}
   static stripDisabledSections(
     prompt: string,
     exploreEnabled: boolean,
+    taskCreationEnabled: boolean = false,
   ): string {
     const EXPLORE_BEGIN = "<!-- EXPLORE_BEGIN -->";
     const EXPLORE_END = "<!-- EXPLORE_END -->";
     const EXPLORE_DISABLED_BEGIN = "<!-- EXPLORE_DISABLED_BEGIN -->";
     const EXPLORE_DISABLED_END = "<!-- EXPLORE_DISABLED_END -->";
+    const TASK_CREATE_BEGIN = "<!-- TASK_CREATE_BEGIN -->";
+    const TASK_CREATE_END = "<!-- TASK_CREATE_END -->";
 
     const stripBlock = (text: string, start: string, end: string): string => {
       let out = "";
@@ -231,20 +252,152 @@ ${toolset.reviewWorkflowInstructions(params)}
     const removeAll = (text: string, marker: string): string =>
       text.split(marker).join("");
 
+    // --- Explore sections ---
+    let result: string;
     if (exploreEnabled) {
-      let result = stripBlock(
-        prompt,
-        EXPLORE_DISABLED_BEGIN,
-        EXPLORE_DISABLED_END,
-      );
+      result = stripBlock(prompt, EXPLORE_DISABLED_BEGIN, EXPLORE_DISABLED_END);
       result = removeAll(result, EXPLORE_BEGIN);
       result = removeAll(result, EXPLORE_END);
-      return result;
+    } else {
+      result = stripBlock(prompt, EXPLORE_BEGIN, EXPLORE_END);
+      result = removeAll(result, EXPLORE_DISABLED_BEGIN);
+      result = removeAll(result, EXPLORE_DISABLED_END);
     }
-    let result = stripBlock(prompt, EXPLORE_BEGIN, EXPLORE_END);
-    result = removeAll(result, EXPLORE_DISABLED_BEGIN);
-    result = removeAll(result, EXPLORE_DISABLED_END);
+
+    // --- Task creation sections ---
+    if (taskCreationEnabled) {
+      // Keep the content inside TASK_CREATE markers, just remove the markers.
+      result = removeAll(result, TASK_CREATE_BEGIN);
+      result = removeAll(result, TASK_CREATE_END);
+    } else {
+      // Strip the entire TASK_CREATE block.
+      result = stripBlock(result, TASK_CREATE_BEGIN, TASK_CREATE_END);
+    }
+
     return result;
+  }
+
+  /**
+   * Build the <bitbucket-task-creation> XML block injected into <review-task>.
+   *
+   * Only emitted when bitbucket.taskCreation.enabled = true. Contains:
+   *  - Severity-based path: convert every qualifying comment into a task.
+   *  - Keyword-based path: AI appends taskKeyword to any comment to escalate it.
+   *  - Conditional rules: repo-specific "if PR touches X → create task Y" rules
+   *    evaluated once in STEP 2 before the file-by-file review starts.
+   */
+  private buildBitbucketTaskCreationBlock(config: YamaConfig): string {
+    const tc = config.mcpServers.bitbucket?.taskCreation;
+    if (!tc?.enabled) {
+      return "";
+    }
+
+    const severities = (tc.severities ?? ["CRITICAL", "MAJOR"]).join(", ");
+    const keyword = tc.taskKeyword ?? "[TASK]";
+    const keywordEnabled = keyword.length > 0;
+    const rules = tc.conditionalTaskRules ?? [];
+
+    const keywordPath = keywordEnabled
+      ? `
+      PATH 2 — Keyword-based (per-comment discretion):
+      For any inline comment at ANY severity level that you judge deserves a
+      developer action item — even MINOR or SUGGESTION — append "${keyword}" to
+      the comment_text body. Then follow the same convert_pr_item flow (steps
+      1-3 above). Use this sparingly for genuinely important non-critical findings
+      where you want the developer to explicitly acknowledge the issue.
+`
+      : "";
+
+    const onlyClause = keywordEnabled
+      ? `severities: ${severities}, or when the comment body contains "${keyword}"`
+      : `severities: ${severities}`;
+
+    const noTaskClause = keywordEnabled
+      ? `Do NOT call these tools for MINOR or SUGGESTION unless the comment body contains "${keyword}".`
+      : `Do NOT call convert_pr_item or create_pr_task for MINOR or SUGGESTION.`;
+
+    // Build the conditional rules section (only if rules are defined)
+    const conditionalRulesBlock =
+      rules.length > 0
+        ? `\n  <conditional-task-rules>
+    <!-- Evaluated ONCE in STEP 2, immediately after you read the changed files
+         list from get_pull_request. For each rule whose trigger is met, call
+         create_pr_task once with the configured task text. Never call a rule's
+         task more than once per review, and never evaluate these rules inside
+         explore_context. -->
+${rules
+  .map((rule) => {
+    const triggers: string[] = [];
+    if (rule.triggerWhen.always) {
+      triggers.push(
+        `<trigger-always>true — fire for every PR regardless of changes</trigger-always>`,
+      );
+    }
+    if (rule.triggerWhen.filesMatch && rule.triggerWhen.filesMatch.length > 0) {
+      triggers.push(
+        `<trigger-files-match>Fire if ANY changed file path matches (case-insensitive substring or glob): ${rule.triggerWhen.filesMatch.map((p) => `"${this.escapeXML(p)}"`).join(", ")}</trigger-files-match>`,
+      );
+    }
+    if (
+      rule.triggerWhen.diffContains &&
+      rule.triggerWhen.diffContains.length > 0
+    ) {
+      triggers.push(
+        `<trigger-diff-contains>Fire if ANY of these appear in the diff content or file paths (case-insensitive): ${rule.triggerWhen.diffContains.map((p) => `"${this.escapeXML(p)}"`).join(", ")}</trigger-diff-contains>`,
+      );
+    }
+    return `    <rule name="${this.escapeXML(rule.name)}"${rule.description ? ` description="${this.escapeXML(rule.description)}"` : ""}>
+${triggers.map((t) => `      ${t}`).join("\n")}
+      <task-text>${this.escapeXML(rule.createTask.text)}</task-text>
+    </rule>`;
+  })
+  .join("\n")}
+  </conditional-task-rules>`
+        : "";
+
+    return `  <bitbucket-task-creation>
+    <enabled>true</enabled>
+    <severities>${severities}</severities>${keywordEnabled ? `\n    <task-keyword>${keyword}</task-keyword>` : ""}
+    <instructions>
+      PART A — Conditional task rules (evaluated ONCE in STEP 2, before file review):
+      After reading the PR's changed files list, evaluate each rule in
+      &lt;conditional-task-rules&gt;. If a rule's trigger is met, call
+      create_pr_task(workspace, repository, pull_request_id, text="&lt;rule task-text&gt;")
+      immediately. Fire each rule at most once.
+
+      PART B — Comment-to-task conversion (evaluated in STEP 3 per comment):
+      Tasks are created after inline comments via two trigger paths:
+
+      PATH 1 — Severity-based (automatic):
+      For every inline comment you post with severity in [${severities}]:
+
+      1. Post the comment with add_comment as normal.
+      2. Immediately call create_pr_task(workspace, repository, pull_request_id,
+            text="[SEVERITY] &lt;file_path&gt;:&lt;line&gt; — &lt;brief issue description&gt;").
+         This is unconditional — do NOT depend on or wait for the add_comment id.
+      3. Optional enhancement: also call convert_pr_item with:
+         - workspace, repository, pull_request_id (same as the review context)
+         - id: the comment.id value from the add_comment response JSON (nested under "comment" object, NOT a top-level field)
+         - direction: "to_task"
+         If convert_pr_item errors, ignore it — create_pr_task in step 2 already satisfies the requirement.
+      Do NOT move to the next file until create_pr_task has been called.
+${keywordPath}
+       RECONCILIATION MODE: If you decide NOT to call add_comment for a CRITICAL/MAJOR
+       finding because an existing comment already covers it (seen in STEP 2's
+       get_pull_request response), you MUST still call create_pr_task for that finding
+       (and optionally convert_pr_item with the existing comment's id).
+       Do not skip task creation just because the comment is from a prior run.
+
+      If both methods fail:
+      - The PR comment was already posted — do NOT skip it.
+      - Do NOT abort or pause the review.
+      - Continue to the next file.
+
+      ONLY convert/create comment-derived tasks for ${onlyClause}.
+      ${noTaskClause}
+      Do NOT call these tools inside explore_context.
+    </instructions>
+  </bitbucket-task-creation>${conditionalRulesBlock}`;
   }
 
   /**

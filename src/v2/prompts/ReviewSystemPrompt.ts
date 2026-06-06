@@ -63,6 +63,18 @@ ${toolUsageSection}
     <level name="SUGGESTION" emoji="💬">Informational. Optimizations and improvements.</level>
   </severity-levels>
 
+  <!-- TASK_CREATE_BEGIN -->
+  <task-creation-rules>
+    <rule>In STEP 2, after reading the changed files list, evaluate every rule in &lt;conditional-task-rules&gt; (if present). If a rule's trigger is met, call create_pr_task once with the rule's task-text before starting the file-by-file review. Never fire the same rule twice.</rule>
+    <rule>After posting an inline comment whose severity matches the configured task-creation severities, immediately call convert_pr_item with the comment id and direction="to_task" to convert it into a Bitbucket task.</rule>
+    <rule>If the configured task keyword (e.g. "[TASK]") is present in the comment body, also call convert_pr_item — this applies at ANY severity, not just the configured severities. Use the keyword sparingly for non-critical findings that still require explicit developer acknowledgement.</rule>
+    <rule>If convert_pr_item fails or is unavailable (Bitbucket Cloud), fall back to create_pr_task with the issue text — never skip task creation because one method failed.</rule>
+    <rule>If both task creation methods fail, post the PR comment without a task — never abort the review because task creation failed.</rule>
+    <rule>NEVER call convert_pr_item or create_pr_task for MINOR or SUGGESTION comments unless they are explicitly listed in the &lt;bitbucket-task-creation&gt; severities or the comment body contains the configured task keyword.</rule>
+    <rule>NEVER call task creation tools inside explore_context — task creation is only allowed in the main review loop.</rule>
+  </task-creation-rules>
+  <!-- TASK_CREATE_END -->
+
   <anti-patterns>
     <dont>Request all files upfront — use lazy loading, one file at a time.</dont>
     <dont>Batch comments until the end — comment immediately as you find issues.</dont>
@@ -70,6 +82,13 @@ ${toolUsageSection}
     <dont>Use a code_snippet field — always use line_number and line_type from the diff JSON.</dont>
     <dont>Jump between files — finish one file before starting another.</dont>
     <dont>Duplicate an existing comment — check first; reply if a developer's response is wrong.</dont>
+    <dont>Call add_comment without first confirming you have a line_number and line_type sourced directly from the diff JSON output — never guess or infer these values.</dont>
+    <!-- TASK_CREATE_BEGIN -->
+    <dont>Create a task for every comment — only for severities listed in the &lt;bitbucket-task-creation&gt; config block, or when you explicitly append the configured task keyword to a comment body.</dont>
+    <dont>Call convert_pr_item before add_comment returns a comment id — post the comment first, then convert it.</dont>
+    <dont>Append the task keyword to every MINOR or SUGGESTION comment — use it sparingly for genuinely important findings that need explicit developer acknowledgement.</dont>
+    <dont>Fire a conditional task rule more than once per review — check once in STEP 2 and do not re-evaluate the same rule during the file-by-file review.</dont>
+    <!-- TASK_CREATE_END -->
   </anti-patterns>
 </yama-review-system>
 `;

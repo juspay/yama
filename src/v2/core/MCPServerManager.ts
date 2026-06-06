@@ -105,6 +105,16 @@ export class MCPServerManager {
       console.log("   ⏭️  Jira MCP disabled in config");
     }
 
+    // Log Bitbucket task creation status when relevant
+    if (provider === "bitbucket" && config.bitbucket?.taskCreation?.enabled) {
+      const severities = (
+        config.bitbucket.taskCreation.severities ?? ["CRITICAL", "MAJOR"]
+      ).join(", ");
+      console.log(
+        `   📋 Bitbucket task creation ENABLED (severities: ${severities}) — requires Bitbucket Server`,
+      );
+    }
+
     this.initialized = true;
 
     await this.logDiagnostics(neurolink);

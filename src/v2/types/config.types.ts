@@ -107,6 +107,101 @@ export interface BitbucketConfig {
   enabled?: boolean;
   /** List of tool names to block from Bitbucket MCP server */
   blockedTools?: string[];
+  /**
+   * Native Bitbucket PR task creation.
+   * When enabled, review findings of the configured severities are converted
+   * from inline comments into Bitbucket tasks — checklist items that must be
+   * resolved before the PR can be merged.
+   * Requires Bitbucket Server (self-hosted); not available on Bitbucket Cloud.
+   */
+  taskCreation?: BitbucketTaskCreationConfig;
+}
+
+/**
+ * A single conditional task rule.
+ * When the AI detects that a PR satisfies the trigger conditions, it calls
+ * create_pr_task once with the configured text. Rules are evaluated in STEP 2
+ * (after reading the PR shell / changed files list), before the file-by-file
+ * review starts. Each rule fires at most once per review.
+ *
+ * Example (Lighthouse repo yama.config.json):
+ *   {
+ *     "name": "automation-test-required",
+ *     "triggerWhen": {
+ *       "filesMatch": ["automation/", "ai-tab/"],
+ *       "diffContains": ["slash command", "AI tab"]
+ *     },
+ *     "createTask": {
+ *       "text": "Attach automation test cases and video proof for this PR."
+ *     }
+ *   }
+ */
+export interface ConditionalTaskRule {
+  /**
+   * Unique identifier for this rule.
+   * Appears in ReviewResult.tasks[].triggeredByRule for traceability.
+   */
+  name: string;
+  /** Optional human-readable explanation of when / why this rule fires. */
+  description?: string;
+  /**
+   * Trigger conditions. The rule fires when ANY condition below is met.
+   * The AI evaluates these semantically against the changed files and diff.
+   */
+  triggerWhen: {
+    /**
+     * File path patterns (glob-style or substring, case-insensitive).
+     * The rule fires if ANY changed file path matches ANY entry in this list.
+     * Examples: ["automation/", "src/ai-tab/", "slash"]
+     */
+    filesMatch?: string[];
+    /**
+     * Text / code patterns (case-insensitive substring).
+     * The rule fires if ANY of these appear in the diff content OR changed file paths.
+     * Examples: ["slash command", "AI tab", "automation suite"]
+     */
+    diffContains?: string[];
+    /**
+     * Always fire this rule for every PR review, regardless of changed files.
+     * Useful for org-wide mandatory checklists.
+     */
+    always?: boolean;
+  };
+  /** The PR-level task to create when this rule fires. */
+  createTask: {
+    /** Full task text shown on the Bitbucket PR checklist. */
+    text: string;
+  };
+}
+
+/**
+ * Configuration for converting specific review comments into Bitbucket PR tasks.
+ * Tasks are native Bitbucket checklist items that block PR merging until resolved.
+ * Uses the convert_pr_item MCP tool (Bitbucket Server only).
+ */
+export interface BitbucketTaskCreationConfig {
+  /** Master switch. Requires Bitbucket Server. */
+  enabled: boolean;
+  /**
+   * Which comment severities are automatically converted to tasks.
+   * Defaults to ["CRITICAL", "MAJOR"]. Set explicitly to include MINOR.
+   */
+  severities?: Array<"CRITICAL" | "MAJOR" | "MINOR" | "SUGGESTION">;
+  /**
+   * Keyword the AI appends to any comment body to escalate that specific
+   * comment to a Bitbucket task, regardless of its severity level.
+   * Defaults to "[TASK]". Set to "" to disable keyword-based task creation
+   * and rely solely on the configured severities.
+   */
+  taskKeyword?: string;
+  /**
+   * Conditional task rules evaluated once per review (after reading the
+   * changed files list) before the file-by-file review starts.
+   * Each rule creates a PR-level task when its trigger conditions are met.
+   * This is the primary mechanism for repo-specific mandatory checklists
+   * (e.g. "if PR touches automation code → require test evidence").
+   */
+  conditionalTaskRules?: ConditionalTaskRule[];
 }
 
 export interface GitHubConfig {

@@ -57,6 +57,37 @@ export interface LocalReviewRequest {
 
 export type UnifiedReviewRequest = ReviewRequest | LocalReviewRequest;
 
+/**
+ * A native Bitbucket PR task created from a review finding.
+ * Populated when bitbucket.taskCreation.enabled = true and the AI converts
+ * a CRITICAL / MAJOR (or configured severity) comment into a task.
+ */
+export interface CreatedTask {
+  /** The Bitbucket task ID returned by convert_pr_item or create_pr_task. */
+  taskId: string;
+  /** Text / summary of the created task. */
+  summary: string;
+  /** Severity of the review finding that triggered task creation. */
+  severity: "CRITICAL" | "MAJOR" | "MINOR" | "SUGGESTION";
+  /** File path the finding relates to, if applicable. */
+  filePath?: string;
+  /** Line number the finding relates to, if applicable. */
+  line?: number;
+  /** ID of the source comment that was converted to a task (convert_pr_item flow). */
+  sourceCommentId?: number;
+  /**
+   * True when the task was triggered by the AI appending the configured task
+   * keyword (e.g. "[TASK]") to the comment body, rather than purely by severity.
+   */
+  triggeredByKeyword?: boolean;
+  /**
+   * Name of the ConditionalTaskRule that triggered this task (if applicable).
+   * Set when the task was created by evaluating a conditionalTaskRules entry
+   * rather than by comment severity or keyword.
+   */
+  triggeredByRule?: string;
+}
+
 export interface ReviewResult {
   mode?: ReviewMode;
   prId: number;
@@ -69,6 +100,11 @@ export interface ReviewResult {
   sessionId: string;
   descriptionEnhanced?: boolean;
   totalComments?: number;
+  /**
+   * Jira tasks created during the review.
+   * Only populated when jira.taskCreation.enabled = true.
+   */
+  tasks?: CreatedTask[];
 }
 
 export interface LocalReviewFinding {
@@ -118,6 +154,8 @@ export interface ReviewStatistics {
   toolCallsMade: number;
   cacheHits: number;
   totalComments: number;
+  /** Number of Jira tasks created during this review (0 when task creation is disabled). */
+  tasksCreated: number;
 }
 
 export interface IssuesBySeverity {
