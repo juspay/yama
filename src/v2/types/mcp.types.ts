@@ -111,6 +111,20 @@ export interface GetIssueResponse {
 }
 
 /**
+ * Response from a Bitbucket create_pr_task or convert_pr_item tool call.
+ * The `id` field is the Bitbucket task ID used to later resolve / re-open the task.
+ */
+export interface CreateBitbucketTaskResponse {
+  /** The task ID assigned by Bitbucket. */
+  id?: number | string;
+  /** Human-readable task text (echoed back on creation). */
+  text?: string;
+  /** Task state: "OPEN" or "RESOLVED". */
+  state?: string;
+  [key: string]: unknown;
+}
+
+/**
  * Code search response from a code-search tool call
  */
 export interface SearchCodeResponse {

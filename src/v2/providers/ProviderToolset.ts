@@ -98,6 +98,12 @@ class BitbucketToolset implements ProviderToolset {
     "update_pull_request",
     "merge_pull_request",
     "delete_branch",
+    // Task creation tools — must not be called inside explore_context
+    "convert_pr_item",
+    "create_pr_task",
+    "update_pr_task",
+    "delete_pr_task",
+    "set_pr_task_status",
   ];
 
   /**
@@ -154,7 +160,22 @@ class BitbucketToolset implements ProviderToolset {
     <tool name="add_comment">
       <fields>file_path, line_number, line_type (ADDED|REMOVED|CONTEXT), comment_text, and suggestion (required for CRITICAL and MAJOR — must be real, executable code).</fields>
       <do-not-use-when>You only have a code_snippet but no line_number/line_type from the diff JSON.</do-not-use-when>
+      <returns>JSON with shape { "message": "...", "comment": { "id": &lt;number&gt;, ... } }. The comment ID is at comment.id (NOT a top-level id field). For CRITICAL/MAJOR you MUST call create_pr_task immediately after — do not skip to the next file first.</returns>
+      <task-keyword>When task creation is enabled, you may append the configured task keyword (e.g. "[TASK]") to comment_text for ANY severity to escalate that comment to a Bitbucket task. Use sparingly for non-critical findings that still require explicit developer acknowledgement.</task-keyword>
     </tool>
+
+    <!-- TASK_CREATE_BEGIN -->
+    <tool name="create_pr_task">
+      <use-when>MANDATORY — call immediately after every add_comment for a CRITICAL or MAJOR finding (or any comment where you appended the task keyword). No conditions, no dependencies on the add_comment response. Also used for conditional task rules in STEP 2.</use-when>
+      <fields>workspace, repository, pull_request_id, text (include severity, file path, line number, and a brief description: e.g. "[CRITICAL] src/foo.ts:12 — explicit any type").</fields>
+    </tool>
+
+    <tool name="convert_pr_item">
+      <use-when>Optional enhancement — AFTER create_pr_task succeeds, also call convert_pr_item to link the task to the inline comment. Pass id=&lt;comment.id from the add_comment response&gt; and direction="to_task". If it errors, ignore — the create_pr_task already covers the requirement.</use-when>
+      <do-not-use-when>Task creation is not enabled, or the finding is MINOR/SUGGESTION without the task keyword.</do-not-use-when>
+      <fields>workspace, repository, pull_request_id, id (comment.id from the add_comment response JSON), direction="to_task".</fields>
+    </tool>
+    <!-- TASK_CREATE_END -->
 
     <tool name="set_pr_approval">
       <use-when>No blocking issues found. Pass approved=true.</use-when>
@@ -183,6 +204,16 @@ class BitbucketToolset implements ProviderToolset {
     Call get_pull_request once to get changed files, branch info, and existing comments.
     Build a mental map of which files exist and which already have comments.
     Do NOT request the full PR diff.
+    <!-- TASK_CREATE_BEGIN -->
+    After reading the changed files list, immediately evaluate each rule in
+    &lt;conditional-task-rules&gt; (if present in the task context):
+      - For each rule: check whether any changed file path matches the rule's
+        trigger-files-match patterns, OR whether the diff/file-path content
+        matches trigger-diff-contains patterns, OR whether trigger-always is true.
+      - If the rule fires, call create_pr_task(workspace, repository,
+          pull_request_id, text="&lt;rule task-text&gt;") ONCE for that rule.
+      - Never re-evaluate a rule during the file-by-file review.
+    <!-- TASK_CREATE_END -->
 
     STEP 3 — Walk files one at a time
     For each changed file, in order:
@@ -191,8 +222,29 @@ class BitbucketToolset implements ProviderToolset {
       c. If anything is non-trivial — multi-file impact, unfamiliar pattern, unclear intent,
          history-dependent behavior — <!-- EXPLORE_BEGIN -->call explore_context with a precise
          task and wait for its evidence before commenting<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN -->use search_code or get_file_content to verify before commenting<!-- EXPLORE_DISABLED_END -->.
-      d. For every confirmed issue, call add_comment immediately with line_number and
-         line_type from the diff JSON. Include a real-code suggestion for CRITICAL/MAJOR.
+      d. For every confirmed issue, validate then post:
+         VALIDATE BEFORE add_comment: confirm you have (1) a line_number taken
+         directly from the diff JSON output (never guessed), (2) a line_type of
+         ADDED/REMOVED/CONTEXT from the same diff JSON, and (3) a non-empty,
+         substantive comment_text. Only call add_comment when all three checks pass.
+         Include a real-code suggestion for CRITICAL/MAJOR.
+           <!-- TASK_CREATE_BEGIN -->
+           MANDATORY — task creation for CRITICAL/MAJOR comments:
+            For CRITICAL or MAJOR findings (or any comment where you appended the task keyword):
+            1. Immediately call create_pr_task(workspace, repository, pull_request_id,
+                 text="[SEVERITY] &lt;file_path&gt;:&lt;line&gt; — &lt;brief issue&gt;").
+               This is unconditional — do NOT wait for or depend on the add_comment id.
+            2. Optional: also call convert_pr_item(workspace, repository, pull_request_id,
+                 id=&lt;comment.id from the add_comment response JSON&gt;, direction="to_task")
+                 to link the task to the inline comment. If it errors, ignore — the
+                 create_pr_task in step 1 already satisfies the requirement.
+            Do NOT proceed to the next file until create_pr_task has been called.
+            Never skip create_pr_task for CRITICAL/MAJOR — it has no preconditions.
+            RECONCILIATION MODE — if you decide NOT to call add_comment because an existing
+            CRITICAL/MAJOR comment already covers this file/line, you MUST still call
+            create_pr_task (and optionally convert_pr_item with the existing comment id).
+            Do not skip task creation simply because the comment was posted in a prior run.
+           <!-- TASK_CREATE_END -->
       e. Move to the next file. Never request another file's diff before finishing the
          current one. Never request a multi-file diff.
 
@@ -202,6 +254,9 @@ class BitbucketToolset implements ProviderToolset {
 
     STEP 5 — Summary comment
     Post one summary comment with file count, issue counts by severity, and next steps.
+    <!-- TASK_CREATE_BEGIN -->
+    Include the number of tasks created in the summary (e.g., "3 tasks created for CRITICAL/MAJOR findings").
+    <!-- TASK_CREATE_END -->
 
     Budget guidance: roughly 10 tool calls per file in the main loop. If you exceed
     that on a single file, <!-- EXPLORE_BEGIN -->delegate the rest to explore_context<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN -->stop investigating<!-- EXPLORE_DISABLED_END --> and move on.`;

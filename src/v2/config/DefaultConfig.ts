@@ -50,6 +50,12 @@ export class DefaultConfig {
       mcpServers: {
         bitbucket: {
           blockedTools: [],
+          taskCreation: {
+            enabled: false, // Opt-in: set to true on Bitbucket Server to convert comments to tasks
+            severities: ["CRITICAL", "MAJOR"],
+            taskKeyword: "[TASK]", // AI appends this to any comment body to escalate it to a task
+            conditionalTaskRules: [], // Per-repo rules: if PR touches X → create task saying Y
+          },
         },
         github: {
           enabled: true,
