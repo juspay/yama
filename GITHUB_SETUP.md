@@ -11,6 +11,33 @@ troubleshooting.
 
 ---
 
+## 0. One-command setup (recommended)
+
+Instead of hand-creating the files in §3, run the interactive setup script from the repo
+you want reviewed. It asks for your **AI provider + model + target branch(es)**, then
+writes a provider-aware `.github/workflows/yama-review.yml` and a standard, tunable
+`yama.config.yaml`, and prints exactly what to do next (set secrets, optionally make it a
+required check, raise a PR — your call). It only makes the code changes; it never touches
+your secrets, commits, or opens a PR.
+
+```bash
+# From the target repo (no install needed):
+curl -fsSL https://raw.githubusercontent.com/juspay/yama/main/scripts/setup-github.sh | bash
+
+# …or from a cloned yama checkout:
+bash /path/to/yama/scripts/setup-github.sh
+
+# Non-interactive (CI / scripted):
+bash setup-github.sh --provider anthropic --model claude-opus-4-8 --branches main --yes
+```
+
+It auto-detects your repo's default branch and a `pnpm` `packageManager` clash (adding the
+workaround only when needed), is idempotent (won't clobber existing files without
+`--force`), and supports `--dry-run`. Run with `--help` for all flags. The rest of this
+guide explains what it generates and why.
+
+---
+
 ## 1. What you get
 
 - **Inline, line‑level comments** on the diff (parity with the Bitbucket flow).
