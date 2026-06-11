@@ -1,3 +1,10 @@
+# [2.7.0](https://github.com/juspay/yama/compare/v2.6.0...v2.7.0) (2026-06-11)
+
+
+### Features
+
+* **setup:** add one-command GitHub integration setup script ([6a014b0](https://github.com/juspay/yama/commit/6a014b05ccf12e4ca362316e5f69c9441a93618f))
+
 # [2.6.0](https://github.com/juspay/yama/compare/v2.5.0...v2.6.0) (2026-06-04)
 
 
