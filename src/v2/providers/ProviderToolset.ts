@@ -192,7 +192,9 @@ class BitbucketToolset implements ProviderToolset {
          history-dependent behavior — <!-- EXPLORE_BEGIN -->call explore_context with a precise
          task and wait for its evidence before commenting<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN -->use search_code or get_file_content to verify before commenting<!-- EXPLORE_DISABLED_END -->.
       d. For every confirmed issue, call add_comment immediately with line_number and
-         line_type from the diff JSON. Include a real-code suggestion for CRITICAL/MAJOR.
+         line_type from the diff JSON. Begin comment_text with the exact severity marker as
+         its first token — "🔒 CRITICAL:", "⚠️ MAJOR:", "💡 MINOR:", or "💬 SUGGESTION:" —
+         then the message. Include a real-code suggestion for CRITICAL/MAJOR.
       e. Move to the next file. Never request another file's diff before finishing the
          current one. Never request a multi-file diff.
 
@@ -397,8 +399,10 @@ class GitHubToolset implements ProviderToolset {
          history-dependent behavior — <!-- EXPLORE_BEGIN -->call explore_context with a precise
          task and wait for its evidence before commenting<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN -->use search_code or get_file_contents to verify before commenting<!-- EXPLORE_DISABLED_END -->.
       d. For every confirmed issue, call add_comment_to_pending_review immediately with
-         path, line, subjectType="LINE", and body taken from the diff. Include a real-code
-         suggestion in body for CRITICAL/MAJOR.
+         path, line, subjectType="LINE", and body taken from the diff. Begin body with the
+         exact severity marker as its first token — "🔒 CRITICAL:", "⚠️ MAJOR:", "💡 MINOR:",
+         or "💬 SUGGESTION:" — then the message. Include a real-code suggestion in body for
+         CRITICAL/MAJOR.
       e. Move to the next file. Never jump between files mid-review.
 
     STEP 5 — Decision (submit the review)

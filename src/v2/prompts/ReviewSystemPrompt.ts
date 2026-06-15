@@ -61,6 +61,7 @@ ${toolUsageSection}
     <level name="MAJOR"    emoji="⚠️">Blocks if multiple. MUST include a real-code suggestion. Logic bugs, perf issues, broken APIs.</level>
     <level name="MINOR"    emoji="💡">Request changes. Suggestion optional. Quality, naming, duplication.</level>
     <level name="SUGGESTION" emoji="💬">Informational. Optimizations and improvements.</level>
+    <marker-rule>EVERY posted inline comment body MUST BEGIN with its severity marker as the very first token, exactly one of: "🔒 CRITICAL:", "⚠️ MAJOR:", "💡 MINOR:", "💬 SUGGESTION:". Write the marker verbatim (emoji + level + colon) before any other text — it is how issues are counted, so an omitted or altered marker is not counted.</marker-rule>
   </severity-levels>
 
   <anti-patterns>

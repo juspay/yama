@@ -24,14 +24,18 @@ export class ConfigLoader {
   ): Promise<YamaConfig> {
     console.log("📋 Loading Yama configuration...");
 
+    // Final precedence (lowest → highest):
+    //   defaults < file < env < instance overrides
+    // Environment variables intentionally override the committed config file
+    // (the standard expectation). Env overrides are re-applied AFTER the file
+    // merge; they are idempotent and only mutate values when the env var is
+    // actually set (see applyEnvironmentOverrides / applyMemoryOverrides), so
+    // they never clobber file values with undefined.
+
     // Layer 1: Start with default config
     let config = DefaultConfig.get();
 
-    // Layer 2: Apply environment variable overrides
-    // Lowest user-provided layer in SDK mode precedence.
-    config = this.applyEnvironmentOverrides(config);
-
-    // Layer 3: Load from file if provided or search for default locations
+    // Layer 2: Load from file if provided or search for default locations
     const filePath = await this.resolveConfigPath(configPath);
     if (filePath) {
       console.log(`   Reading config from: ${filePath}`);
@@ -42,6 +46,9 @@ export class ConfigLoader {
       console.log("   Using default configuration (no config file found)");
     }
 
+    // Layer 3: Apply environment variable overrides AFTER the file so env wins
+    // over the committed config (consistently for both ai.* and memory.*).
+    config = this.applyEnvironmentOverrides(config);
     config.memory = this.applyMemoryOverrides(config.memory);
 
     // Layer 4: Apply SDK instance overrides (highest priority)

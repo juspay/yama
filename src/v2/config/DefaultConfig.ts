@@ -22,7 +22,8 @@ export class DefaultConfig {
         provider: "auto",
         model: "gemini-2.5-pro",
         temperature: 0.2,
-        maxTokens: 128000,
+        // Sane output ceiling (NeuroLink clamps further per-model server-side).
+        maxTokens: 32000,
         enableAnalytics: true,
         enableEvaluation: false,
         timeout: "15m",
@@ -41,7 +42,8 @@ export class DefaultConfig {
           provider: "auto",
           model: "gemini-2.5-flash",
           temperature: 0.1,
-          maxTokens: 32000,
+          // Lighter sub-task: sane output ceiling (NeuroLink clamps further per-model server-side).
+          maxTokens: 16000,
           timeout: "5m",
           cacheResults: true,
         },
