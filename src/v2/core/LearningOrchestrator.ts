@@ -25,6 +25,7 @@ import {
   buildObservabilityConfigFromEnv,
   validateObservabilityConfig,
 } from "../utils/ObservabilityConfig.js";
+import { clampMaxTokens } from "../utils/tokenLimits.js";
 
 // Type for structured learning extraction output
 interface LearningExtractionOutput {
@@ -127,7 +128,7 @@ export class LearningOrchestrator {
         provider: this.config.ai.provider,
         model: this.config.ai.model,
         temperature: 0.1,
-        maxTokens: 50000,
+        maxTokens: clampMaxTokens(50000),
         timeout: this.config.ai.timeout,
         context: {
           operation: "learning-fetch-comments",
@@ -154,7 +155,7 @@ export class LearningOrchestrator {
         provider: this.config.ai.provider,
         model: this.config.ai.model,
         temperature: 0.2,
-        maxTokens: 10000,
+        maxTokens: clampMaxTokens(10000),
         timeout: "2m",
         disableTools: true, // No tools needed for extraction phase
         context: {
@@ -254,7 +255,7 @@ export class LearningOrchestrator {
             provider: this.config.ai.provider,
             model: this.config.ai.model,
             temperature: 0.1,
-            maxTokens: 100,
+            maxTokens: clampMaxTokens(100),
             disableTools: true,
             context: {
               userId: ownerId,
@@ -490,20 +491,16 @@ Analyze the PR data above and extract learnings.
     prId: number,
   ): ExtractedLearning[] {
     try {
-      const content = (response.content || "") as string;
+      // Prefer the provider's structured output (NeuroLink populates
+      // `structuredData` when the model returns a parsed object) before falling
+      // back to hand-parsing the raw text. This avoids brittle regex extraction
+      // when a clean object is already available.
+      const structured = this.coerceLearningOutput(response.structuredData);
 
-      // Find JSON in response (may be in code block)
-      const jsonMatch =
-        content.match(/```json\s*([\s\S]*?)\s*```/) ||
-        content.match(/\{[\s\S]*\}/);
-
-      if (!jsonMatch) {
-        console.log("   ⚠️ No JSON found in extraction response");
+      const parsed = structured ?? this.parseLearningOutputFromText(response);
+      if (!parsed) {
         return [];
       }
-
-      const jsonStr = jsonMatch[1] || jsonMatch[0];
-      const parsed = JSON.parse(jsonStr) as LearningExtractionOutput;
 
       // Log summary if available
       if (parsed.summary) {
@@ -540,6 +537,64 @@ Analyze the PR data above and extract learnings.
       );
       return [];
     }
+  }
+
+  /**
+   * Validate that a candidate value (typically `response.structuredData`) is a
+   * usable learning-extraction object. Returns it typed when it carries a
+   * `learnings` array, otherwise null so callers fall back to text parsing.
+   */
+  private coerceLearningOutput(
+    candidate: unknown,
+  ): LearningExtractionOutput | null {
+    if (
+      candidate &&
+      typeof candidate === "object" &&
+      Array.isArray((candidate as { learnings?: unknown }).learnings)
+    ) {
+      return candidate as LearningExtractionOutput;
+    }
+    return null;
+  }
+
+  /**
+   * Fallback parser: extract the learning-extraction JSON from the raw response
+   * text (may be wrapped in a ```json code block).
+   */
+  private parseLearningOutputFromText(
+    response: Record<string, unknown>,
+  ): LearningExtractionOutput | null {
+    const content = (response.content || "") as string;
+
+    // Extract JSON without backtracking-prone regexes (ReDoS-safe): locate the
+    // fenced ```json block (or the first '{' .. last '}' span) via linear string
+    // scans instead of polynomial regex matching on uncontrolled model output.
+    let jsonStr: string | null = null;
+
+    const fenceToken = "```json";
+    const fenceStart = content.indexOf(fenceToken);
+    if (fenceStart !== -1) {
+      const afterFence = fenceStart + fenceToken.length;
+      const fenceEnd = content.indexOf("```", afterFence);
+      if (fenceEnd !== -1) {
+        jsonStr = content.slice(afterFence, fenceEnd).trim();
+      }
+    }
+
+    if (!jsonStr) {
+      const objStart = content.indexOf("{");
+      const objEnd = content.lastIndexOf("}");
+      if (objStart !== -1 && objEnd > objStart) {
+        jsonStr = content.slice(objStart, objEnd + 1);
+      }
+    }
+
+    if (!jsonStr) {
+      console.log("   ⚠️ No JSON found in extraction response");
+      return null;
+    }
+
+    return JSON.parse(jsonStr) as LearningExtractionOutput;
   }
 
   // ============================================================================
@@ -669,7 +724,7 @@ Consolidate the learnings as instructed. Return the complete updated knowledge b
       provider: this.config.ai.provider,
       model: this.config.ai.model,
       temperature: 0.2,
-      maxTokens: 30000,
+      maxTokens: clampMaxTokens(30000),
     });
 
     // Parse and update the knowledge base

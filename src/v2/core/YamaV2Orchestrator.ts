@@ -24,7 +24,6 @@ import {
   ReviewRequest,
   ReviewResult,
   ReviewMode,
-  ReviewUpdate,
   ReviewStatistics,
   TokenUsage,
   UnifiedReviewRequest,
@@ -35,6 +34,9 @@ import {
   buildObservabilityConfigFromEnv,
   validateObservabilityConfig,
 } from "../utils/ObservabilityConfig.js";
+import { clampMaxTokens } from "../utils/tokenLimits.js";
+import { isMutatingGitTool } from "../utils/toolPolicy.js";
+import { VERSION } from "../../index.js";
 
 export class YamaOrchestrator {
   private neurolink!: NeuroLink;
@@ -247,26 +249,31 @@ export class YamaOrchestrator {
         "   AI will now make decisions and execute actions autonomously\n",
       );
 
-      // Review call: RETRIEVE memory (for context), but DON'T STORE
-      const aiResponse = await this.neurolink.generate({
-        input: { text: instructions },
-        provider: this.config.ai.provider,
-        model: this.config.ai.model,
-        temperature: this.config.ai.temperature,
-        maxTokens: this.config.ai.maxTokens,
-        timeout: this.config.ai.timeout,
-        skipToolPromptInjection: true,
-        ...this.getPRToolFilteringOptions(instructions),
-        context: {
-          sessionId,
-          userId: this.getUserId(request),
-          operation: "code-review",
-          metadata: toolContext.metadata,
-        },
-        memory: { read: true, write: false },
-        enableAnalytics: this.config.ai.enableAnalytics,
-        enableEvaluation: this.config.ai.enableEvaluation,
-      } as unknown as Parameters<NeuroLink["generate"]>[0]);
+      // Review call: RETRIEVE memory (for context), but DON'T STORE.
+      // Wrapped in a bounded retry (ai.retryAttempts) for transient failures.
+      const aiResponse = await this.generateWithRetry(
+        () =>
+          this.neurolink.generate({
+            input: { text: instructions },
+            provider: this.config.ai.provider,
+            model: this.config.ai.model,
+            temperature: this.config.ai.temperature,
+            maxTokens: clampMaxTokens(this.config.ai.maxTokens),
+            timeout: this.config.ai.timeout,
+            skipToolPromptInjection: true,
+            ...this.getPRToolFilteringOptions(instructions),
+            context: {
+              sessionId,
+              userId: this.getUserId(request),
+              operation: "code-review",
+              metadata: toolContext.metadata,
+            },
+            memory: { read: true, write: false },
+            enableAnalytics: this.config.ai.enableAnalytics,
+            enableEvaluation: this.config.ai.enableEvaluation,
+          } as unknown as Parameters<NeuroLink["generate"]>[0]),
+        "code-review",
+      );
       this.recordToolCallsFromResponse(sessionId, aiResponse);
 
       // Extract and parse results
@@ -333,32 +340,36 @@ export class YamaOrchestrator {
       );
       this.setToolContext(toolContext);
 
-      const aiResponse = await this.neurolink.generate({
-        input: { text: instructions },
-        provider: this.config.ai.provider,
-        model: this.config.ai.model,
-        temperature: this.config.ai.temperature,
-        maxTokens: Math.min(this.config.ai.maxTokens, 16_000),
-        timeout: this.config.ai.timeout,
-        enableAnalytics: this.config.ai.enableAnalytics,
-        enableEvaluation: this.config.ai.enableEvaluation,
-        // Request JSON output at the provider level (prompt-level mode; safe alongside tools).
-        output: { format: "json" },
-        // Tools are passed natively; avoids huge duplicated tool-schema prompt injection.
-        skipToolPromptInjection: true,
-        ...this.getLocalToolFilteringOptions(),
-        context: {
-          sessionId,
-          userId: this.getUserId(pseudoRequest),
-          operation: "local-review",
-          metadata: {
-            repoPath: diffContext.repoPath,
-            diffSource: diffContext.diffSource,
-            baseRef: diffContext.baseRef,
-            headRef: diffContext.headRef,
-          },
-        },
-      } as unknown as Parameters<NeuroLink["generate"]>[0]);
+      const aiResponse = await this.generateWithRetry(
+        () =>
+          this.neurolink.generate({
+            input: { text: instructions },
+            provider: this.config.ai.provider,
+            model: this.config.ai.model,
+            temperature: this.config.ai.temperature,
+            maxTokens: clampMaxTokens(this.config.ai.maxTokens),
+            timeout: this.config.ai.timeout,
+            enableAnalytics: this.config.ai.enableAnalytics,
+            enableEvaluation: this.config.ai.enableEvaluation,
+            // Request JSON output at the provider level (prompt-level mode; safe alongside tools).
+            output: { format: "json" },
+            // Tools are passed natively; avoids huge duplicated tool-schema prompt injection.
+            skipToolPromptInjection: true,
+            ...this.getLocalToolFilteringOptions(),
+            context: {
+              sessionId,
+              userId: this.getUserId(pseudoRequest),
+              operation: "local-review",
+              metadata: {
+                repoPath: diffContext.repoPath,
+                diffSource: diffContext.diffSource,
+                baseRef: diffContext.baseRef,
+                headRef: diffContext.headRef,
+              },
+            },
+          } as unknown as Parameters<NeuroLink["generate"]>[0]),
+        "local-review",
+      );
       this.recordToolCallsFromResponse(sessionId, aiResponse);
 
       const result = this.parseLocalReviewResult(
@@ -375,78 +386,6 @@ export class YamaOrchestrator {
         result as unknown as ReviewResult,
       );
       return result;
-    } catch (error) {
-      this.sessionManager.failSession(sessionId, error as Error);
-      throw error;
-    }
-  }
-
-  /**
-   * Stream review with real-time updates (for verbose mode)
-   */
-  async *streamReview(
-    request: ReviewRequest,
-  ): AsyncIterableIterator<ReviewUpdate> {
-    await this.ensureInitialized("pr", request.configPath, request);
-
-    const sessionId = this.sessionManager.createSession(request);
-
-    try {
-      const bootstrapStandards = await this.getBootstrappedStandards(
-        request,
-        sessionId,
-      );
-
-      // Build instructions
-      const instructions = await this.promptBuilder.buildReviewInstructions(
-        request,
-        this.config,
-        bootstrapStandards,
-        this.detectedProvider,
-      );
-
-      // Create tool context
-      const toolContext = this.createToolContext(sessionId, request);
-      this.setToolContext(toolContext);
-
-      // Stream AI execution
-      yield {
-        type: "progress",
-        timestamp: new Date().toISOString(),
-        sessionId,
-        data: {
-          phase: "context_gathering",
-          progress: 0,
-          message: "Starting review...",
-        },
-      };
-
-      // Note: NeuroLink streaming implementation depends on version
-      // This is a placeholder for streaming functionality
-      const aiResponse = await this.neurolink.generate({
-        input: { text: instructions },
-        provider: this.config.ai.provider,
-        model: this.config.ai.model,
-        skipToolPromptInjection: true,
-        ...this.getPRToolFilteringOptions(instructions),
-        context: {
-          sessionId,
-          userId: this.getUserId(request),
-        },
-        memory: { enabled: false },
-        enableAnalytics: true,
-      } as unknown as Parameters<NeuroLink["generate"]>[0]);
-
-      yield {
-        type: "progress",
-        timestamp: new Date().toISOString(),
-        sessionId,
-        data: {
-          phase: "decision_making",
-          progress: 100,
-          message: "Review complete",
-        },
-      };
     } catch (error) {
       this.sessionManager.failSession(sessionId, error as Error);
       throw error;
@@ -510,7 +449,7 @@ export class YamaOrchestrator {
         provider: this.config.ai.provider,
         model: this.config.ai.model,
         temperature: this.config.ai.temperature,
-        maxTokens: this.config.ai.maxTokens,
+        maxTokens: clampMaxTokens(this.config.ai.maxTokens),
         timeout: this.config.ai.timeout,
         skipToolPromptInjection: true,
         ...this.getPRToolFilteringOptions(reviewInstructions),
@@ -558,7 +497,7 @@ export class YamaOrchestrator {
           provider: this.config.ai.provider,
           model: this.config.ai.model,
           temperature: this.config.ai.temperature,
-          maxTokens: this.config.ai.maxTokens,
+          maxTokens: clampMaxTokens(this.config.ai.maxTokens),
           timeout: this.config.ai.timeout,
           skipToolPromptInjection: true,
           ...this.getPRToolFilteringOptions(enhanceInstructions),
@@ -696,7 +635,7 @@ export class YamaOrchestrator {
       branch: request.branch,
       dryRun: request.dryRun || false,
       metadata: {
-        yamaVersion: "2.2.1",
+        yamaVersion: VERSION,
         startTime: new Date().toISOString(),
       },
     };
@@ -718,7 +657,7 @@ export class YamaOrchestrator {
       repository: request.repository || request.repo,
       dryRun: request.dryRun || false,
       metadata: {
-        yamaVersion: "2.2.1",
+        yamaVersion: VERSION,
         startTime: new Date().toISOString(),
         repoPath: diffContext.repoPath,
         diffSource: diffContext.diffSource,
@@ -731,6 +670,83 @@ export class YamaOrchestrator {
   private setToolContext(context: Record<string, unknown>): void {
     this.currentToolContext = context;
     (this.neurolink as any).setToolContext(context);
+  }
+
+  /**
+   * Run a NeuroLink generate() call with a small bounded retry on transient
+   * errors (wires up the previously-unused `ai.retryAttempts` config). Retries
+   * up to `retryAttempts` times (>=1 total attempt) with a short exponential
+   * backoff. Non-transient errors (e.g. auth/validation) fail fast on the first
+   * attempt so we don't paper over real misconfiguration.
+   */
+  private async generateWithRetry<T>(
+    run: () => Promise<T>,
+    label: string,
+  ): Promise<T> {
+    const configured = this.config.ai.retryAttempts;
+    const maxAttempts =
+      typeof configured === "number" && Number.isFinite(configured)
+        ? Math.max(1, Math.floor(configured))
+        : 1;
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await run();
+      } catch (error) {
+        lastError = error;
+        if (attempt >= maxAttempts || !this.isTransientError(error)) {
+          throw error;
+        }
+        const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 8000);
+        console.warn(
+          `   ⚠️  ${label} generate attempt ${attempt}/${maxAttempts} failed ` +
+            `(${(error as Error).message}); retrying in ${backoffMs}ms...`,
+        );
+        await this.delay(backoffMs);
+      }
+    }
+    // Unreachable in practice (loop either returns or throws), but keeps types happy.
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  /**
+   * Heuristic transient-error classifier for retry decisions. Conservative:
+   * matches common network / rate-limit / timeout / 5xx signals and leaves
+   * everything else (auth, validation, 4xx) as non-retryable.
+   */
+  private isTransientError(error: unknown): boolean {
+    const message = (
+      error instanceof Error ? error.message : String(error ?? "")
+    ).toLowerCase();
+    if (!message) {
+      return false;
+    }
+    return (
+      message.includes("timeout") ||
+      message.includes("timed out") ||
+      message.includes("etimedout") ||
+      message.includes("econnreset") ||
+      message.includes("econnrefused") ||
+      message.includes("enotfound") ||
+      message.includes("eai_again") ||
+      message.includes("socket hang up") ||
+      message.includes("network") ||
+      message.includes("rate limit") ||
+      message.includes("rate_limit") ||
+      message.includes("too many requests") ||
+      message.includes("429") ||
+      message.includes("500") ||
+      message.includes("502") ||
+      message.includes("503") ||
+      message.includes("504") ||
+      message.includes("overloaded") ||
+      message.includes("temporarily unavailable")
+    );
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -760,11 +776,13 @@ export class YamaOrchestrator {
       summary: this.extractSummary(aiResponse),
       duration,
       tokenUsage: {
-        input: this.toSafeNumber(aiResponse?.usage?.inputTokens),
-        output: this.toSafeNumber(aiResponse?.usage?.outputTokens),
-        total: this.toSafeNumber(aiResponse?.usage?.totalTokens),
+        // NeuroLink 9.70.x usage shape is { input, output, total } — NOT
+        // inputTokens/outputTokens/totalTokens (those always resolved to 0).
+        input: this.toSafeNumber(aiResponse?.usage?.input),
+        output: this.toSafeNumber(aiResponse?.usage?.output),
+        total: this.toSafeNumber(aiResponse?.usage?.total),
       },
-      costEstimate: this.calculateCost(aiResponse.usage),
+      costEstimate: this.calculateCost(aiResponse),
       sessionId,
     };
   }
@@ -812,25 +830,50 @@ export class YamaOrchestrator {
     diffContext: LocalDiffContext,
   ): LocalReviewResult {
     const rawContent = aiResponse?.content || aiResponse?.outputs?.text || "";
-    const parsed = this.extractJsonPayload(rawContent);
+    // Prefer NeuroLink's already-parsed structuredData (output.format "json")
+    // before re-parsing the raw content string by hand; fall back to the
+    // hand-parse so older shapes / non-JSON outputs still work.
+    const structured =
+      aiResponse?.structuredData &&
+      typeof aiResponse.structuredData === "object" &&
+      !Array.isArray(aiResponse.structuredData)
+        ? (aiResponse.structuredData as Record<string, any>)
+        : null;
+    const parsed = structured ?? this.extractJsonPayload(rawContent);
+    const jsonTruncated = aiResponse?.jsonTruncated === true;
     const usage = aiResponse?.usage || {};
     const tokenUsage: TokenUsage = {
-      input: this.toSafeNumber(usage.inputTokens),
-      output: this.toSafeNumber(usage.outputTokens),
-      total: this.toSafeNumber(usage.totalTokens),
+      // NeuroLink 9.70.x usage shape is { input, output, total }.
+      input: this.toSafeNumber(usage.input),
+      output: this.toSafeNumber(usage.output),
+      total: this.toSafeNumber(usage.total),
     };
 
     if (!parsed) {
-      const fallbackIssue: LocalReviewFinding = {
-        id: "OUTPUT_FORMAT_VIOLATION",
-        severity: "MAJOR",
-        category: "review-engine",
-        title: "Model did not return structured JSON",
-        description:
-          "Local review response was unstructured (likely tool-call trace or partial output), so findings cannot be trusted.",
-        suggestion:
-          "Retry with a tool-calling capable model or reduce review scope (smaller diff / includePaths) to keep responses structured.",
-      };
+      // Distinguish a truncated response (model ran out of output budget mid-JSON)
+      // from a genuinely malformed one, and advise raising maxTokens in that case
+      // rather than emitting the generic format-violation guidance.
+      const fallbackIssue: LocalReviewFinding = jsonTruncated
+        ? {
+            id: "OUTPUT_TRUNCATED",
+            severity: "MAJOR",
+            category: "review-engine",
+            title: "Model output was truncated before valid JSON completed",
+            description:
+              "The local review response was cut off (jsonTruncated), so the JSON could not be parsed and findings cannot be trusted.",
+            suggestion:
+              "Raise ai.maxTokens (output budget) and/or reduce review scope (smaller diff / includePaths) so the structured JSON can finish.",
+          }
+        : {
+            id: "OUTPUT_FORMAT_VIOLATION",
+            severity: "MAJOR",
+            category: "review-engine",
+            title: "Model did not return structured JSON",
+            description:
+              "Local review response was unstructured (likely tool-call trace or partial output), so findings cannot be trusted.",
+            suggestion:
+              "Retry with a tool-calling capable model or reduce review scope (smaller diff / includePaths) to keep responses structured.",
+          };
       const issuesBySeverity = this.countFindingsBySeverity([fallbackIssue]);
 
       return {
@@ -838,7 +881,9 @@ export class YamaOrchestrator {
         decision: "CHANGES_REQUESTED",
         summary:
           this.sanitizeLocalSummary(rawContent) ||
-          "Local review could not produce structured JSON output.",
+          (jsonTruncated
+            ? "Local review output was truncated before valid JSON completed."
+            : "Local review could not produce structured JSON output."),
         issues: [fallbackIssue],
         enhancements: [],
         statistics: {
@@ -851,7 +896,7 @@ export class YamaOrchestrator {
         },
         duration: Math.round((Date.now() - startTime) / 1000),
         tokenUsage,
-        costEstimate: this.calculateCost(aiResponse?.usage),
+        costEstimate: this.calculateCost(aiResponse),
         sessionId,
         schemaVersion: request.outputSchemaVersion || "1.0",
         metadata: {
@@ -895,7 +940,7 @@ export class YamaOrchestrator {
       },
       duration: Math.round((Date.now() - startTime) / 1000),
       tokenUsage,
-      costEstimate: this.calculateCost(aiResponse?.usage),
+      costEstimate: this.calculateCost(aiResponse),
       sessionId,
       schemaVersion: request.outputSchemaVersion || "1.0",
       metadata: {
@@ -1004,7 +1049,12 @@ export class YamaOrchestrator {
     return findings
       .map((raw, index) => {
         const value = (raw || {}) as Record<string, unknown>;
-        const severity = this.normalizeSeverity(value.severity);
+        const ruleKey =
+          (typeof value.rule === "string" && value.rule) ||
+          (typeof value.category === "string" && value.category) ||
+          (typeof value.id === "string" && value.id) ||
+          undefined;
+        const severity = this.normalizeSeverity(value.severity, ruleKey);
         if (!severity) {
           return null;
         }
@@ -1045,9 +1095,33 @@ export class YamaOrchestrator {
 
   private normalizeSeverity(
     severity: unknown,
+    ruleKey?: string,
+  ): LocalReviewFinding["severity"] | null {
+    // Calibration: allow projectStandards.severityOverrides to remap a finding's
+    // severity by its rule/category key (defensive — config is optional and the
+    // override value is itself validated against the known severity set). This
+    // takes precedence over the model-reported severity.
+    const overrides = this.config.projectStandards?.severityOverrides;
+    if (overrides && ruleKey) {
+      const overridden = this.coerceSeverity(overrides[ruleKey]);
+      if (overridden) {
+        return overridden;
+      }
+    }
+
+    return this.coerceSeverity(severity) ?? "MINOR";
+  }
+
+  /**
+   * Map an arbitrary value to a known severity, or null if it is not one of the
+   * recognised levels. Unlike normalizeSeverity this does NOT default to MINOR,
+   * so callers can distinguish "unknown" from a real level.
+   */
+  private coerceSeverity(
+    severity: unknown,
   ): LocalReviewFinding["severity"] | null {
     if (typeof severity !== "string") {
-      return "MINOR";
+      return null;
     }
     const value = severity.toUpperCase();
     if (
@@ -1058,7 +1132,7 @@ export class YamaOrchestrator {
     ) {
       return value;
     }
-    return "MINOR";
+    return null;
   }
 
   private countFindingsBySeverity(
@@ -1124,8 +1198,11 @@ export class YamaOrchestrator {
     const toolCalls = session.toolCalls || [];
     const ts = getProviderToolset(this.detectedProvider);
 
-    let requestedChanges: boolean | undefined;
-    let approved: boolean | undefined;
+    // ORDER-AWARE: the LAST decisive review-status / approval tool call wins, so
+    // a later approval correctly overrides an earlier request-changes (and vice
+    // versa). The previous logic let any "BLOCKED" stick regardless of order,
+    // reporting BLOCKED even when the AI changed its mind and approved afterward.
+    let lastDecision: "APPROVED" | "BLOCKED" | undefined;
 
     for (const tc of toolCalls) {
       const decision = ts.interpretDecision({
@@ -1133,17 +1210,15 @@ export class YamaOrchestrator {
         args: tc?.args || {},
       });
 
-      if (decision === "BLOCKED") {
-        requestedChanges = true;
-      } else if (decision === "APPROVED") {
-        approved = true;
+      if (decision === "BLOCKED" || decision === "APPROVED") {
+        lastDecision = decision;
       }
     }
 
-    if (requestedChanges === true) {
+    if (lastDecision === "BLOCKED") {
       return "BLOCKED";
     }
-    if (approved === true) {
+    if (lastDecision === "APPROVED") {
       return "APPROVED";
     }
 
@@ -1248,7 +1323,10 @@ export class YamaOrchestrator {
     };
 
     commentCalls.forEach((call) => {
-      const text = call.args?.comment_text || "";
+      // Comment body field differs per provider: Bitbucket comment tools use
+      // `comment_text`, GitHub comment tools use `body`. Read either so severity
+      // counts work for both (GitHub previously always counted 0).
+      const text = call.args?.comment_text ?? call.args?.body ?? "";
 
       if (text.includes("🔒 CRITICAL") || text.includes("CRITICAL:")) {
         counts.critical++;
@@ -1275,19 +1353,34 @@ export class YamaOrchestrator {
   }
 
   /**
-   * Calculate cost estimate from token usage
+   * Calculate cost estimate from an AI response.
+   *
+   * Prefers NeuroLink's own analytics cost (`response.analytics.cost`, a USD
+   * number computed per-provider/model when enableAnalytics is true — Yama sets
+   * it). The previous implementation hardcoded Gemini-2.0-Flash pricing
+   * ($0.25/$1.00 per 1M) for EVERY provider, which is ~12-15x too low for Claude.
+   * Only when the analytics cost is unavailable do we fall back to a clearly
+   * labeled rough estimate based on the { input, output } token usage.
    */
-  private calculateCost(usage: any): number {
+  private calculateCost(aiResponse: any): number {
+    const analyticsCost = aiResponse?.analytics?.cost;
+    if (typeof analyticsCost === "number" && Number.isFinite(analyticsCost)) {
+      return Number(analyticsCost.toFixed(6));
+    }
+
+    const usage = aiResponse?.usage;
     if (!usage) {
       return 0;
     }
 
-    // Rough estimates (update with actual pricing)
-    const inputCostPer1M = 0.25; // $0.25 per 1M input tokens (Gemini 2.0 Flash)
-    const outputCostPer1M = 1.0; // $1.00 per 1M output tokens
+    // ROUGH FALLBACK ONLY — provider/model agnostic placeholder pricing used
+    // when NeuroLink analytics cost is unavailable. Not accurate for any
+    // specific model; treat as an order-of-magnitude estimate.
+    const inputCostPer1M = 0.25;
+    const outputCostPer1M = 1.0;
 
-    const inputTokens = this.toSafeNumber(usage.inputTokens);
-    const outputTokens = this.toSafeNumber(usage.outputTokens);
+    const inputTokens = this.toSafeNumber(usage.input);
+    const outputTokens = this.toSafeNumber(usage.output);
 
     const inputCost = (inputTokens / 1_000_000) * inputCostPer1M;
     const outputCost = (outputTokens / 1_000_000) * outputCostPer1M;
@@ -1326,8 +1419,30 @@ export class YamaOrchestrator {
       return {};
     }
 
-    const hasJiraSignal =
-      /\b[A-Z]{2,}-\d+\b/.test(inputText) || /\bjira\b/i.test(inputText);
+    // Jira issue-key signal. The naive /\b[A-Z]{2,}-\d+\b/ over-matched common
+    // non-Jira tokens (UTF-8, SHA-256, SHA256-..., CVE-2024, ISO-8601, RFC-3339),
+    // wrongly keeping Jira tools enabled. Exclude a small denylist of those
+    // prefixes so the match stays conservative (still keeps tools when a real
+    // ABC-123 style key — or the literal word "jira" — is present).
+    const jiraKeyPattern = /\b([A-Z]{2,})-\d+\b/g;
+    const nonJiraKeyPrefixes = new Set([
+      "UTF",
+      "SHA",
+      "SHA256",
+      "SHA512",
+      "MD5",
+      "CVE",
+      "ISO",
+      "RFC",
+      "UTC",
+      "GMT",
+      "BASE64",
+    ]);
+    const hasJiraKey = Array.from(
+      inputText.matchAll(jiraKeyPattern),
+      (m) => m[1],
+    ).some((prefix) => !nonJiraKeyPrefixes.has(prefix));
+    const hasJiraSignal = hasJiraKey || /\bjira\b/i.test(inputText);
 
     if (hasJiraSignal) {
       return {};
@@ -1362,7 +1477,11 @@ export class YamaOrchestrator {
 
   /**
    * Query-level read-only filtering for local-git MCP tools.
-   * Uses regex-based mutation detection instead of hardcoded tool-name lists.
+   *
+   * Uses the shared, fail-closed `isMutatingGitTool` helper (any git_* tool not
+   * on the read-only allow-list is treated as mutating) so the orchestrator,
+   * explorer, and MCP manager all agree on what is read-only. The previous local
+   * regex silently missed mutating tools like git_branch / git_mv / git_pull.
    */
   private getLocalToolFilteringOptions(): { excludeTools?: string[] } {
     try {
@@ -1371,8 +1490,6 @@ export class YamaOrchestrator {
         return {};
       }
 
-      const mutatingGitToolPattern =
-        /^git_(commit|push|add|checkout|create_branch|merge|rebase|cherry_pick|reset|revert|tag|rm|clean|stash|apply)\b/i;
       // High-volume read operations can flood context with huge payloads.
       const highVolumeGitToolPattern =
         /^git_(diff|diff_staged|diff_unstaged|log|show)\b/i;
@@ -1381,11 +1498,13 @@ export class YamaOrchestrator {
         .filter((tool: any) => tool?.serverId === "local-git")
         .map((tool: any) => tool?.name)
         .filter((name: unknown): name is string => typeof name === "string")
-        .filter(
-          (name: string) =>
-            mutatingGitToolPattern.test(this.normalizeToolName(name)) ||
-            highVolumeGitToolPattern.test(this.normalizeToolName(name)),
-        );
+        .filter((name: string) => {
+          const normalized = this.normalizeToolName(name);
+          return (
+            isMutatingGitTool(normalized) ||
+            highVolumeGitToolPattern.test(normalized)
+          );
+        });
 
       if (excludeTools.length === 0) {
         return {};
@@ -1659,7 +1778,7 @@ export class YamaOrchestrator {
     console.log(`
     ⚔️  YAMA - AI-Native Code Review Guardian
 
-    Version: 2.2.1
+    Version: ${VERSION}
     Mode: Autonomous AI-Powered Review
     Powered by: NeuroLink + MCP Tools
     `);
