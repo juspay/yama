@@ -1,3 +1,10 @@
+## [2.7.1](https://github.com/juspay/yama/compare/v2.7.0...v2.7.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **v2:** bump neurolink to 9.70.7 and fix review/config correctness bugs ([d0c62f7](https://github.com/juspay/yama/commit/d0c62f767bb3f38fed0bc5dcc1a64845529ec3b6))
+
 # [2.7.0](https://github.com/juspay/yama/compare/v2.6.0...v2.7.0) (2026-06-11)
 
 
