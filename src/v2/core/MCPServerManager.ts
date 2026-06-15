@@ -6,6 +6,7 @@
 import { join } from "path";
 import { MCPServersConfig, GitHubConfig } from "../types/config.types.js";
 import { MCPServerError } from "../types/v2.types.js";
+import { isMutatingGitTool as isMutatingGitToolShared } from "../utils/toolPolicy.js";
 
 /**
  * Default remote HTTP endpoint for GitHub's hosted MCP server.
@@ -229,11 +230,12 @@ export class MCPServerManager {
   }
 
   private isMutatingGitTool(toolName: string): boolean {
-    // Handles plain names (git_commit) and prefixed names (local-git.git_commit).
-    const normalized = toolName.split(/[.:/]/).pop() || toolName;
-    return /^git_(commit|push|add|checkout|create_branch|merge|rebase|cherry_pick|reset|revert|tag|rm|clean|stash|apply)\b/i.test(
-      normalized,
-    );
+    // Delegate to the shared fail-closed allow-list policy: any git_* tool not
+    // on the read-only allow-list is treated as mutating. This closes the gaps
+    // the old regex blocklist missed (git_branch, git_mv, git_pull, git_fetch,
+    // git_restore, git_switch, git_remote). Prefix handling (local-git.git_*)
+    // is performed inside the shared helper.
+    return isMutatingGitToolShared(toolName);
   }
 
   /**

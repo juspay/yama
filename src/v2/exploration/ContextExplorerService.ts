@@ -20,6 +20,8 @@ import {
   getProviderToolset,
   type VCSProviderName,
 } from "../providers/ProviderToolset.js";
+import { clampMaxTokens, MAX_EXTRACTION_TOKENS } from "../utils/tokenLimits.js";
+import { isMutatingGitTool } from "../utils/toolPolicy.js";
 import { ExplorerPromptBuilder } from "./ExplorerPromptBuilder.js";
 import { RulesContextLoader } from "./RulesContextLoader.js";
 import {
@@ -130,7 +132,9 @@ export class ContextExplorerService {
       model: this.config.ai.explore.model || this.config.ai.model,
       temperature:
         this.config.ai.explore.temperature ?? this.config.ai.temperature,
-      maxTokens: this.config.ai.explore.maxTokens || this.config.ai.maxTokens,
+      maxTokens: clampMaxTokens(
+        this.config.ai.explore.maxTokens ?? this.config.ai.maxTokens,
+      ),
       timeout: this.config.ai.explore.timeout || this.config.ai.timeout,
       skipToolPromptInjection: true,
       ...this.getToolFilteringOptions(runtimeContext.mode),
@@ -154,9 +158,9 @@ export class ContextExplorerService {
       provider: this.config.ai.explore.provider || this.config.ai.provider,
       model: this.config.ai.explore.model || this.config.ai.model,
       temperature: 0.1,
-      maxTokens: Math.min(
-        this.config.ai.explore.maxTokens || this.config.ai.maxTokens,
-        12_000,
+      maxTokens: clampMaxTokens(
+        this.config.ai.explore.maxTokens ?? this.config.ai.maxTokens,
+        MAX_EXTRACTION_TOKENS,
       ),
       timeout: "2m",
       disableTools: true,
@@ -304,16 +308,20 @@ export class ContextExplorerService {
   private shouldExcludeTool(mode: "pr" | "local", toolName: string): boolean {
     const normalized = this.normalizeToolName(toolName);
 
+    // Provider (non-git) mutation tools — Bitbucket/GitHub write tools derived
+    // from each provider toolset — are always excluded for the read-only
+    // explore subagent.
     if (
       ContextExplorerService.MUTATION_TOOL_NAMES.has(normalized.toLowerCase())
     ) {
       return true;
     }
 
+    // Git tools are filtered with the shared fail-closed allow-list in local
+    // mode (any git_* tool not on the read-only list is treated as mutating),
+    // closing the gaps the old regex missed (git_branch, git_mv, git_pull, …).
     if (mode === "local") {
-      return /^git_(commit|push|add|checkout|create_branch|merge|rebase|cherry_pick|reset|revert|tag|rm|clean|stash|apply)\b/i.test(
-        normalized,
-      );
+      return isMutatingGitTool(toolName);
     }
 
     return false;

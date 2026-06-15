@@ -3,6 +3,8 @@
  * Main export file
  */
 
+import { createRequire } from "node:module";
+
 // ============================================================================
 // Core Exports
 // ============================================================================
@@ -68,7 +70,26 @@ export type {
 // Version Information
 // ============================================================================
 
-export const VERSION = "2.2.1";
+/**
+ * Single source of truth for the Yama version: read from package.json at runtime
+ * (this module sits one level below package.json in both src/ and dist/, so the
+ * relative require resolves in dev and in the published build). Falls back to a
+ * sentinel if the file can't be read, instead of drifting from a hardcoded
+ * literal.
+ */
+function resolveVersion(): string {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require("../package.json") as { version?: string };
+    return typeof pkg.version === "string" && pkg.version.length > 0
+      ? pkg.version
+      : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+export const VERSION = resolveVersion();
 
 // ============================================================================
 // Default Export
