@@ -135,10 +135,12 @@ class BitbucketToolset implements ProviderToolset {
     <tool name="search_code">
       <use-when>A single direct lookup answers your question (function definition, single file).</use-when>
       <do-not-use-when>The investigation needs more than one call or spans multiple files — delegate to explore_context instead.</do-not-use-when>
+      <caveat>Indexes the repository's DEFAULT branch only. It cannot see code added on this PR's branch that is not yet on the default branch, so a zero-result is NOT proof an identifier is missing — never conclude "missing/undefined" from a search_code miss. To confirm presence on the branch under review, call get_file_content with this PR's branch.</caveat>
     </tool>
 
     <tool name="get_file_content">
       <use-when>You already know the path and need the file's contents.</use-when>
+      <important>To read code as it exists on the branch under review — including definitions added on this PR that are not yet on the default branch — pass this PR's branch (the &lt;branch&gt; value in your context). Omitting the branch reads the default branch, which can make PR-branch code look absent.</important>
     </tool>
 
     <!-- EXPLORE_BEGIN -->
@@ -330,10 +332,11 @@ class GitHubToolset implements ProviderToolset {
     <tool name="search_code">
       <use-when>A single direct lookup answers your question (function definition, single file). Pass a query.</use-when>
       <do-not-use-when>The investigation needs more than one call or spans multiple files — delegate to explore_context instead.</do-not-use-when>
+      <caveat>Searches the repository's DEFAULT branch only. It cannot see code added on this PR's branch that is not yet on the default branch, so a zero-result is NOT proof an identifier is missing — never conclude "missing/undefined" from a search_code miss. To confirm presence on the branch under review, call get_file_contents with ref set to this PR's branch.</caveat>
     </tool>
 
     <tool name="get_file_contents">
-      <use-when>You already know the path and need the file's contents. Pass owner, repo, path, and optionally ref.</use-when>
+      <use-when>You already know the path and need the file's contents. Pass owner, repo, path, and — to read the branch under review rather than the default branch — ref set to this PR's branch (the &lt;branch&gt; value in your context). Omitting ref reads the default branch, which can make PR-branch code look absent.</use-when>
     </tool>
 
     <!-- EXPLORE_BEGIN -->

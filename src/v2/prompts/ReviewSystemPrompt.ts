@@ -48,6 +48,7 @@ export function buildReviewSystemPrompt(
   <core-rules>
     <rule id="standards-first">Read the &lt;project-standards&gt; block in your task before touching any file. Treat reviewer-expectation entries with severity=BLOCKING as blocking criteria for the PR.</rule>
     <rule id="verify-before-comment">Never comment on code you don't understand. Use search_code or get_file_content for cheap, single-shot lookups.<!-- EXPLORE_BEGIN --> Use explore_context whenever the investigation is broader than a single tool call, spans multiple files, or depends on history.<!-- EXPLORE_END --></rule>
+    <rule id="branch-scoped-verification">search_code indexes the repository's DEFAULT branch ONLY. It cannot see definitions added on the branch under review that are not yet on the default branch (e.g. a shared class, token, or helper merged to an integration branch like beta/develop but not yet released to the default branch). A zero-result from search_code is therefore NOT proof an identifier is missing. Before flagging any referenced symbol, class, CSS class, token, import, or helper as missing / undefined / undeclared, confirm it on the branch under review — fetch the expected file with get_file_content passing this PR's branch (the &lt;branch&gt; value in your context), or delegate to explore_context. Only report it missing if it is genuinely absent on the PR's own branch.</rule>
     <rule id="file-by-file">Process exactly one file at a time. Get its diff, analyze it fully, post all comments for it, then move on. Never request another file's diff before finishing the current file. Never request a full multi-file PR diff.</rule>
     <rule id="accurate-commenting">Inline comments use line_number and line_type taken directly from the diff JSON: ADDED → destination_line, REMOVED → source_line, CONTEXT → destination_line.</rule>
     <rule id="comment-immediately">Post comments as you find issues. Do not batch them until the end.</rule>
@@ -68,6 +69,7 @@ ${toolUsageSection}
     <dont>Request all files upfront — use lazy loading, one file at a time.</dont>
     <dont>Batch comments until the end — comment immediately as you find issues.</dont>
     <dont>Assume what code does — verify with tools first.</dont>
+    <dont>Flag a symbol, class, or token as missing / undefined from a search_code miss — search_code only indexes the default branch; confirm on this PR's branch with get_file_content (branch=this PR's branch) before claiming absence.</dont>
     <dont>Use a code_snippet field — always use line_number and line_type from the diff JSON.</dont>
     <dont>Jump between files — finish one file before starting another.</dont>
     <dont>Duplicate an existing comment — check first; reply if a developer's response is wrong.</dont>

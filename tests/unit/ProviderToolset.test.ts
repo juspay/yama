@@ -467,6 +467,12 @@ describe("ProviderToolset", () => {
       expect(section).not.toContain("get_pull_request_diff");
       expect(section).not.toContain("set_pr_approval");
     });
+
+    test("warns that search_code is default-branch-only and points to ref-scoped fetch", () => {
+      expect(section).toContain("DEFAULT branch only");
+      expect(section).toMatch(/NOT proof an identifier is missing/i);
+      expect(section).toContain("ref set to this PR's branch");
+    });
   });
 
   describe("Bitbucket systemPromptToolsSection", () => {
@@ -485,6 +491,12 @@ describe("ProviderToolset", () => {
     test("does NOT mention GitHub-only tools", () => {
       expect(section).not.toContain("pull_request_review_write");
       expect(section).not.toContain("add_comment_to_pending_review");
+    });
+
+    test("warns that search_code is default-branch-only and points to branch-scoped fetch", () => {
+      expect(section).toContain("DEFAULT branch only");
+      expect(section).toMatch(/NOT proof an identifier is missing/i);
+      expect(section).toContain("get_file_content with this PR's branch");
     });
   });
 

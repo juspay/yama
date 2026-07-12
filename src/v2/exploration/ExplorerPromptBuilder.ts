@@ -47,6 +47,7 @@ Rules:
 3. Prefer the smallest sufficient evidence. Do not dump raw tool output.
 4. If you are uncertain, say so explicitly in findings or openQuestions.
 5. Return valid JSON only. No markdown fences or commentary outside JSON.
+6. search_code indexes the repository's DEFAULT branch only — a zero-result is NOT proof code is absent. To verify a symbol, class, or token exists on the branch under review, fetch the file with the branch/ref set to the Branch listed above. Never conclude something is missing from a search_code miss alone.
 
 Research task:
 - Task: ${input.task}

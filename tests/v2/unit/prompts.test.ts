@@ -43,6 +43,15 @@ describe("Review System Prompt", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain('id="accurate-commenting"');
   });
 
+  it("warns that search_code is default-branch-only so PR-branch code is not falsely flagged missing", () => {
+    // Regression guard: a shared class/token added on an integration branch (e.g. beta)
+    // but not yet on the default branch was falsely reported as "does not exist" because
+    // the reviewer trusted a default-branch-only search_code miss.
+    expect(REVIEW_SYSTEM_PROMPT).toContain('id="branch-scoped-verification"');
+    expect(REVIEW_SYSTEM_PROMPT).toContain("DEFAULT branch");
+    expect(REVIEW_SYSTEM_PROMPT).toMatch(/not proof an identifier is missing/i);
+  });
+
   it("should contain tool usage instructions for the tools the agent actually uses", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("<tool-usage>");
     expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="get_pull_request">');
