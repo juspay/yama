@@ -579,15 +579,13 @@ ai:
     timeout: "5m"
     cacheResults: true
 
-# GitHub MCP only. Jira/Bitbucket off so no extra credentials are needed. Yama's
+# GitHub MCP only. Bitbucket off so no extra credentials are needed. Yama's
 # built-in denylist already blocks repo-mutating GitHub tools; this is a
 # read + review-comment workflow.
 mcpServers:
   github:
     enabled: true
     # transport defaults to "http" (hosted GitHub MCP at api.githubcopilot.com).
-  jira:
-    enabled: false
 
 review:
   enabled: true

@@ -1,11 +1,11 @@
-import { ExplorationResult } from "../types/v2.types.js";
+import { ExplorationResult } from "./review.js";
 
-export interface ExploreContextInput {
+export type ExploreContextInput = {
   task: string;
   focus?: string[];
-}
+};
 
-export interface ExploreRuntimeContext {
+export type ExploreRuntimeContext = {
   sessionId: string;
   mode: "pr" | "local";
   workspace: string;
@@ -15,16 +15,16 @@ export interface ExploreRuntimeContext {
   branch?: string;
   dryRun?: boolean;
   metadata?: Record<string, unknown>;
-}
+};
 
-export interface ExplorerSupportingContext {
+export type ExplorerSupportingContext = {
   projectRules: string | null;
   projectStandards: string | null;
   knowledgeBase: string | null;
   repositoryMemory: string | null;
-}
+};
 
-export interface ExploreExecutionResult {
+export type ExploreExecutionResult = {
   result: ExplorationResult;
   cached: boolean;
-}
+};

@@ -3,8 +3,6 @@
  * Main export file
  */
 
-import { createRequire } from "node:module";
-
 // ============================================================================
 // Core Exports
 // ============================================================================
@@ -13,18 +11,21 @@ import { createRequire } from "node:module";
 // consumers as BOTH a value and a type (with all of its public methods). A
 // separate `export type { YamaOrchestrator }` is intentionally omitted because
 // it would collide with this value export (TS2300: Duplicate identifier).
+export { YamaOrchestrator, createYama } from "./v2/core/YamaOrchestrator.js";
+// Backward-compatible aliases for the pre-rename public SDK surface (rule 12:
+// existing consumers keep working on a minor version).
+/** @deprecated Use {@link YamaOrchestrator} / {@link createYama} instead. */
 export {
-  YamaOrchestrator,
-  createYama,
   YamaOrchestrator as YamaV2Orchestrator,
   createYama as createYamaV2,
-} from "./v2/core/YamaV2Orchestrator.js";
+} from "./v2/core/YamaOrchestrator.js";
 export {
   LearningOrchestrator,
   createLearningOrchestrator,
 } from "./v2/core/LearningOrchestrator.js";
 export { ConfigLoader } from "./v2/config/ConfigLoader.js";
 export { MCPServerManager } from "./v2/core/MCPServerManager.js";
+export { McpRegistry } from "./v2/core/McpRegistry.js";
 export { SessionManager } from "./v2/core/SessionManager.js";
 export { PromptBuilder } from "./v2/prompts/PromptBuilder.js";
 export { MemoryManager } from "./v2/memory/MemoryManager.js";
@@ -40,59 +41,48 @@ export type {
   ReviewRequest,
   ReviewMode,
   ReviewResult,
+  EnhancementResult,
   ReviewUpdate,
   ReviewSession,
   ReviewStatistics,
   IssuesBySeverity,
   TokenUsage,
   UnifiedReviewRequest,
-} from "./v2/types/v2.types.js";
+} from "./v2/types/index.js";
 
 export type {
   YamaConfig,
-  YamaInitOptions,
+  /** @deprecated Use {@link YamaConfig} instead. */
   YamaConfig as YamaV2Config,
+  YamaInitOptions,
   AIConfig,
   MCPServersConfig,
+  McpServerDefinition,
+  McpConfigFile,
+  McpServerRole,
   ReviewConfig,
   DescriptionEnhancementConfig,
   MemoryConfig,
-} from "./v2/types/config.types.js";
+} from "./v2/types/index.js";
 
 export type {
   GetPullRequestResponse,
   GetPullRequestDiffResponse,
-  GetIssueResponse,
   SearchCodeResponse,
-} from "./v2/types/mcp.types.js";
+} from "./v2/types/index.js";
 
 // ============================================================================
 // Version Information
 // ============================================================================
 
 /**
- * Single source of truth for the Yama version: read from package.json at runtime
- * (this module sits one level below package.json in both src/ and dist/, so the
- * relative require resolves in dev and in the published build). Falls back to a
- * sentinel if the file can't be read, instead of drifting from a hardcoded
- * literal.
+ * Yama version — single source of truth lives in the leaf module
+ * `v2/utils/version.ts` (re-exported here for the public SDK surface).
  */
-function resolveVersion(): string {
-  try {
-    const require = createRequire(import.meta.url);
-    const pkg = require("../package.json") as { version?: string };
-    return typeof pkg.version === "string" && pkg.version.length > 0
-      ? pkg.version
-      : "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
-}
-
-export const VERSION = resolveVersion();
+export { VERSION } from "./v2/utils/version.js";
 
 // ============================================================================
 // Default Export
 // ============================================================================
 
-export { createYama as default } from "./v2/core/YamaV2Orchestrator.js";
+export { createYama as default } from "./v2/core/YamaOrchestrator.js";

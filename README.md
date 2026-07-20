@@ -19,7 +19,6 @@
 | **Decision Making**       | TypeScript code        | AI decides                    |
 | **Tool Access**           | None                   | All operations via MCP        |
 | **File Analysis**         | All at once in prompt  | File-by-file AI loop          |
-| **Jira Integration**      | None                   | MCP tools for requirements    |
 | **Comment Posting**       | Batch after analysis   | Real-time as found            |
 | **PR Blocking**           | Manual logic           | AI decision based on criteria |
 
@@ -32,7 +31,7 @@ MemoryManager (per-repo condensed memory)
     ↓
 NeuroLink AI Agent (Autonomous)
     ↓
-MCP Tools (Bitbucket + Jira)
+MCP Tools (Bitbucket / GitHub)
     ↓
 Pull Request Operations
 ```
@@ -42,7 +41,6 @@ Pull Request Operations
 1. **Context Gathering** (AI-driven)
    - Reads per-repo memory (past review learnings)
    - Reads PR details
-   - Finds and reads Jira ticket
    - Loads project standards from memory-bank
    - Reads .clinerules for review guidelines
 
@@ -83,11 +81,6 @@ Create a `.env` file:
 BITBUCKET_USERNAME=your.email@company.com
 BITBUCKET_TOKEN=your-http-access-token
 BITBUCKET_BASE_URL=https://bitbucket.yourcompany.com
-
-# Jira (optional)
-JIRA_EMAIL=your-email@company.com
-JIRA_API_TOKEN=your-jira-api-token
-JIRA_BASE_URL=https://yourcompany.atlassian.net
 
 # AI Provider (optional - defaults to auto)
 AI_PROVIDER=google-ai
@@ -236,8 +229,8 @@ ai:
   temperature: 0.2
 
 mcpServers:
-  jira:
-    enabled: true
+  bitbucket:
+    blockedTools: []
 
 review:
   enabled: true
@@ -297,15 +290,6 @@ AI comments as it finds issues:
 - Severity-based emojis (🔒 CRITICAL, ⚠️ MAJOR, 💡 MINOR, 💬 SUGGESTION)
 - Actionable suggestions with code examples
 
-### Requirement Alignment
-
-AI reads Jira tickets:
-
-- Extracts acceptance criteria
-- Verifies implementation matches requirements
-- Calculates requirement coverage
-- Blocks PR if coverage < 70%
-
 ### Code Context Understanding
 
 AI uses tools to understand code:
@@ -339,10 +323,6 @@ AI applies these criteria automatically:
    - Performance problems
    - Logic errors
 
-3. **Requirement coverage < 70%** → BLOCKS PR (when Jira enabled)
-   - Incomplete Jira implementation
-   - Missing acceptance criteria
-
 ## MCP Servers
 
 Yama uses MCP (Model Context Protocol) servers for tool access:
@@ -352,12 +332,6 @@ Yama uses MCP (Model Context Protocol) servers for tool access:
 - **Package**: `@nexus2520/bitbucket-mcp-server`
 - **Tools**: get_pull_request, add_comment, search_code, get_file_blame, etc.
 - **Status**: Production ready
-
-### Jira MCP
-
-- **Package**: `@nexus2520/jira-mcp-server`
-- **Tools**: get_issue, search_issues, get_issue_comments
-- **Status**: Optional integration
 
 ## Monitoring & Analytics
 

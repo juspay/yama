@@ -80,10 +80,22 @@ export default [
       "no-unused-vars": "off",
       "no-undef": "off",
 
-      // TypeScript-specific rules (less strict to avoid blocking build)
-      "@typescript-eslint/no-unused-vars": "off", // Too many legacy unused vars
+      // TypeScript-specific rules
+      // Re-enabled so dead code cannot silently re-accumulate. Underscore-
+      // prefixed names are treated as intentionally unused.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrors: "none",
+        },
+      ],
       "@typescript-eslint/no-explicit-any": "warn", // Warn about any types but don't block build
       "@typescript-eslint/prefer-as-const": "warn",
+      // Repo convention (mirrors @juspay/neurolink): zero `interface`, always
+      // `type X = { ... }`; use intersection (&) instead of extends.
+      "@typescript-eslint/consistent-type-definitions": ["error", "type"],
 
       // Basic rules
       "no-console": "off",

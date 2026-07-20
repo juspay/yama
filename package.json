@@ -48,9 +48,12 @@
     "!dist/**/test-*",
     "README.md",
     "CHANGELOG.md",
+    "MIGRATION.md",
     "LICENSE",
     "yama.config.example.yaml",
-    ".mcp-config.example.json"
+    ".mcp-config.example.json",
+    ".yama/mcp.example.json",
+    ".yama/README.md"
   ],
   "scripts": {
     "build": "rimraf dist && tsc && tsc-alias",
@@ -90,21 +93,21 @@
     "check:all": "npm run lint && npm run format --check && npm run validate && npm run validate:commit"
   },
   "dependencies": {
-    "@juspay/neurolink": "^10.1.2",
     "@juspay/hippocampus": "^0.1.7",
-    "langfuse": "^3.35.0",
+    "@juspay/neurolink": "^10.4.1",
     "@nexus2520/bitbucket-mcp-server": "2.0.4",
-    "@nexus2520/jira-mcp-server": "^1.1.1",
     "chalk": "^4.1.2",
     "commander": "^11.0.0",
     "debug": "^4.3.4",
     "dotenv": "^16.3.0",
     "fast-glob": "^3.3.1",
     "inquirer": "^8.2.6",
+    "langfuse": "^3.35.0",
     "lodash": "^4.17.21",
     "node-cache": "^5.1.2",
     "ora": "^5.4.1",
-    "yaml": "^2.3.0"
+    "yaml": "^2.3.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.1",
@@ -161,7 +164,12 @@
     ],
     "overrides": {
       "@semantic-release/npm": "^13.1.2",
-      "undici": "~7.22.0"
+      "undici": "~7.22.0",
+      "protobufjs": ">=7.5.5",
+      "jws": ">=4.0.1",
+      "form-data": ">=4.0.6",
+      "@grpc/grpc-js": ">=1.13.5",
+      "adm-zip": ">=0.6.0"
     }
   },
   "lint-staged": {

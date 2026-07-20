@@ -243,8 +243,6 @@ mcpServers:
     # transport: http                          # default; the hosted remote server
     # url: https://api.githubcopilot.com/mcp/  # override for GitHub Enterprise / self-host
     # blockedTools: [delete_file]              # add to the default write-block list
-  jira:
-    enabled: false
 
 review:
   focusAreas: [security, performance, codeQuality, testing, documentation]

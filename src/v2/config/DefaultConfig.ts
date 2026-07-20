@@ -3,7 +3,7 @@
  * Provides sensible defaults when no config file is present
  */
 
-import { YamaConfig } from "../types/config.types.js";
+import { YamaConfig } from "../types/index.js";
 
 export class DefaultConfig {
   static get(): YamaConfig {
@@ -28,14 +28,25 @@ export class DefaultConfig {
         enableEvaluation: false,
         timeout: "15m",
         retryAttempts: 3,
-        enableToolFiltering: false,
-        toolFilteringMode: "off",
+        // Oversized MCP tool results (huge diffs) are externalized and paged
+        // on demand instead of flooding the context window.
+        mcpOutputLimits: {
+          strategy: "externalize",
+          maxBytes: 100_000,
+          warnBytes: 50_000,
+        },
         conversationMemory: {
           enabled: true,
           store: "memory",
           maxSessions: 50,
           maxTurnsPerSession: 300,
           enableSummarization: false,
+          // Auto-compaction keeps long file-by-file reviews inside the model
+          // context window (prune → dedup → summarize → sliding window).
+          contextCompaction: {
+            enabled: true,
+            threshold: 0.8,
+          },
         },
         explore: {
           enabled: true,
@@ -49,31 +60,18 @@ export class DefaultConfig {
         },
       },
 
+      // MCP servers are defined ENTIRELY in config (`.yama/config.yaml` /
+      // `.yama/mcp.json`) — never in code. No server commands, URLs, or tool
+      // names are hardcoded here. Copy `.yama/mcp.example.json` (or the servers
+      // block in `yama.config.example.yaml`) to configure bitbucket / github /
+      // serena / local-git and their per-server blockedTools / allowedTools.
       mcpServers: {
-        bitbucket: {
-          blockedTools: [],
-        },
-        github: {
-          enabled: true,
-          url: "https://api.githubcopilot.com/mcp/",
-          transport: "http",
-          blockedTools: [
-            "push_files",
-            "create_or_update_file",
-            "create_branch",
-            "delete_file",
-            "create_pull_request_with_copilot",
-            "assign_copilot_to_issue",
-          ],
-        },
-        jira: {
-          enabled: false, // Opt-in: users must explicitly enable Jira integration
-          blockedTools: [],
-        },
+        servers: {},
       },
 
       review: {
         enabled: true,
+        verification: "basic",
         workflowInstructions: `Follow the autonomous review workflow defined in the base system prompt.`,
         focusAreas: [
           {
@@ -141,7 +139,7 @@ export class DefaultConfig {
 
       descriptionEnhancement: {
         enabled: true,
-        instructions: `Enhance the PR description using Jira requirements and diff analysis.`,
+        instructions: `Enhance the PR description using diff analysis.`,
         requiredSections: [
           {
             key: "summary",
@@ -156,12 +154,6 @@ export class DefaultConfig {
             description: "Specific technical changes with file references",
           },
           {
-            key: "jira",
-            name: "🎫 Jira Reference",
-            required: false,
-            description: "Link to Jira ticket and requirement coverage",
-          },
-          {
             key: "testing",
             name: "🧪 Testing Strategy",
             required: true,
@@ -174,8 +166,10 @@ export class DefaultConfig {
 
       memoryBank: {
         enabled: true,
-        path: "memory-bank",
-        fallbackPaths: ["docs/memory-bank", ".memory-bank"],
+        // `.yama/standards` is the consolidated location; the legacy roots stay
+        // as fallbacks so existing repos keep working during migration.
+        path: ".yama/standards",
+        fallbackPaths: ["memory-bank", "docs/memory-bank", ".memory-bank"],
         standardFiles: [
           "project-overview.md",
           "architecture.md",
@@ -217,6 +211,10 @@ export class DefaultConfig {
 
       performance: {
         maxReviewDuration: "15m",
+        loop: {
+          maxSteps: 100,
+          toolTimeoutMs: 300_000,
+        },
         tokenBudget: {
           maxTokensPerReview: 500000,
           warningThreshold: 400000,

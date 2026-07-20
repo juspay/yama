@@ -5,38 +5,61 @@
 
 import { NeuroLink } from "@juspay/neurolink";
 import { MCPServerManager } from "./MCPServerManager.js";
+import { McpRegistry } from "./McpRegistry.js";
 import { ConfigLoader } from "../config/ConfigLoader.js";
 import { PromptBuilder } from "../prompts/PromptBuilder.js";
 import { SessionManager } from "./SessionManager.js";
 import { MemoryManager } from "../memory/MemoryManager.js";
 import { LocalDiffSource } from "./LocalDiffSource.js";
-import type { LocalDiffContext } from "./LocalDiffSource.js";
+
 import { ContextExplorerService } from "../exploration/ContextExplorerService.js";
+import { ProviderDetector } from "../utils/ProviderDetector.js";
 import {
-  ProviderDetector,
-  type VCSProvider,
-} from "../utils/ProviderDetector.js";
-import { getProviderToolset } from "../providers/ProviderToolset.js";
-import {
-  LocalReviewFinding,
+  LocalDiffContext,
+  VCSProvider,
   LocalReviewRequest,
   LocalReviewResult,
   ReviewRequest,
   ReviewResult,
   ReviewMode,
-  ReviewStatistics,
-  TokenUsage,
   UnifiedReviewRequest,
-  IssuesBySeverity,
-} from "../types/v2.types.js";
-import { YamaConfig, YamaInitOptions } from "../types/config.types.js";
+  EnhancementResult,
+} from "../types/index.js";
 import {
-  buildObservabilityConfigFromEnv,
-  validateObservabilityConfig,
-} from "../utils/ObservabilityConfig.js";
+  MCPServersConfig,
+  YamaConfig,
+  YamaInitOptions,
+} from "../types/index.js";
+import { NeuroLinkFactory } from "./NeuroLinkFactory.js";
+import { ReviewResultParser } from "./ReviewResultParser.js";
+import {
+  isVerdictShaped,
+  localReviewVerdictSchema,
+  prReviewVerdictSchema,
+} from "./reviewSchema.js";
 import { clampMaxTokens } from "../utils/tokenLimits.js";
-import { isMutatingGitTool } from "../utils/toolPolicy.js";
-import { VERSION } from "../../index.js";
+import { parseDurationMs } from "../utils/duration.js";
+import {
+  buildFindingId,
+  collectSuppressedIds,
+  createStateStore,
+  formatOpenFindingsForPrompt,
+  reconcileFindings,
+  type ReviewStateStore,
+} from "../state/ReviewStateStore.js";
+import { Critic } from "../harness/Critic.js";
+import {
+  RuleLoader,
+  compileRulesForPrompt,
+  computeRuleCompliance,
+  hasBlockingRuleViolation,
+} from "../rules/RuleLoader.js";
+import { RulesContextLoader } from "../exploration/RulesContextLoader.js";
+import type { YamaRule } from "../types/index.js";
+import { gateFindings } from "../harness/submitReviewGate.js";
+import type { SubmitReviewAccepted, SubmittedFinding } from "../types/index.js";
+import { isMutatingGitTool, normalizeToolName } from "../utils/toolPolicy.js";
+import { VERSION } from "../utils/version.js";
 
 export class YamaOrchestrator {
   private neurolink!: NeuroLink;
@@ -45,20 +68,30 @@ export class YamaOrchestrator {
   private configLoader: ConfigLoader;
   private promptBuilder: PromptBuilder;
   private sessionManager: SessionManager;
+  private resultParser: ReviewResultParser;
   private memoryManager: MemoryManager | null = null;
   private localDiffSource: LocalDiffSource;
+  private stateStore: ReviewStateStore | null = null;
   private config!: YamaConfig;
   private initialized = false;
   private mcpInitialized = false;
-  // Provider the PR-mode MCP servers were last set up for. Lets one orchestrator
-  // instance switch providers mid-process (Bitbucket PR then GitHub PR) by
-  // re-running setup when the detected provider no longer matches.
-  private mcpProvider: VCSProvider | null = null;
-  private localGitMcpInitialized = false;
+  // Review mode the MCP servers were last registered for; re-register if a
+  // reused instance switches between "pr" and "local".
+  private mcpMode: ReviewMode | null = null;
   private exploreToolRegistered = false;
+  private submitToolRegistered = false;
+  private critic: Critic | null = null;
+  /** Open finding ids from prior runs on the current PR (state-driven dedup). */
+  private previousOpenIds = new Set<string>();
+  /** Finding ids accepted by submit_review during the current run. */
+  private acceptedFindingIds = new Set<string>();
+  /** Learned false positives (dismissed / ignored 3+ runs) — never re-posted. */
+  private suppressedFindingIds = new Set<string>();
   private currentToolContext: Record<string, unknown> | null = null;
   private initOptions: YamaInitOptions;
   private bootstrapStandardsCache: Map<string, string> = new Map();
+  private loadedRules: YamaRule[] = [];
+  private projectDocsCache: string | null | undefined;
   private detectedProvider: VCSProvider = "bitbucket";
 
   constructor(options: YamaInitOptions = {}) {
@@ -66,7 +99,8 @@ export class YamaOrchestrator {
     this.configLoader = new ConfigLoader();
     this.mcpManager = new MCPServerManager();
     this.promptBuilder = new PromptBuilder();
-    this.sessionManager = new SessionManager();
+    this.sessionManager = new SessionManager(VERSION);
+    this.resultParser = new ReviewResultParser(this.sessionManager);
     this.localDiffSource = new LocalDiffSource();
   }
 
@@ -91,30 +125,6 @@ export class YamaOrchestrator {
 
         this.showBanner();
 
-        // Step 1.5: Detect provider BEFORE MCP setup so the correct provider's
-        // MCP server is wired up. When the real request is threaded in, detect
-        // from it; otherwise fall back to a preliminary detection (for logging
-        // and env/config-default driven runs).
-        if (request) {
-          this.detectedProvider = ProviderDetector.detect(
-            request,
-            process.env,
-            this.config.defaultProvider,
-          );
-        } else {
-          const preliminaryRequest: ReviewRequest = {
-            mode: "pr",
-            workspace: "",
-            repository: "",
-          };
-          this.detectedProvider = ProviderDetector.detect(
-            preliminaryRequest,
-            process.env,
-            this.config.defaultProvider,
-          );
-        }
-        console.log(`🔌 Provider detected: ${this.detectedProvider}\n`);
-
         // Step 2: Initialize
         if (this.config.memory?.enabled) {
           this.memoryManager = new MemoryManager(
@@ -125,6 +135,13 @@ export class YamaOrchestrator {
           console.log("   🧠 Per-repo memory enabled\n");
         }
 
+        this.stateStore = createStateStore(this.config.state);
+        if (this.stateStore) {
+          console.log(
+            `   🗂️  Review state enabled (store: ${this.stateStore.kind})`,
+          );
+        }
+
         // Step 3: Initialize NeuroLink with memory config injected
         console.log("🧠 Initializing NeuroLink AI engine...");
         this.neurolink = this.initializeNeurolink();
@@ -133,55 +150,69 @@ export class YamaOrchestrator {
           this.sessionManager,
           this.memoryManager,
         );
+        this.loadedRules = await new RuleLoader().load();
+        if (this.loadedRules.length > 0) {
+          console.log(
+            `   📏 Loaded ${this.loadedRules.length} team rule(s) from .yama/rules ` +
+              `(${this.loadedRules.filter((r) => r.blocking).length} blocking)`,
+          );
+        }
         this.registerExploreTool();
+        this.critic = new Critic(
+          NeuroLinkFactory.create({ conversationMemory: false }),
+          this.config,
+          this.explorer,
+        );
+        this.registerSubmitReviewTool();
         console.log("✅ NeuroLink initialized\n");
 
         this.initialized = true;
       }
 
-      // Step 4: Mode-specific setup
-      if (mode === "pr") {
-        // If MCP was already set up for a DIFFERENT provider (one instance
-        // reviewing a Bitbucket PR then a GitHub PR), tear down the previous
-        // provider's server and re-register for the new one. Single-provider
-        // runs never hit this branch, so their behaviour is unchanged.
-        if (
-          this.mcpInitialized &&
-          this.mcpProvider !== null &&
-          this.mcpProvider !== this.detectedProvider
-        ) {
-          console.log(
-            `🔄 Provider changed (${this.mcpProvider} → ${this.detectedProvider}); re-registering MCP servers...`,
-          );
-          await this.mcpManager.resetForProviderSwitch(
-            this.neurolink,
-            this.mcpProvider,
-          );
-          this.mcpInitialized = false;
-        }
-
-        if (!this.mcpInitialized) {
-          await this.mcpManager.setupMCPServers(
-            this.neurolink,
-            this.config.mcpServers,
-            this.detectedProvider,
-          );
-          if (this.explorer && this.config.ai.explore.enabled) {
-            await this.explorer.initialize("pr", this.detectedProvider);
-          }
-          this.mcpInitialized = true;
-          this.mcpProvider = this.detectedProvider;
-        }
-      } else if (mode === "local" && !this.localGitMcpInitialized) {
-        await this.mcpManager.setupLocalGitMCPServer(this.neurolink);
-        if (this.explorer && this.config.ai.explore.enabled) {
-          await this.explorer.initialize("local");
-        }
-        this.localGitMcpInitialized = true;
+      // Step 3.5: Detect provider from the CURRENT request on EVERY call (not
+      // just the first), BEFORE MCP setup — so a reused instance reviewing a
+      // different provider (Bitbucket then GitHub) re-detects and the
+      // provider-switch branch below actually fires. Without this, detection was
+      // trapped in the one-time init block and the switch check compared against
+      // a stale provider.
+      // Provider detection is data-only now (used to label the PR identifier in
+      // the prompt); MCP servers are chosen by config, not by provider.
+      if (request) {
+        this.detectedProvider = ProviderDetector.detect(
+          request,
+          process.env,
+          this.config.defaultProvider,
+        );
       }
 
-      // Step 5: Mode-specific validation (provider-aware: GitHub runs skip the
-      // Bitbucket env requirement, Bitbucket runs are unchanged)
+      // Step 4: Register the MCP servers configured for this mode + the main
+      // ("review") agent. Opt-in project servers from `.yama/mcp.json` are
+      // merged OVER the config map (same id = override, including the VCS
+      // servers), so one generic path applies roles/modes/allowlists to all.
+      if (!this.mcpInitialized || this.mcpMode !== mode) {
+        const projectServers = await new McpRegistry().load();
+        if (Object.keys(projectServers).length > 0) {
+          console.log(
+            `   🧩 Merging ${Object.keys(projectServers).length} project MCP server(s) from .yama/mcp.json`,
+          );
+        }
+        const effectiveMcpConfig: MCPServersConfig = {
+          servers: { ...this.config.mcpServers.servers, ...projectServers },
+        };
+        await this.mcpManager.setupMCPServers(
+          this.neurolink,
+          effectiveMcpConfig,
+          mode,
+          "review",
+        );
+        if (this.explorer && this.config.ai.explore.enabled) {
+          await this.explorer.initialize(mode, projectServers);
+        }
+        this.mcpInitialized = true;
+        this.mcpMode = mode;
+      }
+
+      // Step 5: Mode-specific validation.
       await this.configLoader.validate(mode, this.detectedProvider);
 
       console.log("✅ Yama initialized successfully\n");
@@ -215,13 +246,16 @@ export class YamaOrchestrator {
         request,
         sessionId,
       );
+      const previousReview = await this.loadPreviousReview(request);
 
       // Build comprehensive AI instructions
       const instructions = await this.promptBuilder.buildReviewInstructions(
         request,
         this.config,
         bootstrapStandards,
-        this.detectedProvider,
+        previousReview.block,
+        compileRulesForPrompt(this.loadedRules),
+        await this.getProjectDocs(),
       );
 
       if (this.config.display.verboseToolCalls) {
@@ -260,8 +294,15 @@ export class YamaOrchestrator {
             temperature: this.config.ai.temperature,
             maxTokens: clampMaxTokens(this.config.ai.maxTokens),
             timeout: this.config.ai.timeout,
+            // Prefer streaming transport for the long agentic loop (chunked
+            // SSE keeps slow self-hosted backends responsive end-to-end).
+            stream: true,
+            // NeuroLink owns structured output: wire-level enforcement where
+            // the provider supports tools+schema, JSON coercion into
+            // structuredData everywhere else.
+            schema: prReviewVerdictSchema,
             skipToolPromptInjection: true,
-            ...this.getPRToolFilteringOptions(instructions),
+            ...this.getLoopGuardOptions(),
             context: {
               sessionId,
               userId: this.getUserId(request),
@@ -274,10 +315,26 @@ export class YamaOrchestrator {
           } as unknown as Parameters<NeuroLink["generate"]>[0]),
         "code-review",
       );
-      this.recordToolCallsFromResponse(sessionId, aiResponse);
+      this.resultParser.recordToolCallsFromResponse(sessionId, aiResponse);
+      const verdictResponse = await this.ensureStructuredVerdict(
+        aiResponse,
+        prReviewVerdictSchema,
+        sessionId,
+        this.getUserId(request),
+        "code-review-verdict",
+      );
 
       // Extract and parse results
-      const result = this.parseReviewResult(aiResponse, startTime, sessionId);
+      const result = this.applyRuleCompliance(
+        this.resultParser.parseReviewResult(
+          verdictResponse,
+          startTime,
+          sessionId,
+          this.config.projectStandards?.severityOverrides,
+        ),
+      );
+
+      await this.persistReviewState(previousReview.key, request, result);
 
       // Update session with results
       this.sessionManager.completeSession(sessionId, result);
@@ -353,8 +410,11 @@ export class YamaOrchestrator {
             enableEvaluation: this.config.ai.enableEvaluation,
             // Request JSON output at the provider level (prompt-level mode; safe alongside tools).
             output: { format: "json" },
+            // NeuroLink enforces/coerces this shape into structuredData.
+            schema: localReviewVerdictSchema,
             // Tools are passed natively; avoids huge duplicated tool-schema prompt injection.
             skipToolPromptInjection: true,
+            ...this.getLoopGuardOptions(),
             ...this.getLocalToolFilteringOptions(),
             context: {
               sessionId,
@@ -370,14 +430,22 @@ export class YamaOrchestrator {
           } as unknown as Parameters<NeuroLink["generate"]>[0]),
         "local-review",
       );
-      this.recordToolCallsFromResponse(sessionId, aiResponse);
-
-      const result = this.parseLocalReviewResult(
+      this.resultParser.recordToolCallsFromResponse(sessionId, aiResponse);
+      const localResponse = await this.ensureStructuredVerdict(
         aiResponse,
+        localReviewVerdictSchema,
+        sessionId,
+        this.getUserId(pseudoRequest),
+        "local-review-verdict",
+      );
+
+      const result = this.resultParser.parseLocalReviewResult(
+        localResponse,
         sessionId,
         startTime,
         request,
         diffContext,
+        this.config.projectStandards?.severityOverrides,
       );
 
       // Stored as generic session payload for debugging/export parity.
@@ -414,13 +482,17 @@ export class YamaOrchestrator {
         sessionId,
       );
 
+      const previousReview = await this.loadPreviousReview(request);
+
       // Build review instructions
       const reviewInstructions =
         await this.promptBuilder.buildReviewInstructions(
           request,
           this.config,
           bootstrapStandards,
-          this.detectedProvider,
+          previousReview.block,
+          compileRulesForPrompt(this.loadedRules),
+          await this.getProjectDocs(),
         );
 
       if (this.config.display.verboseToolCalls) {
@@ -451,8 +523,15 @@ export class YamaOrchestrator {
         temperature: this.config.ai.temperature,
         maxTokens: clampMaxTokens(this.config.ai.maxTokens),
         timeout: this.config.ai.timeout,
+        // Prefer streaming transport for the long agentic loop (chunked SSE
+        // keeps slow self-hosted backends responsive end-to-end).
+        stream: true,
+        // NeuroLink owns structured output: wire-level enforcement where the
+        // provider supports tools+schema, JSON coercion into structuredData
+        // everywhere else. The parser reads structuredData only.
+        schema: prReviewVerdictSchema,
         skipToolPromptInjection: true,
-        ...this.getPRToolFilteringOptions(reviewInstructions),
+        ...this.getLoopGuardOptions(),
         context: {
           sessionId,
           userId: this.getUserId(request),
@@ -463,13 +542,23 @@ export class YamaOrchestrator {
         enableAnalytics: this.config.ai.enableAnalytics,
         enableEvaluation: this.config.ai.enableEvaluation,
       } as unknown as Parameters<NeuroLink["generate"]>[0]);
-      this.recordToolCallsFromResponse(sessionId, reviewResponse);
+      this.resultParser.recordToolCallsFromResponse(sessionId, reviewResponse);
+      const verdictResponse = await this.ensureStructuredVerdict(
+        reviewResponse,
+        prReviewVerdictSchema,
+        sessionId,
+        this.getUserId(request),
+        "code-review-verdict",
+      );
 
       // Parse review results
-      const reviewResult = this.parseReviewResult(
-        reviewResponse,
-        startTime,
-        sessionId,
+      const reviewResult = this.applyRuleCompliance(
+        this.resultParser.parseReviewResult(
+          verdictResponse,
+          startTime,
+          sessionId,
+          this.config.projectStandards?.severityOverrides,
+        ),
       );
 
       console.log("\n✅ Phase 1 complete: Code review finished");
@@ -488,7 +577,6 @@ export class YamaOrchestrator {
           await this.promptBuilder.buildDescriptionEnhancementInstructions(
             request,
             this.config,
-            this.detectedProvider,
           );
 
         // Continue the SAME session - AI remembers everything from review
@@ -500,7 +588,6 @@ export class YamaOrchestrator {
           maxTokens: clampMaxTokens(this.config.ai.maxTokens),
           timeout: this.config.ai.timeout,
           skipToolPromptInjection: true,
-          ...this.getPRToolFilteringOptions(enhanceInstructions),
           context: {
             sessionId, // SAME sessionId = AI remembers review context
             userId: this.getUserId(request),
@@ -511,7 +598,10 @@ export class YamaOrchestrator {
           enableAnalytics: this.config.ai.enableAnalytics,
           enableEvaluation: this.config.ai.enableEvaluation,
         } as unknown as Parameters<NeuroLink["generate"]>[0]);
-        this.recordToolCallsFromResponse(sessionId, enhanceResponse);
+        this.resultParser.recordToolCallsFromResponse(
+          sessionId,
+          enhanceResponse,
+        );
 
         console.log("✅ Phase 2 complete: Description enhanced\n");
 
@@ -523,6 +613,8 @@ export class YamaOrchestrator {
         );
         reviewResult.descriptionEnhanced = false;
       }
+
+      await this.persistReviewState(previousReview.key, request, reviewResult);
 
       // Update session with final results
       this.sessionManager.completeSession(sessionId, reviewResult);
@@ -540,7 +632,7 @@ export class YamaOrchestrator {
   /**
    * Enhance PR description only (without full review)
    */
-  async enhanceDescription(request: ReviewRequest): Promise<any> {
+  async enhanceDescription(request: ReviewRequest): Promise<EnhancementResult> {
     await this.ensureInitialized("pr", request.configPath, request);
 
     const sessionId = this.sessionManager.createSession(request);
@@ -552,7 +644,6 @@ export class YamaOrchestrator {
         await this.promptBuilder.buildDescriptionEnhancementInstructions(
           request,
           this.config,
-          this.detectedProvider,
         );
 
       const toolContext = this.createToolContext(sessionId, request);
@@ -563,7 +654,6 @@ export class YamaOrchestrator {
         provider: this.config.ai.provider,
         model: this.config.ai.model,
         skipToolPromptInjection: true,
-        ...this.getPRToolFilteringOptions(instructions),
         context: {
           sessionId,
           userId: this.getUserId(request),
@@ -572,7 +662,7 @@ export class YamaOrchestrator {
         memory: { enabled: false },
         enableAnalytics: true,
       } as unknown as Parameters<NeuroLink["generate"]>[0]);
-      this.recordToolCallsFromResponse(sessionId, aiResponse);
+      this.resultParser.recordToolCallsFromResponse(sessionId, aiResponse);
 
       console.log("✅ Description enhanced successfully\n");
 
@@ -673,6 +763,67 @@ export class YamaOrchestrator {
   }
 
   /**
+   * Guarantee a structured verdict without any project-level JSON parsing.
+   *
+   * The agentic review loop can legitimately end on a tool step, leaving the
+   * final message empty — nothing for NeuroLink's schema coercion to work on.
+   * In that case ask the SAME conversation session (the model remembers its
+   * whole review) for just the verdict: tools disabled, schema passed, so
+   * NeuroLink enforces/coerces the JSON itself. One bounded follow-up; if it
+   * also produces nothing structured, the caller's parser fails safe.
+   */
+  private async ensureStructuredVerdict(
+    response: any,
+    schema: unknown,
+    sessionId: string,
+    userId: string,
+    operation: string,
+  ): Promise<any> {
+    // Same shape test the parser uses — a present-but-unrelated JSON object
+    // recovered from prose must still trigger the follow-up.
+    const hasVerdict = (candidate: any): boolean =>
+      isVerdictShaped(candidate?.structuredData);
+    if (hasVerdict(response)) {
+      return response;
+    }
+
+    console.log(
+      "   🔁 Final message carried no structured verdict — requesting it explicitly (same session, tools off)...",
+    );
+    try {
+      const verdict = await this.neurolink.generate({
+        input: {
+          text: "The review is complete. Return ONLY the final review verdict now, as the strict JSON object defined in the output contract — no prose, no markdown fences, no tool calls.",
+        },
+        provider: this.config.ai.provider,
+        model: this.config.ai.model,
+        temperature: 0,
+        maxTokens: clampMaxTokens(8000),
+        timeout: "3m",
+        schema,
+        disableTools: true,
+        skipToolPromptInjection: true,
+        context: { sessionId, userId, operation },
+        memory: { enabled: false },
+      } as unknown as Parameters<NeuroLink["generate"]>[0]);
+
+      if (hasVerdict(verdict)) {
+        // Keep the original response's usage/analytics/tool trace; only the
+        // structured verdict comes from the follow-up.
+        return { ...response, structuredData: verdict.structuredData };
+      }
+      console.warn(
+        "   ⚠️  Follow-up verdict request also returned no structured output.",
+      );
+    } catch (error) {
+      console.warn(
+        `   ⚠️  Follow-up verdict request failed: ${(error as Error).message}`,
+      );
+    }
+    return response;
+  }
+
+  /**
    * Run a NeuroLink generate() call with a small bounded retry on transient
    * errors (wires up the previously-unused `ai.retryAttempts` config). Retries
    * up to `retryAttempts` times (>=1 total attempt) with a short exponential
@@ -749,651 +900,6 @@ export class YamaOrchestrator {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  /**
-   * Parse AI response into structured review result
-   */
-  private parseReviewResult(
-    aiResponse: any,
-    startTime: number,
-    sessionId: string,
-  ): ReviewResult {
-    const session = this.sessionManager.getSession(sessionId);
-    const duration = Math.round((Date.now() - startTime) / 1000);
-
-    // Extract decision from AI response or tool calls
-    const decision = this.extractDecision(aiResponse, session);
-
-    // Calculate statistics from session tool calls
-    const statistics = this.calculateStatistics(session);
-
-    return {
-      mode: "pr",
-      // GitHub passes the PR number via prNumber; coalesce so GitHub reviews
-      // report the real PR number instead of 0.
-      prId: session.request.pullRequestId ?? session.request.prNumber ?? 0,
-      decision,
-      statistics,
-      summary: this.extractSummary(aiResponse),
-      duration,
-      tokenUsage: {
-        // NeuroLink 9.70.x usage shape is { input, output, total } — NOT
-        // inputTokens/outputTokens/totalTokens (those always resolved to 0).
-        input: this.toSafeNumber(aiResponse?.usage?.input),
-        output: this.toSafeNumber(aiResponse?.usage?.output),
-        total: this.toSafeNumber(aiResponse?.usage?.total),
-      },
-      costEstimate: this.calculateCost(aiResponse),
-      sessionId,
-    };
-  }
-
-  private recordToolCallsFromResponse(
-    sessionId: string,
-    aiResponse: any,
-  ): void {
-    const toolCalls = Array.isArray(aiResponse?.toolCalls)
-      ? aiResponse.toolCalls
-      : [];
-    const toolResults = Array.isArray(aiResponse?.toolResults)
-      ? aiResponse.toolResults
-      : [];
-
-    for (const call of toolCalls) {
-      const toolName =
-        call?.toolName || call?.name || call?.tool || "unknown_tool";
-      const args = call?.parameters || call?.args || {};
-      const matchingResult =
-        toolResults.find(
-          (result: any) =>
-            result?.toolCallId === call?.id || result?.toolName === toolName,
-        ) || null;
-
-      this.sessionManager.recordToolCall(
-        sessionId,
-        toolName,
-        args,
-        matchingResult,
-        0,
-        matchingResult?.error,
-      );
-    }
-  }
-
-  /**
-   * Parse local SDK mode response into strict LocalReviewResult.
-   */
-  private parseLocalReviewResult(
-    aiResponse: any,
-    sessionId: string,
-    startTime: number,
-    request: LocalReviewRequest,
-    diffContext: LocalDiffContext,
-  ): LocalReviewResult {
-    const rawContent = aiResponse?.content || aiResponse?.outputs?.text || "";
-    // Prefer NeuroLink's already-parsed structuredData (output.format "json")
-    // before re-parsing the raw content string by hand; fall back to the
-    // hand-parse so older shapes / non-JSON outputs still work.
-    const structured =
-      aiResponse?.structuredData &&
-      typeof aiResponse.structuredData === "object" &&
-      !Array.isArray(aiResponse.structuredData)
-        ? (aiResponse.structuredData as Record<string, any>)
-        : null;
-    const parsed = structured ?? this.extractJsonPayload(rawContent);
-    const jsonTruncated = aiResponse?.jsonTruncated === true;
-    const usage = aiResponse?.usage || {};
-    const tokenUsage: TokenUsage = {
-      // NeuroLink 9.70.x usage shape is { input, output, total }.
-      input: this.toSafeNumber(usage.input),
-      output: this.toSafeNumber(usage.output),
-      total: this.toSafeNumber(usage.total),
-    };
-
-    if (!parsed) {
-      // Distinguish a truncated response (model ran out of output budget mid-JSON)
-      // from a genuinely malformed one, and advise raising maxTokens in that case
-      // rather than emitting the generic format-violation guidance.
-      const fallbackIssue: LocalReviewFinding = jsonTruncated
-        ? {
-            id: "OUTPUT_TRUNCATED",
-            severity: "MAJOR",
-            category: "review-engine",
-            title: "Model output was truncated before valid JSON completed",
-            description:
-              "The local review response was cut off (jsonTruncated), so the JSON could not be parsed and findings cannot be trusted.",
-            suggestion:
-              "Raise ai.maxTokens (output budget) and/or reduce review scope (smaller diff / includePaths) so the structured JSON can finish.",
-          }
-        : {
-            id: "OUTPUT_FORMAT_VIOLATION",
-            severity: "MAJOR",
-            category: "review-engine",
-            title: "Model did not return structured JSON",
-            description:
-              "Local review response was unstructured (likely tool-call trace or partial output), so findings cannot be trusted.",
-            suggestion:
-              "Retry with a tool-calling capable model or reduce review scope (smaller diff / includePaths) to keep responses structured.",
-          };
-      const issuesBySeverity = this.countFindingsBySeverity([fallbackIssue]);
-
-      return {
-        mode: "local",
-        decision: "CHANGES_REQUESTED",
-        summary:
-          this.sanitizeLocalSummary(rawContent) ||
-          (jsonTruncated
-            ? "Local review output was truncated before valid JSON completed."
-            : "Local review could not produce structured JSON output."),
-        issues: [fallbackIssue],
-        enhancements: [],
-        statistics: {
-          filesChanged: diffContext.changedFiles.length,
-          additions: diffContext.additions,
-          deletions: diffContext.deletions,
-          issuesFound: 1,
-          enhancementsFound: 0,
-          issuesBySeverity,
-        },
-        duration: Math.round((Date.now() - startTime) / 1000),
-        tokenUsage,
-        costEstimate: this.calculateCost(aiResponse),
-        sessionId,
-        schemaVersion: request.outputSchemaVersion || "1.0",
-        metadata: {
-          repoPath: diffContext.repoPath,
-          diffSource: diffContext.diffSource,
-          baseRef: diffContext.baseRef,
-          headRef: diffContext.headRef,
-          truncated: diffContext.truncated,
-        },
-      };
-    }
-
-    const issues = this.normalizeFindings(parsed?.issues, "issue");
-    const enhancements = this.normalizeFindings(
-      parsed?.enhancements,
-      "enhancement",
-    );
-    const issuesBySeverity = this.countFindingsBySeverity(issues);
-    const fallbackForTruncatedNoFindings =
-      diffContext.truncated && issues.length === 0 && enhancements.length === 0;
-    const decision = fallbackForTruncatedNoFindings
-      ? "CHANGES_REQUESTED"
-      : this.normalizeDecision(parsed?.decision, issuesBySeverity);
-
-    return {
-      mode: "local",
-      decision,
-      summary:
-        this.sanitizeLocalSummary(parsed?.summary) ||
-        this.sanitizeLocalSummary(this.extractSummary(aiResponse)) ||
-        "Local review completed",
-      issues,
-      enhancements,
-      statistics: {
-        filesChanged: diffContext.changedFiles.length,
-        additions: diffContext.additions,
-        deletions: diffContext.deletions,
-        issuesFound: issues.length,
-        enhancementsFound: enhancements.length,
-        issuesBySeverity,
-      },
-      duration: Math.round((Date.now() - startTime) / 1000),
-      tokenUsage,
-      costEstimate: this.calculateCost(aiResponse),
-      sessionId,
-      schemaVersion: request.outputSchemaVersion || "1.0",
-      metadata: {
-        repoPath: diffContext.repoPath,
-        diffSource: diffContext.diffSource,
-        baseRef: diffContext.baseRef,
-        headRef: diffContext.headRef,
-        truncated: diffContext.truncated,
-      },
-    };
-  }
-
-  private sanitizeLocalSummary(summary: unknown): string {
-    if (typeof summary !== "string") {
-      return "";
-    }
-    // Use string splitting instead of backtracking [\s\S]*? regex to avoid ReDoS.
-    let result = this.removeDelimitedSections(
-      summary,
-      "<|tool_calls_section_begin|>",
-      "<|tool_calls_section_end|>",
-    );
-    result = this.removeDelimitedSections(
-      result,
-      "<|tool_call_begin|>",
-      "<|tool_call_end|>",
-    );
-    return result.replace(/\s+/g, " ").trim();
-  }
-
-  private removeDelimitedSections(
-    text: string,
-    open: string,
-    close: string,
-  ): string {
-    let result = "";
-    let pos = 0;
-    while (pos < text.length) {
-      const start = text.indexOf(open, pos);
-      if (start === -1) {
-        result += text.slice(pos);
-        break;
-      }
-      result += text.slice(pos, start);
-      const end = text.indexOf(close, start + open.length);
-      pos = end === -1 ? text.length : end + close.length;
-    }
-    return result;
-  }
-
-  private extractJsonPayload(content: string): Record<string, any> | null {
-    if (!content || typeof content !== "string") {
-      return null;
-    }
-
-    const trimmed = content.trim();
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      // Fall through to extraction strategies
-    }
-
-    // Use indexOf instead of backtracking [\s\S]*? regex to avoid ReDoS.
-    const fenceOpen = trimmed.toLowerCase().indexOf("```json");
-    if (fenceOpen !== -1) {
-      let contentStart = fenceOpen + 7; // length of "```json"
-      while (
-        contentStart < trimmed.length &&
-        (trimmed[contentStart] === " " ||
-          trimmed[contentStart] === "\n" ||
-          trimmed[contentStart] === "\r")
-      ) {
-        contentStart++;
-      }
-      const fenceClose = trimmed.indexOf("```", contentStart);
-      if (fenceClose !== -1) {
-        try {
-          return JSON.parse(trimmed.slice(contentStart, fenceClose).trim());
-        } catch {
-          // Continue
-        }
-      }
-    }
-
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(trimmed.slice(start, end + 1));
-      } catch {
-        return null;
-      }
-    }
-
-    return null;
-  }
-
-  private normalizeFindings(
-    findings: unknown,
-    prefix: "issue" | "enhancement",
-  ): LocalReviewFinding[] {
-    if (!Array.isArray(findings)) {
-      return [];
-    }
-
-    return findings
-      .map((raw, index) => {
-        const value = (raw || {}) as Record<string, unknown>;
-        const ruleKey =
-          (typeof value.rule === "string" && value.rule) ||
-          (typeof value.category === "string" && value.category) ||
-          (typeof value.id === "string" && value.id) ||
-          undefined;
-        const severity = this.normalizeSeverity(value.severity, ruleKey);
-        if (!severity) {
-          return null;
-        }
-        const lineValue =
-          typeof value.line === "number" ? value.line : undefined;
-
-        const finding: LocalReviewFinding = {
-          id:
-            (typeof value.id === "string" && value.id.trim()) ||
-            `${prefix}-${index + 1}`,
-          severity,
-          category:
-            (typeof value.category === "string" && value.category.trim()) ||
-            "general",
-          title:
-            (typeof value.title === "string" && value.title.trim()) ||
-            "Untitled finding",
-          description:
-            (typeof value.description === "string" &&
-              value.description.trim()) ||
-            "",
-        };
-
-        if (typeof value.filePath === "string" && value.filePath.trim()) {
-          finding.filePath = value.filePath;
-        }
-        if (lineValue && lineValue > 0) {
-          finding.line = lineValue;
-        }
-        if (typeof value.suggestion === "string" && value.suggestion.trim()) {
-          finding.suggestion = value.suggestion;
-        }
-
-        return finding;
-      })
-      .filter((item): item is LocalReviewFinding => item !== null);
-  }
-
-  private normalizeSeverity(
-    severity: unknown,
-    ruleKey?: string,
-  ): LocalReviewFinding["severity"] | null {
-    // Calibration: allow projectStandards.severityOverrides to remap a finding's
-    // severity by its rule/category key (defensive — config is optional and the
-    // override value is itself validated against the known severity set). This
-    // takes precedence over the model-reported severity.
-    const overrides = this.config.projectStandards?.severityOverrides;
-    if (overrides && ruleKey) {
-      const overridden = this.coerceSeverity(overrides[ruleKey]);
-      if (overridden) {
-        return overridden;
-      }
-    }
-
-    return this.coerceSeverity(severity) ?? "MINOR";
-  }
-
-  /**
-   * Map an arbitrary value to a known severity, or null if it is not one of the
-   * recognised levels. Unlike normalizeSeverity this does NOT default to MINOR,
-   * so callers can distinguish "unknown" from a real level.
-   */
-  private coerceSeverity(
-    severity: unknown,
-  ): LocalReviewFinding["severity"] | null {
-    if (typeof severity !== "string") {
-      return null;
-    }
-    const value = severity.toUpperCase();
-    if (
-      value === "CRITICAL" ||
-      value === "MAJOR" ||
-      value === "MINOR" ||
-      value === "SUGGESTION"
-    ) {
-      return value;
-    }
-    return null;
-  }
-
-  private countFindingsBySeverity(
-    findings: LocalReviewFinding[],
-  ): IssuesBySeverity {
-    const counts: IssuesBySeverity = {
-      critical: 0,
-      major: 0,
-      minor: 0,
-      suggestions: 0,
-    };
-
-    for (const finding of findings) {
-      if (finding.severity === "CRITICAL") {
-        counts.critical += 1;
-      } else if (finding.severity === "MAJOR") {
-        counts.major += 1;
-      } else if (finding.severity === "MINOR") {
-        counts.minor += 1;
-      } else {
-        counts.suggestions += 1;
-      }
-    }
-
-    return counts;
-  }
-
-  private normalizeDecision(
-    decision: unknown,
-    issuesBySeverity: IssuesBySeverity,
-  ): "APPROVED" | "CHANGES_REQUESTED" | "BLOCKED" {
-    if (typeof decision === "string") {
-      const upper = decision.toUpperCase();
-      if (
-        upper === "APPROVED" ||
-        upper === "CHANGES_REQUESTED" ||
-        upper === "BLOCKED"
-      ) {
-        return upper;
-      }
-    }
-
-    if (issuesBySeverity.critical > 0) {
-      return "BLOCKED";
-    }
-    if (issuesBySeverity.major + issuesBySeverity.minor > 0) {
-      return "CHANGES_REQUESTED";
-    }
-    return "APPROVED";
-  }
-
-  /**
-   * Extract decision from AI response
-   */
-  private extractDecision(
-    aiResponse: any,
-    session: any,
-  ): "APPROVED" | "CHANGES_REQUESTED" | "BLOCKED" {
-    // Derive final review state from tool calls, delegating provider-specific
-    // signal interpretation to the detected provider's toolset. The Bitbucket
-    // toolset replicates the previous hardcoded logic (set_review_status /
-    // set_pr_approval + legacy names) byte-for-byte.
-    const toolCalls = session.toolCalls || [];
-    const ts = getProviderToolset(this.detectedProvider);
-
-    // ORDER-AWARE: the LAST decisive review-status / approval tool call wins, so
-    // a later approval correctly overrides an earlier request-changes (and vice
-    // versa). The previous logic let any "BLOCKED" stick regardless of order,
-    // reporting BLOCKED even when the AI changed its mind and approved afterward.
-    let lastDecision: "APPROVED" | "BLOCKED" | undefined;
-
-    for (const tc of toolCalls) {
-      const decision = ts.interpretDecision({
-        toolName: tc?.toolName,
-        args: tc?.args || {},
-      });
-
-      if (decision === "BLOCKED" || decision === "APPROVED") {
-        lastDecision = decision;
-      }
-    }
-
-    if (lastDecision === "BLOCKED") {
-      return "BLOCKED";
-    }
-    if (lastDecision === "APPROVED") {
-      return "APPROVED";
-    }
-
-    // Default to changes requested if unclear
-    return "CHANGES_REQUESTED";
-  }
-
-  /**
-   * Calculate statistics from session
-   */
-  private calculateStatistics(session: any): ReviewStatistics {
-    const toolCalls = session.toolCalls || [];
-    const ts = getProviderToolset(this.detectedProvider);
-
-    // Count the changed files actually reviewed. Provider-specific because the
-    // diff-tool semantics differ.
-    const filesReviewed = this.countFilesReviewed(toolCalls);
-
-    // Try to extract issue counts from comments (provider-specific comment tools)
-    const commentCalls = toolCalls.filter((tc: any) =>
-      ts.commentToolNames.includes(tc.toolName),
-    );
-    const issuesFound = this.extractIssueCountsFromComments(commentCalls);
-
-    return {
-      filesReviewed,
-      issuesFound,
-      requirementCoverage: 0, // Would need to parse from Jira comparison
-      codeQualityScore: 0, // Would need AI to provide this
-      toolCallsMade: toolCalls.length,
-      cacheHits: 0,
-      totalComments: commentCalls.length,
-    };
-  }
-
-  /**
-   * Count the changed files actually reviewed, from the session tool calls.
-   *
-   * Bitbucket: get_pull_request_diff is called once per file by design, so the
-   * raw count of diff-tool calls already equals the files reviewed. This path is
-   * byte-for-byte identical to the previous behaviour.
-   *
-   * GitHub: pull_request_read is overloaded — the SAME tool name serves
-   * method="get" (PR shell), "get_files" (changed-file list) and "get_diff"
-   * (unified diff). Counting every pull_request_read call therefore inflates the
-   * number. Instead, count DISTINCT file paths the review actually touched, taken
-   * from the inline pending-review comments (add_comment_to_pending_review →
-   * args.path). Fall back to the number of distinct get_files/get_diff reads when
-   * no inline comments were posted (e.g. a clean approval), so a reviewed-but-
-   * clean PR is not reported as 0 files.
-   */
-  private countFilesReviewed(toolCalls: any[]): number {
-    const ts = getProviderToolset(this.detectedProvider);
-
-    if (this.detectedProvider !== "github") {
-      // Bitbucket (and any non-GitHub provider): one diff fetch per file.
-      return toolCalls.filter((tc: any) =>
-        ts.diffToolNames.includes(tc.toolName),
-      ).length;
-    }
-
-    // GitHub: prefer distinct paths from inline comments.
-    const commentedPaths = new Set<string>();
-    for (const tc of toolCalls) {
-      if (tc?.toolName !== "add_comment_to_pending_review") {
-        continue;
-      }
-      const path = tc?.args?.path;
-      if (typeof path === "string" && path.length > 0) {
-        commentedPaths.add(path);
-      }
-    }
-    if (commentedPaths.size > 0) {
-      return commentedPaths.size;
-    }
-
-    // Fallback for clean PRs with no inline comments: count the distinct
-    // changed-file / diff reads (pull_request_read with method get_files/get_diff)
-    // rather than every pull_request_read (which includes the single "get").
-    const diffReads = toolCalls.filter((tc: any) => {
-      if (!ts.diffToolNames.includes(tc?.toolName)) {
-        return false;
-      }
-      const method = tc?.args?.method;
-      return method === "get_files" || method === "get_diff";
-    }).length;
-
-    return diffReads;
-  }
-
-  /**
-   * Extract issue counts from comment tool calls
-   */
-  private extractIssueCountsFromComments(
-    commentCalls: any[],
-  ): IssuesBySeverity {
-    const counts: IssuesBySeverity = {
-      critical: 0,
-      major: 0,
-      minor: 0,
-      suggestions: 0,
-    };
-
-    commentCalls.forEach((call) => {
-      // Comment body field differs per provider: Bitbucket comment tools use
-      // `comment_text`, GitHub comment tools use `body`. Read either so severity
-      // counts work for both (GitHub previously always counted 0).
-      const text = call.args?.comment_text ?? call.args?.body ?? "";
-
-      if (text.includes("🔒 CRITICAL") || text.includes("CRITICAL:")) {
-        counts.critical++;
-      } else if (text.includes("⚠️ MAJOR") || text.includes("MAJOR:")) {
-        counts.major++;
-      } else if (text.includes("💡 MINOR") || text.includes("MINOR:")) {
-        counts.minor++;
-      } else if (
-        text.includes("💬 SUGGESTION") ||
-        text.includes("SUGGESTION:")
-      ) {
-        counts.suggestions++;
-      }
-    });
-
-    return counts;
-  }
-
-  /**
-   * Extract summary from AI response
-   */
-  private extractSummary(aiResponse: any): string {
-    return aiResponse.content || aiResponse.text || "Review completed";
-  }
-
-  /**
-   * Calculate cost estimate from an AI response.
-   *
-   * Prefers NeuroLink's own analytics cost (`response.analytics.cost`, a USD
-   * number computed per-provider/model when enableAnalytics is true — Yama sets
-   * it). The previous implementation hardcoded Gemini-2.0-Flash pricing
-   * ($0.25/$1.00 per 1M) for EVERY provider, which is ~12-15x too low for Claude.
-   * Only when the analytics cost is unavailable do we fall back to a clearly
-   * labeled rough estimate based on the { input, output } token usage.
-   */
-  private calculateCost(aiResponse: any): number {
-    const analyticsCost = aiResponse?.analytics?.cost;
-    if (typeof analyticsCost === "number" && Number.isFinite(analyticsCost)) {
-      return Number(analyticsCost.toFixed(6));
-    }
-
-    const usage = aiResponse?.usage;
-    if (!usage) {
-      return 0;
-    }
-
-    // ROUGH FALLBACK ONLY — provider/model agnostic placeholder pricing used
-    // when NeuroLink analytics cost is unavailable. Not accurate for any
-    // specific model; treat as an order-of-magnitude estimate.
-    const inputCostPer1M = 0.25;
-    const outputCostPer1M = 1.0;
-
-    const inputTokens = this.toSafeNumber(usage.input);
-    const outputTokens = this.toSafeNumber(usage.output);
-
-    const inputCost = (inputTokens / 1_000_000) * inputCostPer1M;
-    const outputCost = (outputTokens / 1_000_000) * outputCostPer1M;
-
-    const totalCost = inputCost + outputCost;
-    return Number.isFinite(totalCost) ? Number(totalCost.toFixed(4)) : 0;
-  }
-
-  private toSafeNumber(value: unknown): number {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
   private isLocalReviewRequest(
     request: UnifiedReviewRequest,
   ): request is LocalReviewRequest {
@@ -1401,78 +907,6 @@ export class YamaOrchestrator {
       (request as LocalReviewRequest).mode === "local" ||
       (!("workspace" in request) && !("repository" in request))
     );
-  }
-
-  /**
-   * Query-level tool filtering for PR mode.
-   * Conservative strategy: only exclude Jira tools when there is no Jira signal.
-   */
-  private getPRToolFilteringOptions(inputText: string): {
-    excludeTools?: string[];
-  } {
-    if (!this.config.ai.enableToolFiltering) {
-      return {};
-    }
-
-    const mode = this.config.ai.toolFilteringMode || "active";
-    if (mode === "off") {
-      return {};
-    }
-
-    // Jira issue-key signal. The naive /\b[A-Z]{2,}-\d+\b/ over-matched common
-    // non-Jira tokens (UTF-8, SHA-256, SHA256-..., CVE-2024, ISO-8601, RFC-3339),
-    // wrongly keeping Jira tools enabled. Exclude a small denylist of those
-    // prefixes so the match stays conservative (still keeps tools when a real
-    // ABC-123 style key — or the literal word "jira" — is present).
-    const jiraKeyPattern = /\b([A-Z]{2,})-\d+\b/g;
-    const nonJiraKeyPrefixes = new Set([
-      "UTF",
-      "SHA",
-      "SHA256",
-      "SHA512",
-      "MD5",
-      "CVE",
-      "ISO",
-      "RFC",
-      "UTC",
-      "GMT",
-      "BASE64",
-    ]);
-    const hasJiraKey = Array.from(
-      inputText.matchAll(jiraKeyPattern),
-      (m) => m[1],
-    ).some((prefix) => !nonJiraKeyPrefixes.has(prefix));
-    const hasJiraSignal = hasJiraKey || /\bjira\b/i.test(inputText);
-
-    if (hasJiraSignal) {
-      return {};
-    }
-
-    try {
-      const externalTools = (this.neurolink as any).getExternalMCPTools?.();
-      const jiraToolNames = Array.isArray(externalTools)
-        ? externalTools
-            .filter((tool: any) => tool?.serverId === "jira")
-            .map((tool: any) => tool?.name)
-            .filter((name: unknown): name is string => typeof name === "string")
-        : [];
-
-      if (jiraToolNames.length === 0) {
-        return {};
-      }
-
-      if (mode === "log-only") {
-        console.log(
-          `   [tool-filter] log-only: would exclude ${jiraToolNames.length} Jira tools`,
-        );
-        return {};
-      }
-
-      return { excludeTools: jiraToolNames };
-    } catch {
-      // Non-fatal: fallback to all tools.
-      return {};
-    }
   }
 
   /**
@@ -1499,7 +933,7 @@ export class YamaOrchestrator {
         .map((tool: any) => tool?.name)
         .filter((name: unknown): name is string => typeof name === "string")
         .filter((name: string) => {
-          const normalized = this.normalizeToolName(name);
+          const normalized = normalizeToolName(name);
           return (
             isMutatingGitTool(normalized) ||
             highVolumeGitToolPattern.test(normalized)
@@ -1516,8 +950,183 @@ export class YamaOrchestrator {
     }
   }
 
-  private normalizeToolName(name: string): string {
-    return name.split(/[.:/]/).pop() || name;
+  /** Root project docs (AGENTS.md / CLAUDE.md / …), loaded once per process. */
+  private async getProjectDocs(): Promise<string | null> {
+    if (this.projectDocsCache !== undefined) {
+      return this.projectDocsCache;
+    }
+    try {
+      this.projectDocsCache = await new RulesContextLoader(
+        this.config.memoryBank,
+        this.config.projectStandards,
+      ).loadRootDocs();
+    } catch {
+      this.projectDocsCache = null;
+    }
+    return this.projectDocsCache;
+  }
+
+  /**
+   * Deterministic rules enforcement: compute per-rule compliance from the
+   * findings and force BLOCKED when a blocking rule is violated — same
+   * authority as a CRITICAL finding, independent of the AI's own verdict.
+   */
+  private applyRuleCompliance(result: ReviewResult): ReviewResult {
+    if (this.loadedRules.length === 0) {
+      return result;
+    }
+    const compliance = computeRuleCompliance(this.loadedRules, result.issues);
+    result.ruleCompliance = compliance;
+    if (hasBlockingRuleViolation(compliance) && result.decision !== "BLOCKED") {
+      console.log(
+        `   🛡️  Blocking team rule violated — decision forced to BLOCKED (was ${result.decision}).`,
+      );
+      result.decision = "BLOCKED";
+    }
+    return result;
+  }
+
+  /** Stable per-PR state key: provider + repo identifiers + PR number. */
+  private buildStateKey(request: ReviewRequest): string | null {
+    const workspace = (request.workspace || request.owner || "").trim();
+    const repository = (request.repository || request.repo || "").trim();
+    const prId = request.pullRequestId ?? request.prNumber;
+    if (!workspace || !repository || prId === undefined || prId === null) {
+      return null;
+    }
+    return `${this.detectedProvider}-${workspace}-${repository}-pr-${prId}`.toLowerCase();
+  }
+
+  /** Head SHA for state bookkeeping — request first, CI env as fallback. */
+  private resolveHeadSha(request: ReviewRequest): string | undefined {
+    return (
+      request.headSha ||
+      process.env.GITHUB_SHA ||
+      process.env.BITBUCKET_COMMIT ||
+      process.env.GIT_COMMIT ||
+      undefined
+    );
+  }
+
+  /**
+   * Load prior review state and format its open findings for prompt
+   * injection. Returns empty context when state is disabled/absent.
+   */
+  private async loadPreviousReview(
+    request: ReviewRequest,
+  ): Promise<{ key: string | null; block: string }> {
+    const key = this.buildStateKey(request);
+    this.previousOpenIds = new Set();
+    this.acceptedFindingIds = new Set();
+    this.suppressedFindingIds = new Set();
+    if (!this.stateStore || !key) {
+      return { key, block: "" };
+    }
+    try {
+      const state = await this.stateStore.load(key);
+      if (!state) {
+        return { key, block: "" };
+      }
+      for (const finding of state.findings) {
+        if (finding.status === "open" || finding.status === "carried") {
+          this.previousOpenIds.add(finding.id);
+        }
+      }
+      this.suppressedFindingIds = collectSuppressedIds(state);
+      if (this.suppressedFindingIds.size > 0) {
+        console.log(
+          `   🤫 ${this.suppressedFindingIds.size} finding(s) auto-suppressed as learned false positives.`,
+        );
+      }
+      const openFindings = formatOpenFindingsForPrompt(state);
+      const header = state.lastReviewedSha
+        ? `Last reviewed commit: ${state.lastReviewedSha}\n`
+        : "";
+      console.log(
+        `   🔁 Incremental review: ${state.runs.length} prior run(s), ` +
+          `${openFindings ? openFindings.split("\n").length : 0} open finding(s) carried in.`,
+      );
+      return { key, block: openFindings ? header + openFindings : header };
+    } catch (error) {
+      console.warn(
+        `   ⚠️  Could not load review state: ${(error as Error).message}`,
+      );
+      return { key, block: "" };
+    }
+  }
+
+  /**
+   * Reconcile this run's findings into state and persist. Never throws —
+   * state is bookkeeping, not a review-blocking dependency.
+   */
+  private async persistReviewState(
+    key: string | null,
+    request: ReviewRequest,
+    result: ReviewResult,
+  ): Promise<void> {
+    if (!this.stateStore || !key) {
+      return;
+    }
+    // Dry-run must stay side-effect free — no state writes either.
+    if (request.dryRun) {
+      console.log("   🗂️  Dry-run: review state not persisted.");
+      return;
+    }
+    try {
+      const previous = await this.stateStore.load(key);
+      const currentFindings = (result.issues || []).map((issue) => ({
+        id: buildFindingId(issue),
+        ruleId: issue.rule,
+        filePath: issue.filePath,
+        line: issue.line ?? null,
+        severity: issue.severity,
+        title: issue.title || issue.description || "(untitled finding)",
+      }));
+      const { state, newFindingIds, resolvedFindingIds } = reconcileFindings({
+        previous,
+        key,
+        sha: this.resolveHeadSha(request),
+        decision: result.decision,
+        stopReason: result.completion?.stopReason,
+        currentFindings,
+        resolvedIds: result.resolvedIssueIds,
+      });
+      await this.stateStore.save(key, state);
+      console.log(
+        `   🗂️  Review state saved (${newFindingIds.size} new, ` +
+          `${resolvedFindingIds.size} resolved, ${state.findings.length} tracked).`,
+      );
+    } catch (error) {
+      console.warn(
+        `   ⚠️  Could not persist review state: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Loop guards for agentic generate() calls, wired from `performance.*`
+   * config (previously decorative). `turnTimeoutMs` falls back to
+   * `performance.maxReviewDuration`; steps default bounded well below
+   * NeuroLink's own 200-step ceiling.
+   */
+  private getLoopGuardOptions(): Record<string, unknown> {
+    const loop = this.config.performance?.loop || {};
+    const turnTimeoutMs =
+      loop.turnTimeoutMs ??
+      parseDurationMs(this.config.performance?.maxReviewDuration);
+    const options: Record<string, unknown> = {
+      maxSteps: loop.maxSteps ?? 100,
+    };
+    if (turnTimeoutMs) {
+      options.turnTimeoutMs = turnTimeoutMs;
+    }
+    if (loop.stallTimeoutMs) {
+      options.stallTimeoutMs = loop.stallTimeoutMs;
+    }
+    if (loop.toolTimeoutMs) {
+      options.toolTimeoutMs = loop.toolTimeoutMs;
+    }
+    return options;
   }
 
   /**
@@ -1525,36 +1134,14 @@ export class YamaOrchestrator {
    */
   private initializeNeurolink(): NeuroLink {
     try {
-      const observabilityConfig = buildObservabilityConfigFromEnv();
-
-      const conversationMemory: Record<string, unknown> = {
-        ...this.config.ai.conversationMemory,
-      };
-      if (this.memoryManager) {
-        conversationMemory.memory =
-          this.memoryManager.buildNeuroLinkMemoryConfig();
-      }
-
-      const neurolinkConfig: Record<string, unknown> = {
-        conversationMemory,
-      };
-
-      if (observabilityConfig) {
-        // Validate observability config
-        if (!validateObservabilityConfig(observabilityConfig)) {
-          throw new Error("Invalid observability configuration");
-        }
-
-        neurolinkConfig.observability = observabilityConfig;
-        console.log("   📊 Observability enabled (Langfuse tracing active)");
-      } else {
-        console.log(
-          "   📊 Observability not configured (set LANGFUSE_* env vars to enable)",
-        );
-      }
-
-      const neurolink = new NeuroLink(neurolinkConfig);
-      return neurolink;
+      // Tool filtering is config-driven (per-server `blockedTools`/`allowedTools`
+      // in `.yama/mcp.json` and `mcpServers.*.blockedTools`), not hardcoded here —
+      // so any MCP server, built-in or added, is governed by config alone.
+      return NeuroLinkFactory.create({
+        conversationMemory: this.config.ai.conversationMemory,
+        memoryManager: this.memoryManager,
+        mcpOutputLimits: this.config.ai.mcpOutputLimits,
+      });
     } catch (error) {
       console.error(
         "❌ Failed to initialize NeuroLink:",
@@ -1664,6 +1251,130 @@ export class YamaOrchestrator {
     });
 
     this.exploreToolRegistered = true;
+  }
+
+  /**
+   * The harness gate: the agent submits candidate findings here BEFORE
+   * posting anything. Deterministic dedup (state + this run) plus critic
+   * verification decide what may be posted; the agent stays the author, the
+   * landing is engineered.
+   */
+  private registerSubmitReviewTool(): void {
+    if (this.submitToolRegistered) {
+      return;
+    }
+
+    this.neurolink.registerTool("submit_review", {
+      name: "submit_review",
+      description:
+        "MANDATORY gate before posting review comments. Submit ALL candidate findings (with concrete file:line evidence); the response tells you exactly which findings you may post and which were rejected and why. Never post a comment for a finding this tool did not accept.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          findings: {
+            type: "array",
+            description: "Candidate findings for this file or batch.",
+            items: {
+              type: "object",
+              properties: {
+                severity: {
+                  type: "string",
+                  enum: ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"],
+                },
+                category: { type: "string" },
+                title: { type: "string" },
+                description: { type: "string" },
+                filePath: { type: "string" },
+                line: { type: "number" },
+                suggestion: { type: "string" },
+                ruleId: { type: "string" },
+                evidence: {
+                  type: "string",
+                  description:
+                    "file:line citations or quoted code backing the claim.",
+                },
+              },
+              required: ["severity", "title"],
+            },
+          },
+        },
+        required: ["findings"],
+      },
+      execute: async (params: unknown) => {
+        const raw = (params || {}) as { findings?: unknown };
+        const submitted: SubmittedFinding[] = Array.isArray(raw.findings)
+          ? (raw.findings as SubmittedFinding[]).filter(
+              (finding) =>
+                finding &&
+                typeof finding === "object" &&
+                typeof finding.title === "string" &&
+                ["CRITICAL", "MAJOR", "MINOR", "SUGGESTION"].includes(
+                  String(finding.severity),
+                ),
+            )
+          : [];
+
+        const stamped: SubmitReviewAccepted[] = submitted.map((finding) => ({
+          ...finding,
+          id: buildFindingId(finding),
+        }));
+
+        const mode = this.config.review.verification ?? "basic";
+        const sessionId = String(this.currentToolContext?.sessionId || "");
+        const dryRun = this.currentToolContext?.dryRun === true;
+
+        const verdicts = this.critic
+          ? await this.critic.verify(
+              stamped,
+              mode,
+              sessionId,
+              this.buildExploreRuntimeContext(),
+            )
+          : stamped.map((finding) => ({
+              id: finding.id,
+              verdict: "confirmed" as const,
+              reason: "no critic available",
+            }));
+
+        const result = gateFindings({
+          findings: stamped,
+          verdicts,
+          previouslyReportedIds: this.previousOpenIds,
+          alreadyAcceptedIds: this.acceptedFindingIds,
+          suppressedIds: this.suppressedFindingIds,
+          mode,
+          dryRun,
+        });
+        for (const finding of result.accepted) {
+          this.acceptedFindingIds.add(finding.id);
+        }
+        console.log(
+          `   🛡️  submit_review: ${result.accepted.length} accepted, ${result.rejected.length} rejected (mode: ${mode}).`,
+        );
+        return { success: true, data: result };
+      },
+    });
+
+    this.submitToolRegistered = true;
+  }
+
+  /** Runtime context for the critic's strict-mode evidence pass. */
+  private buildExploreRuntimeContext() {
+    const context = this.currentToolContext || {};
+    return {
+      sessionId: String(context.sessionId || ""),
+      mode: (context.mode === "local" ? "local" : "pr") as "pr" | "local",
+      workspace: String(context.workspace || "local"),
+      repository: String(context.repository || "repository"),
+      provider:
+        typeof context.provider === "string" ? context.provider : undefined,
+      pullRequestId:
+        typeof context.pullRequestId === "number"
+          ? context.pullRequestId
+          : undefined,
+      dryRun: context.dryRun === true,
+      metadata: {},
+    };
   }
 
   /**
@@ -1793,8 +1504,10 @@ export class YamaOrchestrator {
     console.log(`📋 Review Session Started`);
     console.log("─".repeat(60));
     console.log(`   Session ID: ${sessionId}`);
-    console.log(`   Workspace: ${request.workspace}`);
-    console.log(`   Repository: ${request.repository}`);
+    console.log(`   Provider: ${request.provider ?? "bitbucket"}`);
+    console.log(
+      `   Repository: ${request.workspace ?? request.owner}/${request.repository ?? request.repo}`,
+    );
     console.log(`   PR: ${request.pullRequestId || request.branch}`);
     console.log(`   Mode: ${request.dryRun ? "🔵 DRY RUN" : "🔴 LIVE"}`);
     console.log("─".repeat(60) + "\n");
@@ -1840,12 +1553,6 @@ export class YamaOrchestrator {
 }
 
 // Export factory function
-export function createYamaV2(options: YamaInitOptions = {}): YamaOrchestrator {
-  return createYama(options);
-}
-
 export function createYama(options: YamaInitOptions = {}): YamaOrchestrator {
   return new YamaOrchestrator(options);
 }
-
-export { YamaOrchestrator as YamaV2Orchestrator };

@@ -22,7 +22,7 @@ import { existsSync } from "fs";
 import { join, dirname, isAbsolute } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { MemoryConfig } from "../types/config.types.js";
+import { MemoryConfig } from "../types/index.js";
 
 const execFileAsync = promisify(execFile);
 

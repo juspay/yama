@@ -7,8 +7,8 @@ import { describe, it, expect } from "@jest/globals";
 import { REVIEW_SYSTEM_PROMPT } from "../../../src/v2/prompts/ReviewSystemPrompt.js";
 import { ENHANCEMENT_SYSTEM_PROMPT } from "../../../src/v2/prompts/EnhancementSystemPrompt.js";
 import { PromptBuilder } from "../../../src/v2/prompts/PromptBuilder.js";
-import { YamaConfig } from "../../../src/v2/types/config.types.js";
-import { ReviewRequest } from "../../../src/v2/types/v2.types.js";
+import { YamaConfig } from "../../../src/v2/types/index.js";
+import { ReviewRequest } from "../../../src/v2/types/index.js";
 
 describe("Review System Prompt", () => {
   it("should export a non-empty string", () => {
@@ -29,58 +29,81 @@ describe("Review System Prompt", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("</yama-review-system>");
   });
 
-  it("should contain identity section", () => {
-    expect(REVIEW_SYSTEM_PROMPT).toContain("<identity>");
+  it("should contain a role section describing the reviewer", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("<role>");
-    expect(REVIEW_SYSTEM_PROMPT).toContain("Autonomous Code Review Agent");
-  });
-
-  it("should contain core rules including the new standards-first and file-by-file rules", () => {
-    expect(REVIEW_SYSTEM_PROMPT).toContain("<core-rules>");
-    expect(REVIEW_SYSTEM_PROMPT).toContain('id="standards-first"');
-    expect(REVIEW_SYSTEM_PROMPT).toContain('id="verify-before-comment"');
-    expect(REVIEW_SYSTEM_PROMPT).toContain('id="file-by-file"');
-    expect(REVIEW_SYSTEM_PROMPT).toContain('id="accurate-commenting"');
-  });
-
-  it("should contain tool usage instructions for the tools the agent actually uses", () => {
-    expect(REVIEW_SYSTEM_PROMPT).toContain("<tool-usage>");
-    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="get_pull_request">');
-    expect(REVIEW_SYSTEM_PROMPT).toContain(
-      '<tool name="get_pull_request_diff">',
+    expect(REVIEW_SYSTEM_PROMPT.toLowerCase()).toContain(
+      "autonomous code review agent",
     );
-    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="search_code">');
-    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="explore_context">');
-    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="add_comment">');
-    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="set_pr_approval">');
-    expect(REVIEW_SYSTEM_PROMPT).toContain('<tool name="set_review_status">');
   });
 
-  it("should describe explore_context with use-when / do-not-use-when guidance", () => {
-    // The whole point of the rewrite — the model needs a clear decision rule.
-    const exploreBlockMatch = REVIEW_SYSTEM_PROMPT.match(
-      /<tool name="explore_context">[\s\S]*?<\/tool>/,
+  it("should contain the core method rules (standards-first, verify, file-by-file, actionable)", () => {
+    expect(REVIEW_SYSTEM_PROMPT).toContain("<method>");
+    expect(REVIEW_SYSTEM_PROMPT).toContain("STANDARDS FIRST");
+    expect(REVIEW_SYSTEM_PROMPT).toContain("VERIFY BEFORE YOU CLAIM");
+    expect(REVIEW_SYSTEM_PROMPT).toContain("FILE BY FILE");
+    expect(REVIEW_SYSTEM_PROMPT).toContain("BE ACTIONABLE");
+  });
+
+  it("should NOT hardcode any provider/MCP tool names — the agent uses whatever tools it is given", () => {
+    // The whole point of the config-driven redesign: no tool vocabulary is
+    // baked into the prompt. It must instruct the agent to discover and use the
+    // tools it actually has, never name specific ones.
+    for (const toolName of [
+      "get_pull_request",
+      "get_pull_request_diff",
+      "search_code",
+      "add_comment",
+      "set_pr_approval",
+      "set_review_status",
+      "pull_request_read",
+      "push_files",
+    ]) {
+      expect(REVIEW_SYSTEM_PROMPT).not.toContain(toolName);
+    }
+    expect(REVIEW_SYSTEM_PROMPT).toContain("USE THE TOOLS YOU HAVE");
+    expect(REVIEW_SYSTEM_PROMPT.toLowerCase()).toContain(
+      "only tools that actually exist",
     );
-    expect(exploreBlockMatch).not.toBeNull();
-    const block = exploreBlockMatch![0];
-    expect(block).toContain("<use-when>");
-    expect(block).toContain("<do-not-use-when>");
-    expect(block).toMatch(/example positive/);
-    expect(block).toMatch(/example negative/);
+  });
+
+  it("should gate explore_context behind the strippable EXPLORE markers", () => {
+    // explore_context is the ONE agent-internal tool the prompt may reference,
+    // and only inside EXPLORE markers so it disappears when explore is disabled.
+    expect(REVIEW_SYSTEM_PROMPT).toContain("explore_context");
+    const exploreIdx = REVIEW_SYSTEM_PROMPT.indexOf("explore_context");
+    const beginIdx = REVIEW_SYSTEM_PROMPT.lastIndexOf(
+      "<!-- EXPLORE_BEGIN -->",
+      exploreIdx,
+    );
+    const endIdx = REVIEW_SYSTEM_PROMPT.indexOf(
+      "<!-- EXPLORE_END -->",
+      beginIdx,
+    );
+    expect(beginIdx).toBeGreaterThanOrEqual(0);
+    expect(endIdx).toBeGreaterThan(exploreIdx);
   });
 
   it("should contain severity levels", () => {
-    expect(REVIEW_SYSTEM_PROMPT).toContain("<severity-levels>");
+    expect(REVIEW_SYSTEM_PROMPT).toContain("<severity>");
     expect(REVIEW_SYSTEM_PROMPT).toContain('name="CRITICAL"');
     expect(REVIEW_SYSTEM_PROMPT).toContain('name="MAJOR"');
     expect(REVIEW_SYSTEM_PROMPT).toContain('name="MINOR"');
     expect(REVIEW_SYSTEM_PROMPT).toContain('name="SUGGESTION"');
   });
 
-  it("should contain anti-patterns", () => {
+  it("should define the structured-JSON output contract", () => {
+    expect(REVIEW_SYSTEM_PROMPT).toContain("<output>");
+    expect(REVIEW_SYSTEM_PROMPT).toContain('"decision"');
+    expect(REVIEW_SYSTEM_PROMPT).toContain('"issues"');
+    expect(REVIEW_SYSTEM_PROMPT).toContain('"severity"');
+  });
+
+  it("should contain anti-patterns that forbid unverified comments and invented tools", () => {
     expect(REVIEW_SYSTEM_PROMPT).toContain("<anti-patterns>");
-    expect(REVIEW_SYSTEM_PROMPT).toContain("lazy loading");
-    expect(REVIEW_SYSTEM_PROMPT).toContain("code_snippet");
+    expect(REVIEW_SYSTEM_PROMPT).toContain("Invent tool names");
+    expect(REVIEW_SYSTEM_PROMPT.toLowerCase()).toContain(
+      "code you have not verified",
+    );
   });
 
   it("should NOT contain company-specific information", () => {
@@ -172,7 +195,7 @@ describe("PromptBuilder", () => {
         },
       },
       mcpServers: {
-        jira: { enabled: false },
+        servers: {},
       },
       review: {
         enabled: true,
@@ -265,16 +288,18 @@ describe("PromptBuilder", () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
       expect(result).toContain("<yama-review-system>");
-      expect(result).toContain("Autonomous Code Review Agent");
+      expect(result.toLowerCase()).toContain("autonomous code review agent");
     });
 
     it("should include project configuration in XML", async () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
       expect(result).toContain("<project-configuration>");
@@ -283,16 +308,22 @@ describe("PromptBuilder", () => {
       expect(result).toContain("<blocking-criteria>");
     });
 
-    it("should include review task details", async () => {
+    it("should include a generic review task with the PR identifier", async () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
       expect(result).toContain("<review-task>");
-      expect(result).toContain("<workspace>test-workspace</workspace>");
-      expect(result).toContain("<repository>test-repo</repository>");
-      expect(result).toContain("<pull_request_id>123</pull_request_id>");
+      // Provider-agnostic identifier: owner/workspace + repo joined into a slug,
+      // never provider-specific <workspace>/<pull_request_id> tags.
+      expect(result).toContain(
+        "<repository>test-workspace/test-repo</repository>",
+      );
+      expect(result).toContain("<id>123</id>");
+      expect(result).not.toContain("<workspace>");
+      expect(result).not.toContain("<pull_request_id>");
     });
 
     it("should escape XML special characters in config", async () => {
@@ -301,6 +332,7 @@ describe("PromptBuilder", () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
       expect(result).toContain("&lt;special&gt;");
@@ -313,10 +345,11 @@ describe("PromptBuilder", () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
       expect(result).toContain("<mode>dry-run</mode>");
-      expect(result).toContain("DRY RUN MODE");
+      expect(result).toContain("DRY-RUN:");
     });
 
     it("should indicate live mode in task", async () => {
@@ -324,25 +357,28 @@ describe("PromptBuilder", () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
       expect(result).toContain("<mode>live</mode>");
-      expect(result).toContain("LIVE MODE");
+      expect(result).toContain("LIVE:");
     });
 
-    it("should follow the standards-first / file-by-file workflow", async () => {
+    it("should carry the standards-first / file-by-file method into the prompt", async () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
-      expect(result).toContain("STEP 1 — Read project standards");
-      expect(result).toContain("STEP 2 — Read the PR shell");
-      expect(result).toContain("STEP 3 — Walk files one at a time");
-      expect(result).toContain("STEP 4 — Decision");
-      expect(result).toContain("STEP 5 — Summary comment");
-      // Ordering invariant — STEP 1 must come before STEP 3 in the rendered prompt.
-      expect(result.indexOf("STEP 1")).toBeLessThan(result.indexOf("STEP 3"));
+      // The method now lives in the system prompt; the task references it.
+      expect(result).toContain("STANDARDS FIRST");
+      expect(result).toContain("FILE BY FILE");
+      expect(result).toContain("one changed file at a time");
+      // Ordering invariant — the method must render before the review task.
+      expect(result.indexOf("STANDARDS FIRST")).toBeLessThan(
+        result.indexOf("<review-task>"),
+      );
     });
 
     it("should reference explore_context when explore is enabled", async () => {
@@ -350,6 +386,7 @@ describe("PromptBuilder", () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
       expect(result).toContain("explore_context");
@@ -365,17 +402,17 @@ describe("PromptBuilder", () => {
       const result = await builder.buildReviewInstructions(
         mockRequest,
         mockConfig,
+        null,
       );
 
-      // The dedicated tool block and the workflow callouts should be gone.
-      expect(result).not.toContain('<tool name="explore_context">');
+      // The only explore_context reference lives inside EXPLORE markers, so it
+      // disappears entirely when explore is disabled.
+      expect(result).not.toContain("explore_context");
       // Markers themselves must always be stripped.
       expect(result).not.toContain("EXPLORE_BEGIN");
       expect(result).not.toContain("EXPLORE_END");
       expect(result).not.toContain("EXPLORE_DISABLED_BEGIN");
       expect(result).not.toContain("EXPLORE_DISABLED_END");
-      // The fallback wording for the disabled case should be present in the workflow.
-      expect(result).toContain("use search_code or get_file_content to verify");
     });
   });
 
@@ -467,7 +504,9 @@ describe("PromptBuilder", () => {
       );
 
       expect(result).toContain("<enhancement-task>");
-      expect(result).toContain("<workspace>test-workspace</workspace>");
+      expect(result).toContain(
+        "<repository>test-workspace/test-repo</repository>",
+      );
     });
   });
 });

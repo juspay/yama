@@ -15,20 +15,13 @@ import {
   LearnResult,
   ExtractedLearning,
   LearningCategory,
-} from "../learning/types.js";
-import { YamaConfig } from "../types/config.types.js";
-import {
-  getProviderToolset,
-  type VCSProviderName,
-} from "../providers/ProviderToolset.js";
-import {
-  buildObservabilityConfigFromEnv,
-  validateObservabilityConfig,
-} from "../utils/ObservabilityConfig.js";
+} from "../types/index.js";
+import { YamaConfig } from "../types/index.js";
+import { NeuroLinkFactory } from "./NeuroLinkFactory.js";
 import { clampMaxTokens } from "../utils/tokenLimits.js";
 
 // Type for structured learning extraction output
-interface LearningExtractionOutput {
+type LearningExtractionOutput = {
   learnings: Array<{
     category: LearningCategory;
     subcategory?: string;
@@ -42,7 +35,7 @@ interface LearningExtractionOutput {
     totalIndependentDevComments: number;
     actionablePairsFound: number;
   };
-}
+};
 
 export class LearningOrchestrator {
   private neurolink!: NeuroLink;
@@ -88,10 +81,13 @@ export class LearningOrchestrator {
       this.neurolink = this.initializeNeurolink();
       console.log("   ✅ NeuroLink initialized\n");
 
-      // Setup MCP servers (need Bitbucket for PR access)
+      // Register the configured PR-mode MCP servers for the learn agent. Which
+      // provider's server is available is a config choice, like everywhere else.
       await this.mcpManager.setupMCPServers(
         this.neurolink,
         this.config.mcpServers,
+        "pr",
+        "review",
       );
       console.log("   ✅ MCP servers ready\n");
 
@@ -256,6 +252,7 @@ export class LearningOrchestrator {
             model: this.config.ai.model,
             temperature: 0.1,
             maxTokens: clampMaxTokens(100),
+            timeout: "2m",
             disableTools: true,
             context: {
               userId: ownerId,
@@ -330,26 +327,15 @@ export class LearningOrchestrator {
   private buildFetchCommentsInstructions(request: LearnRequest): string {
     const aiPatterns = this.config.knowledgeBase.aiAuthorPatterns.join(", ");
 
-    // Derive the PR-read tool name and identifier format from the provider
-    // toolset so a GitHub learn run asks for the tool it actually has.
-    // The learn flow's only provider signal is request.provider; default to
-    // bitbucket to preserve existing behavior.
-    const provider: VCSProviderName =
-      request.provider === "github" ? "github" : "bitbucket";
-    const toolset = getProviderToolset(provider);
-    const prReadTool = toolset.prReadToolName;
-
-    // Bitbucket: workspace/repository/pull_request_id (byte-identical to before).
-    // GitHub: owner/repo/pull_number — the same repository identifiers carried
-    // by the Bitbucket-shaped request, relabelled to GitHub's vocabulary.
-    const prDetails =
-      provider === "github"
-        ? `  <owner>${request.workspace}</owner>
-  <repo>${request.repository}</repo>
-  <pull_number>${request.pullRequestId}</pull_number>`
-        : `  <workspace>${request.workspace}</workspace>
-  <repository>${request.repository}</repository>
-  <pull_request_id>${request.pullRequestId}</pull_request_id>`;
+    // Generic, provider-agnostic PR identifier: whichever fields the request
+    // carries (workspace/repository or owner/repo). The agent discovers the
+    // PR-read tool from whatever MCP server is configured — no tool name or
+    // provider vocabulary is hardcoded here.
+    const repository = [request.workspace, request.repository]
+      .filter(Boolean)
+      .join("/");
+    const prDetails = `  <repository>${repository}</repository>
+  <pull-request-id>${request.pullRequestId}</pull-request-id>`;
 
     return `
 <task>Fetch and analyze ALL PR comments for learning extraction</task>
@@ -359,7 +345,7 @@ ${prDetails}
 </pr-details>
 
 <instructions>
-1. Use ${prReadTool} tool to fetch the PR details including all comments/activities
+1. Use the available PR/repository tools to fetch the PR details including all comments/activities
 2. Look through ALL comments on the PR (both active and resolved if available)
 3. Identify AI-generated comments by:
    - Author patterns: ${aiPatterns}
@@ -605,28 +591,10 @@ Analyze the PR data above and extract learnings.
    * Initialize NeuroLink with observability
    */
   private initializeNeurolink(): NeuroLink {
-    const observabilityConfig = buildObservabilityConfigFromEnv();
-
-    const conversationMemory: Record<string, unknown> = {
-      ...this.config.ai.conversationMemory,
-    };
-    if (this.memoryManager) {
-      conversationMemory.memory =
-        this.memoryManager.buildNeuroLinkMemoryConfig();
-    }
-
-    const neurolinkConfig: Record<string, unknown> = {
-      conversationMemory,
-    };
-
-    if (
-      observabilityConfig &&
-      validateObservabilityConfig(observabilityConfig)
-    ) {
-      neurolinkConfig.observability = observabilityConfig;
-    }
-
-    return new NeuroLink(neurolinkConfig);
+    return NeuroLinkFactory.create({
+      conversationMemory: this.config.ai.conversationMemory,
+      memoryManager: this.memoryManager,
+    });
   }
 
   /**
@@ -725,6 +693,7 @@ Consolidate the learnings as instructed. Return the complete updated knowledge b
       model: this.config.ai.model,
       temperature: 0.2,
       maxTokens: clampMaxTokens(30000),
+      timeout: this.config.ai.timeout,
     });
 
     // Parse and update the knowledge base

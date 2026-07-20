@@ -11,15 +11,13 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
-import { KnowledgeBaseConfig } from "../types/config.types.js";
+import { KnowledgeBaseConfig } from "../types/index.js";
 import {
   KnowledgeBase,
-  KnowledgeBaseMetadata,
-  KnowledgeBaseSection,
   ExtractedLearning,
   LearningCategory,
   CATEGORY_SECTION_NAMES,
-} from "./types.js";
+} from "../types/index.js";
 
 /**
  * Template for a new knowledge base file

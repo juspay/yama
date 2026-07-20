@@ -24,6 +24,9 @@ inputs:
   ai-model:
     description: "Model name for the selected AI provider"
     required: false
+  explore-model:
+    description: "Smaller/faster model for the explore + verification subagents (defaults to ai-model)"
+    required: false
   anthropic-api-key:
     description: "Anthropic API key (used when ai-provider: anthropic)"
     required: false
@@ -104,19 +107,19 @@ runs:
     # enable` picks an arbitrary pnpm whose `overrides` serialization differs
     # from the lockfile (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH on frozen install).
     - name: Set up pnpm
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       with:
         version: 10.14.0
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         # Node 24: NeuroLink's memory layer requires the `node:sqlite` built-in,
         # which does not exist on Node 20 and is flag-gated on Node 22. Node 24
         # ships node:sqlite without an experimental flag. actions/setup-node
         # downloads and provisions this version on any runner, so it does not
         # depend on the runner's pre-installed Node.
-        node-version: "24"
+        node-version: "26"
 
     - name: Install dependencies and build CLI
       shell: bash
@@ -132,7 +135,13 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
-        # GitHub MCP server authenticates via GITHUB_TOKEN.
+        # GitHub MCP server authenticates via the token. We forward it under a
+        # NON-RESERVED name (YAMA_GITHUB_TOKEN) as well as GITHUB_TOKEN: inside a
+        # composite action `GITHUB_TOKEN` is a reserved name whose value can be
+        # clobbered by the runner's automatic token, so `${YAMA_GITHUB_TOKEN}`
+        # (referenced by the MCP config) is the reliable one. GITHUB_TOKEN is
+        # kept for git operations / backward compatibility.
+        YAMA_GITHUB_TOKEN: ${{ inputs.github-token }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         # Surface AI provider/model selection to the orchestrator + NeuroLink.
         # Yama's ConfigLoader reads AI_PROVIDER/AI_MODEL; NeuroLink's own provider
@@ -147,7 +156,7 @@ runs:
         # main review (otherwise it falls back to a config default like vertex and
         # fails when only one provider's credentials are present).
         AI_EXPLORE_PROVIDER: ${{ inputs.ai-provider }}
-        AI_EXPLORE_MODEL: ${{ inputs.ai-model }}
+        AI_EXPLORE_MODEL: ${{ inputs.explore-model || inputs.ai-model }}
         # AI provider credentials (pass the one matching ai-provider). Forwarded
         # as env explicitly because step-level env does NOT propagate into a
         # composite action's steps.

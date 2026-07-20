@@ -9,18 +9,16 @@
 import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
-import { YamaConfig } from "../types/config.types.js";
-import { LocalReviewRequest, ReviewRequest } from "../types/v2.types.js";
-import type { LocalDiffContext } from "../core/LocalDiffSource.js";
+import { YamaConfig } from "../types/index.js";
+import {
+  LocalDiffContext,
+  LocalReviewRequest,
+  ReviewRequest,
+} from "../types/index.js";
+
 import { LangfusePromptManager } from "./LangfusePromptManager.js";
 import { buildReviewSystemPrompt } from "./ReviewSystemPrompt.js";
 import { KnowledgeBaseManager } from "../learning/KnowledgeBaseManager.js";
-import {
-  getProviderToolset,
-  type ProviderToolset,
-  type ReviewPromptParams,
-  type VCSProviderName,
-} from "../providers/ProviderToolset.js";
 
 export class PromptBuilder {
   private langfuseManager: LangfusePromptManager;
@@ -30,116 +28,73 @@ export class PromptBuilder {
   }
 
   /**
-   * Build the provider-agnostic params object the ProviderToolset consumes.
-   * Carries both Bitbucket (workspace/repository/pullRequestId) and GitHub
-   * (owner/repo/prNumber) identifiers plus the shared branch; each toolset
-   * reads only the fields it needs.
+   * A generic pull-request identifier block, built from whatever fields the
+   * request carries (owner/repo or workspace/repository, plus the PR id or a
+   * branch). No provider is special-cased — it's just the data the agent needs
+   * to know WHICH pull request to review; the agent uses the available tools.
    */
-  private toToolsetParams(request: ReviewRequest): ReviewPromptParams {
-    const params: ReviewPromptParams = {};
-
-    const workspace = (request.workspace || "").trim();
-    const repository = (request.repository || "").trim();
-    const branch = (request.branch || "N/A").trim();
-
-    params.workspace = workspace;
-    params.repository = repository;
-    params.branch = branch;
-
-    // Coalesce the PR identifier across both field names so the toolset always
-    // receives the PR number regardless of which one the caller populated.
-    // GitHub's identifierXml reads params.prNumber while Bitbucket's reads
-    // params.pullRequestId; CLI callers set request.pullRequestId even for
-    // GitHub, so without this a GitHub run would lose the PR number and fall
-    // back to 'find-by-branch'. No-op for existing Bitbucket behavior.
-    const resolvedPrNumber =
-      request.prNumber ??
-      (typeof request.pullRequestId === "number"
-        ? request.pullRequestId
-        : undefined);
-    const resolvedPullRequestId = request.pullRequestId ?? request.prNumber;
-
-    if (resolvedPullRequestId !== undefined) {
-      params.pullRequestId = resolvedPullRequestId;
-    }
-    if (request.owner !== undefined) {
-      params.owner = request.owner.trim();
-    }
-    // Coalesce the repo name across the GitHub-specific 'repo' field and the
-    // shared 'repository' field, mirroring the prNumber<->pullRequestId
-    // coalescing above. A GitHub caller may populate the shared 'repository'
-    // field instead of 'repo'; without this the toolset would receive GitHub
-    // identifiers with no repo name. No-op for existing Bitbucket behavior,
-    // which never sets request.repo.
-    const resolvedRepo = request.repo ?? request.repository;
-    if (resolvedRepo !== undefined) {
-      params.repo = resolvedRepo.trim();
-    }
-    if (resolvedPrNumber !== undefined) {
-      params.prNumber = resolvedPrNumber;
-    }
-
-    return params;
+  private buildPullRequestXML(request: ReviewRequest): string {
+    const org = (request.owner || request.workspace || "").trim();
+    const repo = (request.repo || request.repository || "").trim();
+    const prId = request.pullRequestId ?? request.prNumber;
+    const branch = (request.branch || "").trim();
+    const idLine =
+      prId !== undefined && prId !== null
+        ? `  <id>${prId}</id>`
+        : branch
+          ? `  <find-by-branch>${this.escapeXML(branch)}</find-by-branch>`
+          : "";
+    return `<pull-request>
+  <repository>${this.escapeXML([org, repo].filter(Boolean).join("/"))}</repository>
+${idLine}
+</pull-request>`;
   }
 
   /**
-   * Build complete review instructions for AI
-   * Combines generic base prompt + project-specific config
+   * Build complete review instructions. Generic and tool-agnostic: the base
+   * prompt carries the method + severity + structured-output contract; this
+   * layer adds the project config/standards and the target PR.
    */
   async buildReviewInstructions(
     request: ReviewRequest,
     config: YamaConfig,
     bootstrapStandards: string | null | undefined,
-    provider: VCSProviderName,
+    previousReview?: string | null,
+    teamRulesBlock?: string | null,
+    projectDocs?: string | null,
   ): Promise<string> {
-    const toolset = getProviderToolset(provider);
-
-    // Base system prompt. Prefer a Langfuse-managed prompt when one is
-    // configured (provider-agnostic remote override); otherwise fall back to
-    // the provider-aware local prompt so the <tool-usage> section matches the
-    // active provider's tool idiom.
     const basePromptRaw = this.langfuseManager.isEnabled()
       ? await this.langfuseManager.getReviewPrompt()
-      : buildReviewSystemPrompt(toolset);
+      : buildReviewSystemPrompt();
 
-    // Project-specific configuration in XML format
     const projectConfig = this.buildProjectConfigXML(config, request);
-
-    // Project-specific standards (if available)
     const projectStandards = await this.loadProjectStandards(config);
-
-    // Knowledge base learnings (reinforcement learning)
     const knowledgeBase = await this.loadKnowledgeBase(config);
     const exploreEnabled = config.ai.explore.enabled;
 
-    // Strip explore_context references when the subagent is disabled.
     const basePrompt = PromptBuilder.stripDisabledSections(
       basePromptRaw,
       exploreEnabled,
     );
 
-    const toolsetParams = this.toToolsetParams(request);
-
-    const workflowBlock = PromptBuilder.stripDisabledSections(
-      this.buildReviewWorkflow(request, toolset, toolsetParams),
-      exploreEnabled,
-    );
+    const modeLine = request.dryRun
+      ? "DRY-RUN: analyze and return findings only. Do NOT post comments or change PR state."
+      : "LIVE: post an inline comment for each issue and record your review decision using the available tools, then return the findings JSON.";
+    const additional = request.prompt
+      ? `\n  ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}`
+      : "";
 
     const bootstrapBlock =
       bootstrapStandards && bootstrapStandards.trim().length > 0
         ? `<bootstrapped-standards>
 <!--
 Recurring reviewer patterns observed in recent merged PRs on this repo.
-These are runtime observations, not config rules. Treat them as guidance
-that ranks BELOW <blocking-criteria> but ABOVE generic suggestions.
-If they conflict with <project-standards> or <blocking-criteria>, the
-config wins.
+Guidance that ranks BELOW <blocking-criteria> but ABOVE generic suggestions.
 -->
 ${bootstrapStandards.trim()}
 </bootstrapped-standards>`
         : "";
 
-    // Combine all parts
     return `
 ${basePrompt}
 
@@ -149,43 +104,49 @@ ${projectConfig}
 
 ${projectStandards ? `<project-standards>\n${projectStandards}\n</project-standards>` : ""}
 
+${teamRulesBlock && teamRulesBlock.trim() ? teamRulesBlock.trim() : ""}
+
+${
+  projectDocs && projectDocs.trim()
+    ? `<project-docs>
+<!-- The team's own project documentation (AGENTS.md / CLAUDE.md / …).
+     Conventions stated here are enforceable review guidance. -->
+${projectDocs.trim()}
+</project-docs>`
+    : ""
+}
+
 ${bootstrapBlock}
 
 ${knowledgeBase ? `<learned-knowledge>\n${knowledgeBase}\n</learned-knowledge>` : ""}
 
-<review-task>
-${toolset.identifierXml(toolsetParams)}
-  <mode>${request.dryRun ? "dry-run" : "live"}</mode>
+${
+  previousReview && previousReview.trim().length > 0
+    ? `<previous-review>
+<!--
+Findings already reported on this pull request in earlier Yama runs.
+INSTRUCTIONS:
+- Do NOT post a new comment for any finding listed here — it already has one.
+- Focus on the commits pushed since the last run; verify whether each listed
+  finding is now fixed by reading the current code.
+- Report ids you VERIFIED as fixed in the "resolvedIssueIds" array of your
+  final JSON verdict. Include still-valid listed findings in "issues" (same
+  file/severity/title) so the verdict reflects the full picture.
+-->
+${previousReview.trim()}
+</previous-review>`
+    : ""
+}
 
-${workflowBlock}
+<review-task>
+${this.buildPullRequestXML(request)}
+  <mode>${request.dryRun ? "dry-run" : "live"}</mode>
+  <instructions>
+    Review the pull request above, one changed file at a time, following the
+    method and severity rules in the system prompt. ${modeLine}${additional}
+  </instructions>
 </review-task>
     `.trim();
-  }
-
-  /**
-   * Per-PR workflow block. Standards-first, file-by-file, explore-on-uncertainty.
-   * The agent stays autonomous; this just choreographs the order it should follow.
-   */
-  private buildReviewWorkflow(
-    request: ReviewRequest,
-    toolset: ProviderToolset,
-    params: ReviewPromptParams,
-  ): string {
-    const modeLine = request.dryRun
-      ? "DRY RUN MODE: simulate actions only, do not post real comments or change PR state."
-      : "LIVE MODE: post real comments and make real decisions.";
-    const additional = request.prompt
-      ? `\n  ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}`
-      : "";
-
-    // The numbered review steps (tool names + workflow prose) come from the
-    // provider toolset; the <instructions> wrapper and the dynamic mode/
-    // additional tail stay here so they apply to every provider unchanged.
-    return `  <instructions>
-${toolset.reviewWorkflowInstructions(params)}
-
-    ${modeLine}${additional}
-  </instructions>`;
   }
 
   /**
@@ -407,15 +368,8 @@ ${loadedStandards.join("\n\n---\n\n")}
   async buildDescriptionEnhancementInstructions(
     request: ReviewRequest,
     config: YamaConfig,
-    provider: VCSProviderName,
   ): Promise<string> {
-    const toolset = getProviderToolset(provider);
-    const toolsetParams = this.toToolsetParams(request);
-
-    // Base enhancement prompt - fetched from Langfuse or local fallback
     const basePrompt = await this.langfuseManager.getEnhancementPrompt();
-
-    // Project-specific enhancement configuration
     const enhancementConfigXML = this.buildEnhancementConfigXML(config);
 
     return `
@@ -426,13 +380,12 @@ ${enhancementConfigXML}
 </project-configuration>
 
 <enhancement-task>
-${toolset.identifierXml(toolsetParams)}
+${this.buildPullRequestXML(request)}
   <mode>${request.dryRun ? "dry-run" : "live"}</mode>
-
   <instructions>
-${toolset.descriptionEnhancementInstructions(toolsetParams)}
-
-    ${request.dryRun ? "DRY RUN MODE: Simulate only, do not actually update PR." : "LIVE MODE: Update the actual PR description."}
+    Read the pull request and its diff using the available tools, then produce an
+    enhanced description covering the required sections above.
+    ${request.dryRun ? "DRY-RUN: return the enhanced description only, do not update the PR." : "LIVE: update the PR description using the available tool."}
     ${request.prompt ? `ADDITIONAL INSTRUCTIONS: ${this.escapeXML(request.prompt)}` : ""}
   </instructions>
 </enhancement-task>
@@ -472,8 +425,8 @@ ${projectStandards ? `<project-standards>\n${projectStandards}\n</project-standa
 Workflow (follow in order):
 1. STANDARDS FIRST. Read <project-standards> above (if present). Treat any rule with severity=BLOCKING as a blocking criterion.
 2. WALK FILES ONE AT A TIME. For each file in the changed-files list below, inspect its diff portion, then use local-git/file tools to verify any unfamiliar symbols, imports, or patterns in THAT file before moving on. Never analyse multiple files in parallel.
-3. VERIFY BEFORE REPORTING.<!-- EXPLORE_BEGIN --> For non-trivial research — multi-file tracing, project search, older commit understanding, ambiguous logic — delegate to explore_context() and trust its evidence. Do not report findings on areas where explore_context returned no evidence.<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN --> Use bounded local-git/file tools (search_code, get_file_content) to verify before reporting. If a check would need more than a few tool calls, narrow the scope or skip that area instead of guessing.<!-- EXPLORE_DISABLED_END -->
-4. NEVER use PR/Jira MCP tools in local mode.
+3. VERIFY BEFORE REPORTING.<!-- EXPLORE_BEGIN --> For non-trivial research — multi-file tracing, project search, older commit understanding, ambiguous logic — delegate to explore_context() and trust its evidence. Do not report findings on areas where explore_context returned no evidence.<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN --> Use bounded local-git/file tools available to you to verify before reporting. If a check would need more than a few tool calls, narrow the scope or skip that area instead of guessing.<!-- EXPLORE_DISABLED_END -->
+4. NEVER use PR MCP tools in local mode.
 5. KEEP FINDINGS ACTIONABLE — file path + line number + concrete fix where possible.
 6. BUDGET — roughly 10 tool calls per file in the main loop. If you exceed it,<!-- EXPLORE_BEGIN --> delegate the rest to explore_context<!-- EXPLORE_END --><!-- EXPLORE_DISABLED_BEGIN --> stop investigating that file<!-- EXPLORE_DISABLED_END --> and move to the next file.
 7. OUTPUT — return strict JSON only. No markdown code fences. Output must start with "{" and end with "}".

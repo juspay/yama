@@ -6,17 +6,28 @@
 
 import { Command } from "commander";
 import dotenv from "dotenv";
-import { VERSION, createYama } from "../index.js";
+import { VERSION, createYama, McpRegistry } from "../index.js";
 import { createLearningOrchestrator } from "../v2/core/LearningOrchestrator.js";
 import type {
   LocalReviewRequest,
   ReviewRequest,
   ReviewResult,
 } from "../index.js";
-import type { LearnRequest } from "../v2/learning/types.js";
+import type { LearnRequest } from "../v2/types/index.js";
 
-// Load environment variables
+// The project-MCP trust gate must come from the REAL environment (CI / operator),
+// NEVER from a `.env` inside the reviewed checkout. dotenv merges `.env` into
+// process.env, so without this a PR could force-add `.env` with
+// YAMA_ENABLE_PROJECT_MCP=true and re-enable arbitrary command execution (F21).
+// Capture the trusted pre-dotenv value, load `.env`, then restore it — so `.env`
+// can never enable the gate.
+const trustedProjectMcpGate = process.env[McpRegistry.ENABLE_ENV];
 dotenv.config();
+if (trustedProjectMcpGate === undefined) {
+  delete process.env[McpRegistry.ENABLE_ENV];
+} else {
+  process.env[McpRegistry.ENABLE_ENV] = trustedProjectMcpGate;
+}
 
 const program = new Command();
 
@@ -41,12 +52,10 @@ export function setupCLI(): Command {
   setupEnhanceCommand();
   setupLearnCommand();
   setupInitCommand();
+  setupDoctorCommand();
 
   return program;
 }
-
-// Backward-compatible alias.
-export const setupV2CLI = setupCLI;
 
 /**
  * Main review command
@@ -368,8 +377,10 @@ function setupLearnCommand(): void {
   program
     .command("learn")
     .description("Extract learnings from merged PR to improve future reviews")
-    .requiredOption("-w, --workspace <workspace>", "Bitbucket workspace")
-    .requiredOption("-r, --repository <repository>", "Repository name")
+    .option("-w, --workspace <workspace>", "Bitbucket workspace")
+    .option("-r, --repository <repository>", "Repository name")
+    .option("--owner <owner>", "GitHub owner/organization")
+    .option("--repo <repo>", "GitHub repository")
     .requiredOption("-p, --pr <id>", "Merged pull request ID")
     .option("--commit", "Auto-commit knowledge base changes to git")
     .option("--summarize", "Force summarization of knowledge base")
@@ -398,9 +409,38 @@ function setupLearnCommand(): void {
           process.exit(1);
         }
 
+        // Detect provider from the flags (GitHub --owner/--repo vs Bitbucket
+        // --workspace/--repository) so a GitHub learn run registers GitHub MCP.
+        const hasGitHub = options.owner || options.repo;
+        const hasBitbucket = options.workspace || options.repository;
+        if (hasGitHub && hasBitbucket) {
+          console.error(
+            "❌ Error: Cannot mix GitHub (--owner/--repo) and Bitbucket (--workspace/--repository) parameters",
+          );
+          process.exit(1);
+        }
+        if (!hasGitHub && !hasBitbucket) {
+          console.error(
+            "❌ Error: Either GitHub (--owner and --repo) or Bitbucket (--workspace and --repository) parameters are required",
+          );
+          process.exit(1);
+        }
+        const provider = hasGitHub ? "github" : "bitbucket";
+        // The learn prompt relabels workspace/repository → owner/repo for GitHub,
+        // so carry the GitHub identifiers in those fields.
+        const workspace = hasGitHub ? options.owner : options.workspace;
+        const repository = hasGitHub ? options.repo : options.repository;
+        if (!workspace || !repository) {
+          console.error(
+            `❌ Error: ${hasGitHub ? "--owner and --repo" : "--workspace and --repository"} are required`,
+          );
+          process.exit(1);
+        }
+
         const request: LearnRequest = {
-          workspace: options.workspace,
-          repository: options.repository,
+          workspace,
+          repository,
+          provider,
           pullRequestId,
           dryRun: globalOpts.dryRun || false,
           commit: options.commit || false,
@@ -490,6 +530,34 @@ function setupInitCommand(): void {
           ) {
             await fs.copyFile(examplePath, targetPath);
             console.log("✅ Created yama.config.yaml from example");
+            const rulesDir = path.join(process.cwd(), ".yama", "rules");
+            const ruleExample = path.join(rulesDir, "example.yaml");
+            const rulesExist = await fs
+              .access(ruleExample)
+              .then(() => true)
+              .catch(() => false);
+            if (!rulesExist) {
+              await fs.mkdir(rulesDir, { recursive: true });
+              await fs.writeFile(
+                ruleExample,
+                [
+                  "# Team review rules — one file may hold one rule or a `rules:` array.",
+                  "# Findings cite a rule via their `rule` field; violated blocking rules",
+                  "# force the verdict to BLOCKED.",
+                  "rules:",
+                  "  - id: example-no-secrets",
+                  "    rule: Never commit credentials, tokens, or API keys.",
+                  "    severity: CRITICAL",
+                  "    blocking: true",
+                  '    scope: ["**"]',
+                  "    badExample: 'const KEY = \"sk-live-...\"'",
+                  "    goodExample: 'const KEY = process.env.API_KEY'",
+                  "    rationale: Secrets in git history are unrecoverable.",
+                  "",
+                ].join("\n"),
+              );
+              console.log("✅ Scaffolded .yama/rules/example.yaml");
+            }
           } else {
             console.log(
               "⚠️  Example config not found, creating minimal config...",
@@ -503,10 +571,6 @@ ai:
   provider: "auto"
   model: "gemini-2.5-pro"
 
-mcpServers:
-  jira:
-    enabled: false
-
 review:
   enabled: true
 
@@ -519,13 +583,109 @@ descriptionEnhancement:
 
           console.log("\n📝 Next steps:");
           console.log("   1. Edit yama.config.yaml with your settings");
-          console.log("   2. Set environment variables (BITBUCKET_*, JIRA_*)");
+          console.log(
+            "   2. Set environment variables (BITBUCKET_* or GITHUB_*)",
+          );
           console.log("   3. Run: yama review --help\n");
         }
 
         process.exit(0);
       } catch (error) {
         console.error("\n❌ Initialization failed:", (error as Error).message);
+        process.exit(1);
+      }
+    });
+}
+
+/**
+ * Doctor: static config inspection — what this setup will and will not be
+ * able to do, before burning a single token. Reports the capability profile
+ * (which roles/modes have servers) and explicit degradation notes.
+ */
+function setupDoctorCommand(): void {
+  program
+    .command("doctor")
+    .description("Validate configuration and report the capability profile")
+    .action(async () => {
+      try {
+        const globalOpts = program.opts();
+        const { ConfigLoader } = await import("../v2/config/ConfigLoader.js");
+        const { McpRegistry } = await import("../v2/core/McpRegistry.js");
+        const { RuleLoader } = await import("../v2/rules/RuleLoader.js");
+        const { createStateStore } = await import(
+          "../v2/state/ReviewStateStore.js"
+        );
+
+        const config = await new ConfigLoader().loadConfig(globalOpts.config);
+        console.log("\n⚔️  Yama Doctor\n" + "─".repeat(60));
+        console.log(`   AI: ${config.ai.provider} / ${config.ai.model}`);
+        console.log(
+          `   Verification: ${config.review.verification ?? "basic"} · ` +
+            `Loop: maxSteps=${config.performance.loop?.maxSteps ?? 100}`,
+        );
+        const store = createStateStore(config.state);
+        console.log(
+          `   Review state: ${store ? store.kind : "disabled"} · ` +
+            `Compaction: ${config.ai.conversationMemory?.contextCompaction?.enabled !== false ? "on" : "off"}`,
+        );
+        const rules = await new RuleLoader().load();
+        console.log(
+          `   Team rules: ${rules.length} loaded ` +
+            `(${rules.filter((rule) => rule.blocking).length} blocking)`,
+        );
+
+        const projectServers = await new McpRegistry().load();
+        const servers = {
+          ...config.mcpServers.servers,
+          ...projectServers,
+        };
+        const entries = Object.entries(servers);
+        console.log(`\n   MCP servers (${entries.length}):`);
+        for (const [id, def] of entries) {
+          const roles = (def.roles ?? ["review", "explore"]).join(",");
+          const modes = (def.modes ?? ["pr", "local"]).join(",");
+          const flags = [
+            def.enabled === false ? "DISABLED" : "enabled",
+            def.allowedTools?.length
+              ? `allowlist:${def.allowedTools.length}`
+              : def.blockedTools?.length
+                ? `denylist:${def.blockedTools.length}`
+                : "unrestricted",
+          ].join(" · ");
+          console.log(
+            `     - ${id} [${def.transport ?? "stdio"}] roles=${roles} modes=${modes} (${flags})`,
+          );
+        }
+
+        const active = entries.filter(([, def]) => def.enabled !== false);
+        const forRole = (role: string, mode: string) =>
+          active.filter(
+            ([, def]) =>
+              (!def.roles || def.roles.includes(role as never)) &&
+              (!def.modes || def.modes.includes(mode as never)),
+          );
+        console.log("\n   Capability profile:");
+        for (const mode of ["pr", "local"] as const) {
+          const review = forRole("review", mode).length;
+          const explore = forRole("explore", mode).length;
+          console.log(
+            `     - ${mode} mode: review-role servers=${review}, explore-role servers=${explore}`,
+          );
+          if (review === 0) {
+            console.log(
+              `       ⚠️  No review-role servers for ${mode} mode — the reviewer will have no tools; ${mode} reviews degrade to dry-run analysis.`,
+            );
+          }
+        }
+        if (!config.ai.explore.enabled) {
+          console.log(
+            "     ⚠️  explore_context disabled — no delegated research; strict verification falls back to basic.",
+          );
+        }
+        console.log("\n✅ Configuration is loadable and consistent.\n");
+        process.exit(0);
+      } catch (error) {
+        console.error("\n❌ Doctor failed:", (error as Error).message);
         process.exit(1);
       }
     });

@@ -21,19 +21,19 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup PNPM
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
-          version: 9
+          version: 10.14.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          node-version: "26"
           cache: "pnpm"
 
       - name: Install dependencies
@@ -74,7 +74,7 @@ jobs:
 
       - name: Find existing AI review comment
         if: steps.check-permissions.outputs.can_comment == 'true'
-        uses: peter-evans/find-comment@v3
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
         id: find-ai-comment
         with:
           issue-number: ${{ github.event.pull_request.number }}
@@ -83,7 +83,7 @@ jobs:
 
       - name: 📊 Consolidated PR Analysis & Compliance Summary
         if: steps.check-permissions.outputs.can_comment == 'true'
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.pull_request.number }}

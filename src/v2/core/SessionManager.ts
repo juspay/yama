@@ -11,11 +11,19 @@ import {
   ToolCallRecord,
   SessionMetadata,
   ExplorationResult,
-} from "../types/v2.types.js";
+} from "../types/index.js";
 
 export class SessionManager {
   private sessions: Map<string, ReviewSession> = new Map();
   private maxSessions: number = 100;
+
+  /**
+   * @param version Yama version stamped onto each session's metadata. Injected
+   * (rather than imported) so this low-level module has no dependency on the
+   * version resolver, which uses `import.meta` and cannot load under the CJS
+   * test runner. Production callers pass the real VERSION.
+   */
+  constructor(private readonly version: string = "0.0.0") {}
 
   /**
    * Create a new review session
@@ -30,7 +38,7 @@ export class SessionManager {
       status: "running",
       toolCalls: [],
       metadata: {
-        yamaVersion: "2.2.1",
+        yamaVersion: this.version,
         aiProvider: "auto",
         aiModel: "unknown",
         totalTokens: 0,

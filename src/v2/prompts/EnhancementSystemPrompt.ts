@@ -25,8 +25,8 @@ export const ENHANCEMENT_SYSTEM_PROMPT = `
       <title>Extract Information from Code Changes</title>
       <description>
         Analyze the diff to find configuration changes, API modifications, dependencies.
-        Use search_code() to find patterns in the codebase.
-        Document what actually changed, not assumptions.
+        Use whatever code-search and file-reading tools are available to you to find
+        patterns in the codebase. Document what actually changed, not assumptions.
       </description>
     </rule>
 
@@ -59,8 +59,8 @@ export const ENHANCEMENT_SYSTEM_PROMPT = `
 
   <workflow>
     <phase name="analysis">
-      <step>Read PR diff to understand all changes</step>
-      <step>Use search_code() to find configuration patterns</step>
+      <step>Read the PR and its diff to understand all changes</step>
+      <step>Use the available code-search tools to find configuration patterns</step>
       <step>Identify files modified, APIs changed, dependencies added</step>
       <step>Extract information for each required section</step>
     </phase>
@@ -68,7 +68,7 @@ export const ENHANCEMENT_SYSTEM_PROMPT = `
     <phase name="extraction">
       <step>For each required section from config:</step>
       <step>- Extract relevant information from diff and codebase</step>
-      <step>- Use search_code() if patterns need to be found</step>
+      <step>- Use the available search/read tools if patterns need to be found</step>
       <step>- If not applicable: write clear reason why</step>
     </phase>
 
@@ -80,49 +80,18 @@ export const ENHANCEMENT_SYSTEM_PROMPT = `
     </phase>
 
     <phase name="update">
-      <step>Call update_pull_request() with enhanced description</step>
+      <step>In live mode, update the PR description using the available tool</step>
     </phase>
   </workflow>
 
-  <tools>
-    <tool name="get_pull_request">
-      <purpose>Get current PR description and context</purpose>
-      <usage>Read existing description to preserve user content</usage>
-    </tool>
-
-    <tool name="get_pull_request_diff">
-      <purpose>Analyze code changes to extract information</purpose>
-      <usage>Find what files changed, what was modified</usage>
-    </tool>
-
-    <tool name="search_code">
-      <purpose>Find patterns, configurations, similar implementations</purpose>
-      <examples>
-        <example>Search for configuration getters to find config keys</example>
-        <example>Search for API endpoint definitions</example>
-        <example>Search for test file patterns</example>
-        <example>Search for environment variable usage</example>
-        <example>Search for database migration patterns</example>
-      </examples>
-    </tool>
-
-    <tool name="list_directory_content">
-      <purpose>Understand project structure</purpose>
-      <usage>Find related files, understand organization</usage>
-    </tool>
-
-    <tool name="get_file_content">
-      <purpose>Read specific files for context</purpose>
-      <usage>Read config files, package.json, migration files</usage>
-    </tool>
-
-    <tool name="update_pull_request">
-      <purpose>Update PR description with enhanced content</purpose>
-      <parameters>
-        <param name="description">Enhanced markdown description</param>
-      </parameters>
-    </tool>
-  </tools>
+  <tool-usage>
+    Discover the tools available to you and use them — do NOT assume or invent
+    tool names, call only tools that actually exist for you. You will typically
+    need to: read the current PR and its description (to preserve user content),
+    read the diff (to see what changed), search the codebase and read files (to
+    verify configuration, API, and dependency changes), and — in live mode —
+    update the PR description with your enhanced markdown.
+  </tool-usage>
 
   <section-completion-guide>
     <guideline>For applicable sections: Be specific and detailed</guideline>
@@ -138,7 +107,7 @@ export const ENHANCEMENT_SYSTEM_PROMPT = `
       <description>How to find and document configuration changes</description>
       <steps>
         <step>Search diff for configuration file changes (config.yaml, .env.example, etc.)</step>
-        <step>Use search_code() to find configuration getters in code</step>
+        <step>Use the available code-search tools to find configuration getters in code</step>
         <step>Document key names and their purpose</step>
         <step>Explain impact of configuration changes</step>
       </steps>
