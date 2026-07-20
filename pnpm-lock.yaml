@@ -13,10 +13,10 @@ importers:
     dependencies:
       "@juspay/hippocampus":
         specifier: ^0.1.7
-        version: 0.1.7(@juspay/neurolink@9.70.7)
+        version: 0.1.7(@juspay/neurolink@10.1.2)
       "@juspay/neurolink":
-        specifier: ^9.70.7
-        version: 9.70.7(@cfworker/json-schema@4.1.1)(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)
+        specifier: ^10.1.2
+        version: 10.1.2(@cfworker/json-schema@4.1.1)(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)
       "@nexus2520/bitbucket-mcp-server":
         specifier: 2.0.4
         version: 2.0.4(@cfworker/json-schema@4.1.1)(debug@4.4.1)(zod@4.3.6)
@@ -1489,6 +1489,18 @@ packages:
       "@modelcontextprotocol/sdk":
         optional: true
 
+  "@google/genai@1.52.0":
+    resolution:
+      {
+        integrity: sha512-gwSvbpiN/17O9TbsqSsE/OzZcpv5Fo4RQjdngGgogtuB9RsyJ8ZHhX5KjHj1bp5N9snN2eK8LDGXSaWW2hof8Q==,
+      }
+    engines: { node: ">=20.0.0" }
+    peerDependencies:
+      "@modelcontextprotocol/sdk": ^1.25.2
+    peerDependenciesMeta:
+      "@modelcontextprotocol/sdk":
+        optional: true
+
   "@grpc/grpc-js@1.13.4":
     resolution:
       {
@@ -2190,10 +2202,10 @@ packages:
       better-sqlite3:
         optional: true
 
-  "@juspay/neurolink@9.70.7":
+  "@juspay/neurolink@10.1.2":
     resolution:
       {
-        integrity: sha512-oZMOB6G6WzHFJDk47z6unbBBm9yIhYMg+REpSCCG+bc1bVHnBXsi1i79MJMh3hGjc4N5lq4w10KdJL+dFUb1Gw==,
+        integrity: sha512-nYjA0GE2ZDHzMDDBePxD3CxXNLcddX98QnTkliYvK6I15dzrrZo/88yTPJ9f1hipyWfY/gxL63/uWZ0CUCenbQ==,
       }
     engines: { node: ">=20.18.1", npm: ">=10.0.0", pnpm: ">=8.0.0" }
     os: [darwin, linux, win32]
@@ -2275,6 +2287,15 @@ packages:
     peerDependencies:
       "@livekit/agents": 1.4.6
       "@livekit/rtc-node": ^0.13.29
+
+  "@livekit/agents-plugin-google@1.5.3":
+    resolution:
+      {
+        integrity: sha512-KKTCU8yD7g7XpoO3xn1I0trePQ5M/MQTodf3yvgd8kPhuagXnjT0V/FnMSGTVkCfpAMkGDh9EmxCVB/EXnl9EA==,
+      }
+    peerDependencies:
+      "@livekit/agents": 1.5.3
+      "@livekit/rtc-node": ^0.13.31
 
   "@livekit/agents-plugin-livekit@1.4.6":
     resolution:
@@ -2710,6 +2731,12 @@ packages:
     engines: { node: ">=16.0.0" }
     hasBin: true
 
+  "@nodable/entities@3.0.0":
+    resolution:
+      {
+        integrity: sha512-8L9xFeTYKhm49xfIypoe2W5wV1m/3Z58kT+7kR9A8OyFxcPduI4VmxaUMQyKYrRjUoLLSXv6EKKID5Tvj9cUVw==,
+      }
+
   "@nodelib/fs.scandir@2.1.5":
     resolution:
       {
@@ -2898,6 +2925,15 @@ packages:
     resolution:
       {
         integrity: sha512-8xHSGWpJP9wBxgBpnqGL0R3PbdWQndL1Qp50qrg71+B28zK5OQmUgcDKLJgzyAAV38t4tOyLMGDD60LneR5W8g==,
+      }
+    engines: { node: ^18.19.0 || >=20.6.0 }
+    peerDependencies:
+      "@opentelemetry/api": ">=1.0.0 <1.10.0"
+
+  "@opentelemetry/core@2.9.0":
+    resolution:
+      {
+        integrity: sha512-m2nckMT80NnmjTYSPjJQObBJ+8dgkoajEOUbznL8AHZ3T3yHRk2P7gI1PhEBc1+lOnrYE9UWrWHqJDsmqjmNbw==,
       }
     engines: { node: ^18.19.0 || >=20.6.0 }
     peerDependencies:
@@ -4444,6 +4480,12 @@ packages:
         integrity: sha512-KMReFUr0B4t+D+OBkjR3KYqvocp2XaSzO55UcB6mgQMd3KbcE+mWTyvVV7D/zsdEbNnV6acZUutkiHQXvTr1Rw==,
       }
     engines: { node: ">= 8" }
+
+  anynum@1.0.1:
+    resolution:
+      {
+        integrity: sha512-N6//FLET/tXYNM/F6ABca1oH6fWB+KlTt909Le28WMDBk8oaT4vY17DCrwg2MvmuqUKt3Ni4N5dGJ/EoBgcO6A==,
+      }
 
   archiver-utils@2.1.0:
     resolution:
@@ -6247,6 +6289,19 @@ packages:
         integrity: sha512-f2jhpN4Eccy0/Uz9csxh3Nu6q4ErKxf0XIsasomfOihuSUa3/xw6w8dnOtCDgEItQFJG8KyXPzQXzcODDrrbOg==,
       }
 
+  fast-xml-builder@1.3.0:
+    resolution:
+      {
+        integrity: sha512-F74cZEdCvuw9P41GAC3rod4X04jjWGM1JPEv/GWSqFTWLsdyMSBMBMlm9Hk3GLBgLBbdBNY8yee0pQh2RBVESQ==,
+      }
+
+  fast-xml-parser@5.10.1:
+    resolution:
+      {
+        integrity: sha512-IEMIf7298kXuZSRFoGfMYrl7is8LpavODgbNz1cwIudv7KwVFnuU+UsMporfq6PD6aXSlawZlARiA3UywCTfMw==,
+      }
+    hasBin: true
+
   fast-xml-parser@5.5.8:
     resolution:
       {
@@ -7398,6 +7453,12 @@ packages:
       }
     engines: { node: ">=18" }
 
+  is-unsafe@2.0.0:
+    resolution:
+      {
+        integrity: sha512-2LdV822R+wmI86unXA93WCFpL6g+av8ynWk0nrHyJqGop5VoocYsSLFgN8jrfalT6iGeLNM4KXuVSsULP53kEA==,
+      }
+
   is-windows@1.0.2:
     resolution:
       {
@@ -7737,6 +7798,13 @@ packages:
     resolution:
       {
         integrity: sha512-wpxZs9NoxZaJESJGIZTyDEaYpl0FKSA+FB9aJiyemKhMwkxQg63h4T1KJgUGHpTqPDNRcmmYLugrRjJlBtWvRA==,
+      }
+    hasBin: true
+
+  js-yaml@4.3.0:
+    resolution:
+      {
+        integrity: sha512-1td788aAnnZ5qs7V2QIRl1owjtYpbKt749Y3xauqQgwIIGF/xXWz1wMTEBx5O3LK3lXLVuqXPdPxj2BoFHaW9Q==,
       }
     hasBin: true
 
@@ -9191,6 +9259,13 @@ packages:
       }
     engines: { node: ">=14.0.0" }
 
+  path-expression-matcher@1.6.2:
+    resolution:
+      {
+        integrity: sha512-enSlaiat05iasnzmgNxRj8reFdj3puY2QpNgP1aPIaVfT6nn9ICuPoFlKHk8EN22HcwewshO+mN2DGbkCEOtqQ==,
+      }
+    engines: { node: ">=14.0.0" }
+
   path-is-absolute@1.0.1:
     resolution:
       {
@@ -10508,6 +10583,12 @@ packages:
         integrity: sha512-Y7Bj8XyJxnPAORMZj/xltsfo55uOiyHcU2tnAVzHUnSJR/KsEX+9RoDeXEnsXtl/CX4fAcrt64gZ13aGaWPeBg==,
       }
 
+  strnum@2.4.1:
+    resolution:
+      {
+        integrity: sha512-M9eUSMT2dCB2cTNPG7UYj6KuK7RJR2SN2+yCV/fTW3xzTCS6EaGZ5pSMgDIjB7r8zSfTGk+dvvn9rTjpVS9Mwg==,
+      }
+
   strtok3@10.3.4:
     resolution:
       {
@@ -11285,6 +11366,13 @@ packages:
       }
     engines: { node: ">=20" }
 
+  xml-naming@0.3.0:
+    resolution:
+      {
+        integrity: sha512-ghig2TBE/H11aOVgmahA3MhimvkBr6JIYknH/Dhdk10nXwdbIqBJsbfMxpvFPG8bAw77gN29aQWvKpmVoPlvPQ==,
+      }
+    engines: { node: ">=16.0.0" }
+
   xmlbuilder@10.1.1:
     resolution:
       {
@@ -11595,6 +11683,7 @@ snapshots:
       tslib: 2.8.1
     transitivePeerDependencies:
       - aws-crt
+    optional: true
 
   "@aws-sdk/client-bedrock@3.1019.0":
     dependencies:
@@ -11640,6 +11729,7 @@ snapshots:
       tslib: 2.8.1
     transitivePeerDependencies:
       - aws-crt
+    optional: true
 
   "@aws-sdk/client-s3@3.1004.0":
     dependencies:
@@ -11748,6 +11838,7 @@ snapshots:
       tslib: 2.8.1
     transitivePeerDependencies:
       - aws-crt
+    optional: true
 
   "@aws-sdk/client-sagemaker@3.1019.0":
     dependencies:
@@ -11926,6 +12017,7 @@ snapshots:
       "@smithy/eventstream-codec": 4.2.12
       "@smithy/types": 4.13.1
       tslib: 2.8.1
+    optional: true
 
   "@aws-sdk/middleware-bucket-endpoint@3.972.7":
     dependencies:
@@ -11943,6 +12035,7 @@ snapshots:
       "@smithy/protocol-http": 5.3.12
       "@smithy/types": 4.13.1
       tslib: 2.8.1
+    optional: true
 
   "@aws-sdk/middleware-expect-continue@3.972.7":
     dependencies:
@@ -12043,6 +12136,7 @@ snapshots:
       "@smithy/util-hex-encoding": 4.2.2
       "@smithy/util-utf8": 4.2.2
       tslib: 2.8.1
+    optional: true
 
   "@aws-sdk/nested-clients@3.996.16":
     dependencies:
@@ -12139,6 +12233,7 @@ snapshots:
       "@smithy/querystring-builder": 4.2.12
       "@smithy/types": 4.13.1
       tslib: 2.8.1
+    optional: true
 
   "@aws-sdk/util-locate-window@3.804.0":
     dependencies:
@@ -12189,7 +12284,7 @@ snapshots:
       "@babel/traverse": 7.28.0
       "@babel/types": 7.28.2
       convert-source-map: 2.0.0
-      debug: 4.4.1
+      debug: 4.4.3
       gensync: 1.0.0-beta.2
       json5: 2.2.3
       semver: 6.3.1
@@ -12348,7 +12443,7 @@ snapshots:
       "@babel/parser": 7.28.0
       "@babel/template": 7.27.2
       "@babel/types": 7.28.2
-      debug: 4.4.1
+      debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
 
@@ -12774,6 +12869,7 @@ snapshots:
       google-gax: 5.0.6
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   "@google-cloud/vertexai@1.10.0(encoding@0.1.13)":
     dependencies:
@@ -12781,6 +12877,7 @@ snapshots:
     transitivePeerDependencies:
       - encoding
       - supports-color
+    optional: true
 
   "@google/genai@1.47.0(@modelcontextprotocol/sdk@1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))":
     dependencies:
@@ -12795,10 +12892,25 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  "@google/genai@1.52.0(@modelcontextprotocol/sdk@1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))":
+    dependencies:
+      google-auth-library: 10.6.2
+      p-retry: 4.6.2
+      protobufjs: 7.5.4
+      ws: 8.21.0
+    optionalDependencies:
+      "@modelcontextprotocol/sdk": 1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+    optional: true
+
   "@grpc/grpc-js@1.13.4":
     dependencies:
       "@grpc/proto-loader": 0.7.15
       "@js-sdsl/ordered-map": 4.4.2
+    optional: true
 
   "@grpc/proto-loader@0.7.15":
     dependencies:
@@ -12806,6 +12918,7 @@ snapshots:
       long: 5.3.2
       protobufjs: 7.5.4
       yargs: 17.7.2
+    optional: true
 
   "@grpc/proto-loader@0.8.0":
     dependencies:
@@ -12813,6 +12926,7 @@ snapshots:
       long: 5.3.2
       protobufjs: 7.5.4
       yargs: 17.7.2
+    optional: true
 
   "@hapi/bourne@3.0.0":
     optional: true
@@ -12839,10 +12953,13 @@ snapshots:
     dependencies:
       "@huggingface/jinja": 0.5.6
       "@huggingface/tasks": 0.19.90
+    optional: true
 
-  "@huggingface/jinja@0.5.6": {}
+  "@huggingface/jinja@0.5.6":
+    optional: true
 
-  "@huggingface/tasks@0.19.90": {}
+  "@huggingface/tasks@0.19.90":
+    optional: true
 
   "@huggingface/tokenizers@0.1.3":
     optional: true
@@ -13288,17 +13405,18 @@ snapshots:
       "@jridgewell/resolve-uri": 3.1.2
       "@jridgewell/sourcemap-codec": 1.5.4
 
-  "@js-sdsl/ordered-map@4.4.2": {}
+  "@js-sdsl/ordered-map@4.4.2":
+    optional: true
 
-  "@juspay/hippocampus@0.1.7(@juspay/neurolink@9.70.7)":
+  "@juspay/hippocampus@0.1.7(@juspay/neurolink@10.1.2)":
     dependencies:
       "@aws-sdk/client-s3": 3.1004.0
-      "@juspay/neurolink": 9.70.7(@cfworker/json-schema@4.1.1)(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)
+      "@juspay/neurolink": 10.1.2(@cfworker/json-schema@4.1.1)(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)
       redis: 4.7.1
     transitivePeerDependencies:
       - aws-crt
 
-  "@juspay/neurolink@9.70.7(@cfworker/json-schema@4.1.1)(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)":
+  "@juspay/neurolink@10.1.2(@cfworker/json-schema@4.1.1)(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)":
     dependencies:
       "@ai-sdk/anthropic": 3.0.64(zod@4.3.6)
       "@ai-sdk/mistral": 3.0.27(zod@4.3.6)
@@ -13306,20 +13424,13 @@ snapshots:
       "@ai-sdk/provider": 3.0.8
       "@anthropic-ai/sdk": 0.102.0(zod@4.3.6)
       "@anthropic-ai/vertex-sdk": 0.16.1(encoding@0.1.13)(zod@4.3.6)
-      "@aws-sdk/client-bedrock": 3.1019.0
-      "@aws-sdk/client-bedrock-runtime": 3.1019.0
-      "@aws-sdk/client-sagemaker-runtime": 3.1019.0
-      "@aws-sdk/credential-provider-node": 3.972.27
       "@aws-sdk/types": 3.973.6
-      "@google-cloud/text-to-speech": 6.4.0
-      "@google-cloud/vertexai": 1.10.0(encoding@0.1.13)
       "@google/genai": 1.47.0(@modelcontextprotocol/sdk@1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))
-      "@huggingface/inference": 4.13.15
       "@modelcontextprotocol/sdk": 1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
       "@opentelemetry/api": 1.9.0
       "@opentelemetry/api-logs": 0.214.0
       "@opentelemetry/context-async-hooks": 2.6.1(@opentelemetry/api@1.9.0)
-      "@opentelemetry/core": 2.6.1(@opentelemetry/api@1.9.0)
+      "@opentelemetry/core": 2.9.0(@opentelemetry/api@1.9.0)
       "@opentelemetry/exporter-logs-otlp-http": 0.214.0(@opentelemetry/api@1.9.0)
       "@opentelemetry/exporter-metrics-otlp-http": 0.214.0(@opentelemetry/api@1.9.0)
       "@opentelemetry/exporter-trace-otlp-http": 0.214.0(@opentelemetry/api@1.9.0)
@@ -13332,14 +13443,18 @@ snapshots:
       adm-zip: 0.5.16
       ai: 6.0.141(zod@4.3.6)
       chalk: 5.6.2
+      chardet: 2.1.1
       croner: 9.1.0
       csv-parser: 3.2.0
       dotenv: 17.3.1
       eventsource-parser: 3.1.0
+      fast-xml-parser: 5.10.1
       google-auth-library: 10.6.2
       hono: 4.12.25
+      iconv-lite: 0.7.2
       inquirer: 13.3.2(@types/node@20.19.9)
       jose: 6.1.3
+      js-yaml: 4.3.0
       json-schema-to-zod: 2.8.0
       jsonrepair: 3.14.0
       nanoid: 5.1.5
@@ -13354,18 +13469,26 @@ snapshots:
       zod: 4.3.6
       zod-to-json-schema: 3.25.1(zod@4.3.6)
     optionalDependencies:
+      "@aws-sdk/client-bedrock": 3.1019.0
+      "@aws-sdk/client-bedrock-runtime": 3.1019.0
       "@aws-sdk/client-sagemaker": 3.1019.0
+      "@aws-sdk/client-sagemaker-runtime": 3.1019.0
+      "@aws-sdk/credential-provider-node": 3.972.27
       "@fastify/cors": 11.2.0
       "@fastify/rate-limit": 10.3.0
+      "@google-cloud/text-to-speech": 6.4.0
+      "@google-cloud/vertexai": 1.10.0(encoding@0.1.13)
       "@hono/node-server": 1.19.14(hono@4.12.25)
-      "@juspay/hippocampus": 0.1.7(@juspay/neurolink@9.70.7)
+      "@huggingface/inference": 4.13.15
+      "@juspay/hippocampus": 0.1.7(@juspay/neurolink@10.1.2)
       "@koa/cors": 5.0.0
       "@koa/router": 15.3.1(koa@3.1.2)
-      "@langfuse/otel": 5.0.1(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/exporter-trace-otlp-http@0.214.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.0))
+      "@langfuse/otel": 5.0.1(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/exporter-trace-otlp-http@0.214.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.0))
       "@livekit/agents": 1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6)
       "@livekit/agents-plugin-cartesia": 1.4.6(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))(@livekit/rtc-node@0.13.29)(zod@4.3.6)
       "@livekit/agents-plugin-deepgram": 1.4.6(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))(@livekit/rtc-node@0.13.29)
       "@livekit/agents-plugin-elevenlabs": 1.4.6(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))(@livekit/rtc-node@0.13.29)
+      "@livekit/agents-plugin-google": 1.5.3(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))(@livekit/rtc-node@0.13.29)(@modelcontextprotocol/sdk@1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.0)(zod@4.3.6)
       "@livekit/agents-plugin-livekit": 1.4.6(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))
       "@livekit/agents-plugin-silero": 1.4.6(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))(@livekit/rtc-node@0.13.29)
       "@livekit/agents-plugin-soniox": 1.4.6(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))(@livekit/rtc-node@0.13.29)
@@ -13425,11 +13548,11 @@ snapshots:
       "@opentelemetry/api": 1.9.0
     optional: true
 
-  "@langfuse/otel@5.0.1(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.6.1(@opentelemetry/api@1.9.0))(@opentelemetry/exporter-trace-otlp-http@0.214.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.0))":
+  "@langfuse/otel@5.0.1(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/exporter-trace-otlp-http@0.214.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.0))":
     dependencies:
       "@langfuse/core": 5.0.1(@opentelemetry/api@1.9.0)
       "@opentelemetry/api": 1.9.0
-      "@opentelemetry/core": 2.6.1(@opentelemetry/api@1.9.0)
+      "@opentelemetry/core": 2.9.0(@opentelemetry/api@1.9.0)
       "@opentelemetry/exporter-trace-otlp-http": 0.214.0(@opentelemetry/api@1.9.0)
       "@opentelemetry/sdk-trace-base": 2.6.1(@opentelemetry/api@1.9.0)
     optional: true
@@ -13464,6 +13587,25 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
+
+  "@livekit/agents-plugin-google@1.5.3(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))(@livekit/rtc-node@0.13.29)(@modelcontextprotocol/sdk@1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.0)(zod@4.3.6)":
+    dependencies:
+      "@google/genai": 1.52.0(@modelcontextprotocol/sdk@1.28.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))
+      "@livekit/agents": 1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6)
+      "@livekit/mutex": 1.1.1
+      "@livekit/rtc-node": 0.13.29
+      "@types/json-schema": 7.0.15
+      google-auth-library: 10.6.2
+      json-schema: 0.4.0
+      openai: 6.42.0(ws@8.21.0)(zod@4.3.6)
+    transitivePeerDependencies:
+      - "@modelcontextprotocol/sdk"
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
     optional: true
 
   "@livekit/agents-plugin-livekit@1.4.6(@livekit/agents@1.4.6(@livekit/rtc-node@0.13.29)(typescript@5.8.3)(zod@4.3.6))":
@@ -13506,7 +13648,7 @@ snapshots:
       "@livekit/typed-emitter": 3.0.0
       "@opentelemetry/api": 1.9.0
       "@opentelemetry/api-logs": 0.54.2
-      "@opentelemetry/core": 2.6.1(@opentelemetry/api@1.9.0)
+      "@opentelemetry/core": 2.9.0(@opentelemetry/api@1.9.0)
       "@opentelemetry/exporter-logs-otlp-proto": 0.54.2(@opentelemetry/api@1.9.0)
       "@opentelemetry/exporter-trace-otlp-proto": 0.54.2(@opentelemetry/api@1.9.0)
       "@opentelemetry/instrumentation-pino": 0.43.0(@opentelemetry/api@1.9.0)
@@ -13792,6 +13934,8 @@ snapshots:
       - supports-color
       - zod
 
+  "@nodable/entities@3.0.0": {}
+
   "@nodelib/fs.scandir@2.1.5":
     dependencies:
       "@nodelib/fs.stat": 2.0.5
@@ -13910,6 +14054,11 @@ snapshots:
       "@opentelemetry/semantic-conventions": 1.40.0
 
   "@opentelemetry/core@2.6.1(@opentelemetry/api@1.9.0)":
+    dependencies:
+      "@opentelemetry/api": 1.9.0
+      "@opentelemetry/semantic-conventions": 1.40.0
+
+  "@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.0)":
     dependencies:
       "@opentelemetry/api": 1.9.0
       "@opentelemetry/semantic-conventions": 1.40.0
@@ -14902,7 +15051,7 @@ snapshots:
       "@typescript-eslint/types": 8.38.0
       "@typescript-eslint/typescript-estree": 8.38.0(typescript@5.8.3)
       "@typescript-eslint/utils": 8.38.0(eslint@9.31.0)(typescript@5.8.3)
-      debug: 4.4.1
+      debug: 4.4.3
       eslint: 9.31.0
       ts-api-utils: 2.1.0(typescript@5.8.3)
       typescript: 5.8.3
@@ -15065,6 +15214,8 @@ snapshots:
     dependencies:
       normalize-path: 3.0.0
       picomatch: 2.3.1
+
+  anynum@1.0.1: {}
 
   archiver-utils@2.1.0:
     dependencies:
@@ -15804,6 +15955,7 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
       stream-shift: 1.0.3
+    optional: true
 
   dynamic-dedupe@0.3.0:
     dependencies:
@@ -15843,6 +15995,7 @@ snapshots:
   end-of-stream@1.4.5:
     dependencies:
       once: 1.4.0
+    optional: true
 
   enquirer@2.4.1:
     dependencies:
@@ -16019,7 +16172,7 @@ snapshots:
 
   eventsource@3.0.7:
     dependencies:
-      eventsource-parser: 3.0.3
+      eventsource-parser: 3.1.0
 
   exceljs@4.4.0:
     dependencies:
@@ -16202,6 +16355,20 @@ snapshots:
   fast-xml-builder@1.1.4:
     dependencies:
       path-expression-matcher: 1.2.0
+
+  fast-xml-builder@1.3.0:
+    dependencies:
+      path-expression-matcher: 1.6.2
+      xml-naming: 0.3.0
+
+  fast-xml-parser@5.10.1:
+    dependencies:
+      "@nodable/entities": 3.0.0
+      fast-xml-builder: 1.3.0
+      is-unsafe: 2.0.0
+      path-expression-matcher: 1.6.2
+      strnum: 2.4.1
+      xml-naming: 0.3.0
 
   fast-xml-parser@5.5.8:
     dependencies:
@@ -16620,6 +16787,7 @@ snapshots:
       rimraf: 5.0.10
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   google-logging-utils@0.0.2: {}
 
@@ -16675,7 +16843,6 @@ snapshots:
   hasown@2.0.4:
     dependencies:
       function-bind: 1.1.2
-    optional: true
 
   heap-js@2.7.1:
     optional: true
@@ -16909,7 +17076,7 @@ snapshots:
 
   is-core-module@2.16.1:
     dependencies:
-      hasown: 2.0.2
+      hasown: 2.0.4
 
   is-docker@3.0.0: {}
 
@@ -16961,6 +17128,8 @@ snapshots:
 
   is-unicode-supported@2.1.0: {}
 
+  is-unsafe@2.0.0: {}
+
   is-windows@1.0.2: {}
 
   is-wsl@3.1.1:
@@ -16997,7 +17166,7 @@ snapshots:
       "@babel/parser": 7.28.0
       "@istanbuljs/schema": 0.1.3
       istanbul-lib-coverage: 3.2.2
-      semver: 7.7.2
+      semver: 7.7.4
     transitivePeerDependencies:
       - supports-color
 
@@ -17009,7 +17178,7 @@ snapshots:
 
   istanbul-lib-source-maps@4.0.1:
     dependencies:
-      debug: 4.4.1
+      debug: 4.4.3
       istanbul-lib-coverage: 3.2.2
       source-map: 0.6.1
     transitivePeerDependencies:
@@ -17292,7 +17461,7 @@ snapshots:
       jest-util: 29.7.0
       natural-compare: 1.4.0
       pretty-format: 29.7.0
-      semver: 7.7.2
+      semver: 7.7.4
     transitivePeerDependencies:
       - supports-color
 
@@ -17360,6 +17529,10 @@ snapshots:
       esprima: 4.0.1
 
   js-yaml@4.1.0:
+    dependencies:
+      argparse: 2.0.1
+
+  js-yaml@4.3.0:
     dependencies:
       argparse: 2.0.1
 
@@ -17571,7 +17744,8 @@ snapshots:
 
   lodash-es@4.17.21: {}
 
-  lodash.camelcase@4.3.0: {}
+  lodash.camelcase@4.3.0:
+    optional: true
 
   lodash.capitalize@4.2.1: {}
 
@@ -17669,7 +17843,7 @@ snapshots:
 
   make-dir@4.0.0:
     dependencies:
-      semver: 7.7.2
+      semver: 7.7.4
 
   make-error@1.3.6: {}
 
@@ -17697,8 +17871,8 @@ snapshots:
   marked-terminal@7.3.0(marked@15.0.12):
     dependencies:
       ansi-escapes: 7.0.0
-      ansi-regex: 6.1.0
-      chalk: 5.4.1
+      ansi-regex: 6.2.2
+      chalk: 5.6.2
       cli-highlight: 2.1.11
       cli-table3: 0.6.5
       marked: 15.0.12
@@ -17901,13 +18075,13 @@ snapshots:
   normalize-package-data@6.0.2:
     dependencies:
       hosted-git-info: 7.0.2
-      semver: 7.7.2
+      semver: 7.7.4
       validate-npm-package-license: 3.0.4
 
   normalize-package-data@8.0.0:
     dependencies:
       hosted-git-info: 9.0.2
-      semver: 7.7.2
+      semver: 7.7.4
       validate-npm-package-license: 3.0.4
 
   normalize-path@3.0.0: {}
@@ -17931,7 +18105,8 @@ snapshots:
 
   object-assign@4.1.1: {}
 
-  object-hash@3.0.0: {}
+  object-hash@3.0.0:
+    optional: true
 
   object-inspect@1.13.4: {}
 
@@ -18155,6 +18330,8 @@ snapshots:
   path-exists@4.0.0: {}
 
   path-expression-matcher@1.2.0: {}
+
+  path-expression-matcher@1.6.2: {}
 
   path-is-absolute@1.0.1: {}
 
@@ -18392,6 +18569,7 @@ snapshots:
   proto3-json-serializer@3.0.4:
     dependencies:
       protobufjs: 7.5.4
+    optional: true
 
   protobufjs@7.5.4:
     dependencies:
@@ -18629,6 +18807,7 @@ snapshots:
       teeny-request: 10.1.2
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   retry@0.13.1: {}
 
@@ -18747,7 +18926,7 @@ snapshots:
 
   semver-diff@4.0.0:
     dependencies:
-      semver: 7.7.2
+      semver: 7.7.4
 
   semver-regex@4.0.5: {}
 
@@ -18755,8 +18934,7 @@ snapshots:
 
   semver@7.7.2: {}
 
-  semver@7.7.4:
-    optional: true
+  semver@7.7.4: {}
 
   send@1.2.0:
     dependencies:
@@ -18984,8 +19162,10 @@ snapshots:
   stream-events@1.0.5:
     dependencies:
       stubs: 3.0.0
+    optional: true
 
-  stream-shift@1.0.3: {}
+  stream-shift@1.0.3:
+    optional: true
 
   streamx@2.25.0:
     dependencies:
@@ -19065,12 +19245,17 @@ snapshots:
 
   strnum@2.2.0: {}
 
+  strnum@2.4.1:
+    dependencies:
+      anynum: 1.0.1
+
   strtok3@10.3.4:
     dependencies:
       "@tokenizer/token": 0.3.0
     optional: true
 
-  stubs@3.0.0: {}
+  stubs@3.0.0:
+    optional: true
 
   super-regex@1.0.0:
     dependencies:
@@ -19126,6 +19311,7 @@ snapshots:
       stream-events: 1.0.5
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   teex@1.0.1:
     dependencies:
@@ -19523,6 +19709,8 @@ snapshots:
     dependencies:
       is-wsl: 3.1.1
       powershell-utils: 0.1.0
+
+  xml-naming@0.3.0: {}
 
   xmlbuilder@10.1.1:
     optional: true
