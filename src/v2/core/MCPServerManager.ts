@@ -1,557 +1,368 @@
 /**
- * MCP Server Manager for Yama V2
- * Manages lifecycle and health of PR/local MCP servers
+ * MCPServerManager — generic, config-driven MCP registrar.
+ *
+ * Yama does not special-case any MCP server. Every server — bitbucket, github,
+ * serena, local-git, or any custom one — is just a config-defined
+ * `McpServerDefinition`. This manager substitutes `${ENV}` placeholders, selects
+ * the servers enabled for the current review mode + agent role, registers each
+ * with NeuroLink, and applies that server's config-driven tool filtering:
+ * `blockedTools` (denylist) and `allowedTools` (fail-closed allowlist). No
+ * server commands, URLs, tokens, or tool names are hardcoded here.
  */
 
-import { join } from "path";
-import { MCPServersConfig, GitHubConfig } from "../types/config.types.js";
-import { MCPServerError } from "../types/v2.types.js";
-import { isMutatingGitTool as isMutatingGitToolShared } from "../utils/toolPolicy.js";
-
-/**
- * Default remote HTTP endpoint for GitHub's hosted MCP server.
- * Overridable via `mcpServers.github.url`.
- */
-const DEFAULT_GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/";
-
-/**
- * Default write tools blocked on the GitHub MCP server.
- * Mirrors Curator's proven pattern: the AI never mutates the repo directly —
- * the single write path is the review-comment / review-submit tools, which are
- * intentionally NOT blocked here.
- */
-const DEFAULT_GITHUB_BLOCKED_TOOLS: string[] = [
-  "push_files",
-  "create_or_update_file",
-  "create_branch",
-  "delete_file",
-  "create_pull_request_with_copilot",
-  "assign_copilot_to_issue",
-];
+import {
+  MCPServersConfig,
+  McpServerDefinition,
+  McpServerMode,
+  McpServerRole,
+} from "../types/index.js";
+import { normalizeToolName } from "../utils/toolPolicy.js";
+import { McpRegistry } from "./McpRegistry.js";
 
 /**
- * Registration shape for the GitHub remote HTTP MCP server.
- * Structural subset of NeuroLink's `MCPServerInfo` (transport/url/headers/
- * blockedTools + optional stdio command/args), typed explicitly to avoid `any`
- * for the new config object.
+ * Minimal shape of the result returned by NeuroLink's `addExternalMCPServer()`.
+ * Registration is synchronous: NeuroLink connects and discovers tools before
+ * resolving, and reports the outcome here — `success: false` (with `error`)
+ * instead of throwing. This result is the authoritative registration status;
+ * `listMCPServers()` entries carry no server name/id, so they cannot be used
+ * to verify a specific server.
  */
-/**
- * Minimal shape of an entry returned by NeuroLink's `listMCPServers()`,
- * used to verify a server connected without resorting to `any`.
- */
-interface MCPServerStatus {
-  name: string;
-  status?: string;
-  tools?: Array<{ name?: string }>;
-}
-
-interface GitHubMCPRegistration {
-  transport: "http" | "stdio";
-  url?: string;
-  headers?: Record<string, string>;
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  blockedTools: string[];
-  /** Connection timeout (ms). The hosted remote endpoint is slow (~3-4s TLS). */
-  timeout?: number;
-  /** Retry/backoff for the remote HTTP endpoint (mirrors Curator's setup). */
-  retryConfig?: {
-    maxAttempts?: number;
-    initialDelay?: number;
-    maxDelay?: number;
-    backoffMultiplier?: number;
-  };
-}
+type AddServerResult = {
+  success?: boolean;
+  error?: string;
+  metadata?: { toolsDiscovered?: number };
+};
 
 export class MCPServerManager {
-  // MCP servers are managed entirely by NeuroLink
-  // No need to track tools locally
-  private initialized = false;
+  /**
+   * Servers this manager has registered on the given NeuroLink instance,
+   * with the definition they were registered from (needed to evict them on a
+   * mode switch).
+   */
+  private readonly registered = new Map<string, McpServerDefinition>();
 
   /**
-   * Setup MCP servers based on detected provider
-   * GitHub MCP OR Bitbucket MCP (not both) - whichever is needed
-   * Jira is optional for both
+   * Register every configured server that is enabled for (mode, role). Env
+   * placeholders are substituted, per-server tool filtering applied, and each
+   * registration is non-fatal so one broken server cannot abort the review.
+   *
+   * Safe to call again: registration is RECONCILED against the current config
+   * on every call. A server that is no longer selected (removed from config,
+   * `enabled: false`, or outside the new mode/role) is unregistered — a
+   * pr→local switch must not leave PR write tools live — and a server whose
+   * definition materially changed (blockedTools, url, command, headers, …) is
+   * re-registered so a long-lived SDK instance tracks config, not its first
+   * snapshot. Unchanged servers are left untouched.
    */
   async setupMCPServers(
     neurolink: any,
     config: MCPServersConfig,
-    provider: "github" | "bitbucket" = "bitbucket",
+    mode: McpServerMode,
+    role: McpServerRole,
+    env: NodeJS.ProcessEnv = process.env,
   ): Promise<void> {
-    if (this.initialized) {
+    const servers = this.selectServers(config, mode, role, env);
+    await this.reconcileRegistered(neurolink, servers, mode, role);
+
+    if (servers.length === 0) {
+      console.warn(
+        `   ⚠️  No MCP servers enabled for mode="${mode}", role="${role}". Configure mcpServers in your config.`,
+      );
       return;
     }
 
-    console.log("🔌 Setting up MCP servers...");
-    console.log(`   📍 Provider: ${provider}`);
-
-    // Setup provider-specific MCP (only one needed)
-    if (provider === "github") {
-      // Fail fast rather than passing an undefined/disabled config downstream.
-      if (!config.github || config.github.enabled === false) {
-        throw new MCPServerError(
-          "GitHub provider selected but mcpServers.github is not enabled",
-        );
+    console.log(
+      `🔌 Registering ${servers.length} MCP server(s) [mode=${mode}, role=${role}]...`,
+    );
+    for (const { id, definition } of servers) {
+      if (this.registered.has(id)) {
+        continue; // still selected and unchanged (reconciled above)
       }
-      await this.setupGitHubMCP(neurolink, config.github);
-    } else {
-      await this.setupBitbucketMCP(neurolink, config.bitbucket?.blockedTools);
+      await this.registerOne(neurolink, id, definition);
     }
-
-    // Setup Jira MCP (optional, works with both providers)
-    if (config.jira.enabled) {
-      await this.setupJiraMCP(neurolink, config.jira.blockedTools);
-    } else {
-      console.log("   ⏭️  Jira MCP disabled in config");
-    }
-
-    this.initialized = true;
-
     await this.logDiagnostics(neurolink);
     console.log("✅ MCP servers configured\n");
   }
 
   /**
-   * Reset PR-mode MCP setup so {@link setupMCPServers} can re-register for a
-   * different provider within the same process (e.g. one orchestrator instance
-   * reviewing a Bitbucket PR then a GitHub PR). Removes the previously-registered
-   * provider server (Bitbucket or GitHub) so the new provider's server takes its
-   * place, and clears the `initialized` guard. The optional Jira server is left
-   * in place — it is provider-agnostic and shared. Single-provider runs never
-   * call this, so their behaviour is unchanged.
+   * Unregister every previously-registered server that is no longer in the
+   * selected set, or whose (substituted) definition differs from the one it
+   * was registered with. Changed servers are re-added by the caller's
+   * registration loop because they are removed from `registered` here.
    */
-  async resetForProviderSwitch(
+  private async reconcileRegistered(
     neurolink: any,
-    previousProvider: "github" | "bitbucket",
+    selected: Array<{ id: string; definition: McpServerDefinition }>,
+    mode: McpServerMode,
+    role: McpServerRole,
   ): Promise<void> {
-    const serverName = previousProvider === "github" ? "github" : "bitbucket";
-    try {
-      await neurolink.removeExternalMCPServer?.(serverName);
-    } catch {
-      // Non-fatal: if removal fails the subsequent re-register will surface a
-      // clearer error. Proceed to allow re-setup.
-    }
-    this.initialized = false;
-  }
-
-  /**
-   * Setup local git MCP server for SDK/local mode.
-   * Mandatory in local mode.
-   */
-  async setupLocalGitMCPServer(neurolink: any): Promise<void> {
-    try {
-      console.log("🔌 Setting up local Git MCP server...");
-      await neurolink.addExternalMCPServer(
-        "local-git",
-        this.buildLocalGitServerConfig([]),
-      );
-
-      const discoveredToolNames = this.getLocalGitToolNames(neurolink);
-
-      // Fail closed: if tool discovery returns nothing we cannot verify read-only
-      // safety, so refuse to proceed rather than silently exposing write operations.
-      if (discoveredToolNames.length === 0) {
-        await neurolink
-          .removeExternalMCPServer("local-git")
-          .catch(() => undefined);
-        throw new MCPServerError(
-          "local-git MCP server returned no tools — cannot verify read-only filtering. Aborting local mode setup.",
-        );
+    const desired = new Map(selected.map((s) => [s.id, s.definition]));
+    for (const [id, current] of Array.from(this.registered)) {
+      const next = desired.get(id);
+      if (
+        next &&
+        MCPServerManager.stableStringify(next) ===
+          MCPServerManager.stableStringify(current)
+      ) {
+        continue;
       }
-
-      const mutatingTools = discoveredToolNames.filter((name) =>
-        this.isMutatingGitTool(name),
-      );
-
-      // Enforce hard safety at MCP layer: mutating tools are removed from registry.
-      if (mutatingTools.length > 0) {
-        await neurolink.removeExternalMCPServer("local-git");
-        await neurolink.addExternalMCPServer(
-          "local-git",
-          this.buildLocalGitServerConfig(mutatingTools),
-        );
-
-        // Verify the re-registration actually removed all mutating tools.
-        const remainingMutating = this.getLocalGitToolNames(neurolink).filter(
-          (name) => this.isMutatingGitTool(name),
-        );
-        if (remainingMutating.length > 0) {
-          await neurolink
-            .removeExternalMCPServer("local-git")
-            .catch(() => undefined);
-          throw new MCPServerError(
-            `Read-only enforcement failed — mutating tools still present after blocking: ${remainingMutating.join(", ")}`,
-          );
-        }
-      }
-
-      console.log("   ✅ Local Git MCP server registered");
+      await neurolink.removeExternalMCPServer?.(id)?.catch?.(() => undefined);
+      this.registered.delete(id);
       console.log(
-        "   🔒 Local mode enforces regex-derived read-only blocking at MCP layer",
-      );
-      if (mutatingTools.length > 0) {
-        console.log(
-          `   🚫 Blocked local-git tools: ${mutatingTools.join(", ")}`,
-        );
-      }
-      try {
-        const toolNames = this.getLocalGitToolNames(neurolink);
-        if (toolNames.length > 0) {
-          console.log(
-            `   🧰 local-git tools (available): ${toolNames.join(", ")}`,
-          );
-        }
-      } catch {
-        // Optional introspection only
-      }
-      await this.logDiagnostics(neurolink);
-    } catch (error) {
-      throw new MCPServerError(
-        `Failed to setup local Git MCP server: ${(error as Error).message}`,
+        next
+          ? `   🔄 ${id}: definition changed — re-registering`
+          : `   🔌 ${id} unregistered (no longer enabled for mode="${mode}", role="${role}")`,
       );
     }
   }
 
-  private buildLocalGitServerConfig(blockedTools: string[]) {
-    return {
-      // Launch via package script: tries uvx first, falls back to npx package.
-      command: "npm",
-      args: ["run", "-s", "mcp:git:server"],
-      transport: "stdio",
-      blockedTools,
-    };
-  }
-
-  private getLocalGitToolNames(neurolink: any): string[] {
-    return (neurolink.getExternalMCPServerTools?.("local-git") || [])
-      .map((tool: any) => tool?.name)
-      .filter((name: unknown): name is string => typeof name === "string");
-  }
-
-  private isMutatingGitTool(toolName: string): boolean {
-    // Delegate to the shared fail-closed allow-list policy: any git_* tool not
-    // on the read-only allow-list is treated as mutating. This closes the gaps
-    // the old regex blocklist missed (git_branch, git_mv, git_pull, git_fetch,
-    // git_restore, git_switch, git_remote). Prefix handling (local-git.git_*)
-    // is performed inside the shared helper.
-    return isMutatingGitToolShared(toolName);
-  }
-
-  /**
-   * Setup Bitbucket MCP server (hardcoded, always enabled)
-   */
-  private async setupBitbucketMCP(
-    neurolink: any,
-    blockedTools?: string[],
-  ): Promise<void> {
-    try {
-      console.log("   🔧 Registering Bitbucket MCP server...");
-
-      // Verify environment variables
-      if (
-        !process.env.BITBUCKET_USERNAME ||
-        !process.env.BITBUCKET_TOKEN ||
-        !process.env.BITBUCKET_BASE_URL
-      ) {
-        throw new MCPServerError(
-          "Missing required environment variables: BITBUCKET_USERNAME, BITBUCKET_TOKEN, or BITBUCKET_BASE_URL",
-        );
-      }
-
-      // Use the locally installed binary instead of `npx @latest`, which forces
-      // a registry check + possible download in CI and causes the 30s circuit-breaker
-      // to fire intermittently.
-      const bitbucketBin = join(
-        process.cwd(),
-        "node_modules/.bin/bitbucket-mcp-server",
-      );
-
-      await neurolink.addExternalMCPServer("bitbucket", {
-        command: bitbucketBin,
-        args: [],
-        transport: "stdio",
-        env: {
-          BITBUCKET_USERNAME: process.env.BITBUCKET_USERNAME,
-          BITBUCKET_TOKEN: process.env.BITBUCKET_TOKEN,
-          BITBUCKET_BASE_URL: process.env.BITBUCKET_BASE_URL,
-        },
-        blockedTools: blockedTools || [],
-      });
-
-      // Verify the server actually connected — NeuroLink resolves the promise
-      // even on timeout, so we must check the status explicitly.
-      const servers = await neurolink.listMCPServers();
-      const bbServer = (servers || []).find((s: any) => s.name === "bitbucket");
-      if (
-        !bbServer ||
-        bbServer.status !== "connected" ||
-        bbServer.tools?.length === 0
-      ) {
-        throw new MCPServerError(
-          `Bitbucket MCP server registered but not connected (status: ${bbServer?.status ?? "unknown"}, tools: ${bbServer?.tools?.length ?? 0}). Possible startup timeout.`,
-        );
-      }
-
-      console.log("   ✅ Bitbucket MCP server registered and tools available");
-      if (blockedTools && blockedTools.length > 0) {
-        console.log(`   🚫 Blocked tools: ${blockedTools.join(", ")}`);
-      }
-    } catch (error) {
-      throw new MCPServerError(
-        `Failed to setup Bitbucket MCP server: ${(error as Error).message}`,
-      );
+  /** Deterministic serialization (sorted keys) for definition comparison. */
+  private static stableStringify(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((v) => MCPServerManager.stableStringify(v)).join(",")}]`;
     }
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map(
+          (k) =>
+            `${JSON.stringify(k)}:${MCPServerManager.stableStringify((value as Record<string, unknown>)[k])}`,
+        )
+        .join(",")}}`;
+    }
+    return JSON.stringify(value) ?? "undefined";
   }
 
-  /**
-   * Setup GitHub MCP server.
-   *
-   * Registers GitHub's hosted REMOTE HTTP MCP server via NeuroLink, mirroring
-   * Curator's proven pattern (transport: "http" + Bearer auth header). The old
-   * `npx @github/github-mcp-server` package does not exist, so stdio is only
-   * supported for an explicitly-configured self-hosted / Docker server.
-   *
-   * URL + transport are config-driven (`mcpServers.github.{url,transport,command,args}`),
-   * defaulting to the remote HTTP endpoint.
-   */
-  private async setupGitHubMCP(
+  /** Servers from config that are enabled and match the mode + role. */
+  private selectServers(
+    config: MCPServersConfig,
+    mode: McpServerMode,
+    role: McpServerRole,
+    env: NodeJS.ProcessEnv,
+  ): Array<{ id: string; definition: McpServerDefinition }> {
+    const substituted = McpRegistry.substituteAll(config.servers ?? {}, env);
+    return Object.entries(substituted)
+      .filter(([, def]) => def.enabled !== false)
+      .filter(([, def]) => !def.modes || def.modes.includes(mode))
+      .filter(([, def]) => !def.roles || def.roles.includes(role))
+      .map(([id, definition]) => ({ id, definition }));
+  }
+
+  private async registerOne(
     neurolink: any,
-    githubConfig?: GitHubConfig,
+    id: string,
+    definition: McpServerDefinition,
   ): Promise<void> {
     try {
-      console.log("   🔧 Registering GitHub MCP server...");
-
-      // Be robust to a possibly-undefined config: default URL + transport +
-      // blockedTools so registration still works if the caller passes nothing.
-      const transport = githubConfig?.transport ?? "http";
-      // ADDITIVE, not replacing: always enforce the default write-block denylist
-      // and union it with any user-provided entries, so a user-supplied
-      // `blockedTools` can only EXTEND the denylist — never un-block write tools
-      // like push_files / create_or_update_file.
-      const blockedTools = Array.from(
-        new Set([
-          ...DEFAULT_GITHUB_BLOCKED_TOOLS,
-          ...(githubConfig?.blockedTools ?? []),
-        ]),
-      );
-
-      // An explicit token is REQUIRED. gh CLI auth (hosts.yml) cannot supply a
-      // Bearer token for the remote HTTP transport, so we do not accept it as a
-      // substitute. The hosted endpoint (api.githubcopilot.com) expects a real
-      // GitHub PAT — the ephemeral Actions GITHUB_TOKEN may be rejected. Token
-      // resolution order mirrors Curator's proven setup (GITHUB_ACCESS_TOKEN):
-      //   GITHUB_TOKEN → GH_TOKEN → GITHUB_PERSONAL_ACCESS_TOKEN → GITHUB_ACCESS_TOKEN.
-      const ghToken =
-        process.env.GITHUB_TOKEN ||
-        process.env.GH_TOKEN ||
-        process.env.GITHUB_PERSONAL_ACCESS_TOKEN ||
-        process.env.GITHUB_ACCESS_TOKEN;
-
-      if (!ghToken) {
-        throw new MCPServerError(
-          "Missing GitHub authentication: set GITHUB_TOKEN (or GH_TOKEN / " +
-            "GITHUB_PERSONAL_ACCESS_TOKEN / GITHUB_ACCESS_TOKEN). The remote HTTP " +
-            "transport requires an explicit GitHub PAT; 'gh auth login' alone is " +
-            "not sufficient.",
+      this.warnOnUnresolvedAuth(id, definition);
+      const result: AddServerResult | undefined =
+        await neurolink.addExternalMCPServer(
+          id,
+          this.toNeuroLinkServerConfig(definition),
         );
-      }
 
-      const config: GitHubMCPRegistration =
-        transport === "stdio"
-          ? this.buildGitHubStdioConfig(githubConfig, ghToken, blockedTools)
-          : this.buildGitHubHttpConfig(githubConfig, ghToken, blockedTools);
-
-      await neurolink.addExternalMCPServer("github", config);
-
-      // The remote HTTP endpoint (api.githubcopilot.com) connects asynchronously
-      // — TLS handshake + auth + tool discovery take ~3-4s, and NeuroLink may only
-      // finish discovery lazily on the first generate() call. Poll briefly for a
-      // healthy status, but for the HTTP transport DO NOT hard-fail if it is not
-      // yet "connected": the tools are resolved when the review runs (this mirrors
-      // Curator's proven pattern). For a local stdio server we keep the strict
-      // check, since a local process should connect promptly.
-      const ghServer = await this.waitForMCPServer(neurolink, "github", 12000);
-      const connected =
-        ghServer?.status === "connected" && (ghServer?.tools?.length ?? 0) > 0;
-
-      if (transport === "stdio" && !connected) {
-        throw new MCPServerError(
-          `GitHub MCP server registered but not connected (status: ${ghServer?.status ?? "unknown"}, tools: ${ghServer?.tools?.length ?? 0}). Possible startup timeout.`,
-        );
-      }
-
-      if (connected) {
-        console.log(
-          `   ✅ GitHub MCP server registered and tools available (transport: ${transport})`,
-        );
-      } else {
+      // addExternalMCPServer reports failure via the result instead of
+      // throwing. Not marking the server registered lets a later setup call
+      // retry it.
+      if (result?.success === false) {
         console.warn(
-          `   ⚠️  GitHub MCP server registered but not yet reporting connected ` +
-            `(status: ${ghServer?.status ?? "unknown"}, tools: ${ghServer?.tools?.length ?? 0}). ` +
-            `Remote tools are discovered on first use; continuing.`,
+          `   ⚠️  Failed to register MCP server "${id}": ${result.error ?? "unknown error"}`,
         );
-      }
-      if (transport === "http") {
-        console.log(`   🌐 Remote endpoint: ${config.url}`);
-      }
-      console.log(`   🚫 Blocked write tools: ${blockedTools.join(", ")}`);
-    } catch (error) {
-      throw new MCPServerError(
-        `Failed to setup GitHub MCP server: ${(error as Error).message}`,
-      );
-    }
-  }
-
-  /**
-   * Poll {@link listMCPServers} until the named server reports "connected" with
-   * at least one tool, or the timeout elapses. Returns the last-seen server
-   * entry (possibly not-yet-connected) so the caller can decide how to proceed.
-   *
-   * Bounded by `timeoutMs` via the loop condition — it cannot run indefinitely.
-   */
-  private async waitForMCPServer(
-    neurolink: any,
-    name: string,
-    timeoutMs: number,
-  ): Promise<MCPServerStatus | undefined> {
-    const deadline = Date.now() + timeoutMs;
-    let last: MCPServerStatus | undefined;
-    while (Date.now() < deadline) {
-      const servers: MCPServerStatus[] = await neurolink
-        .listMCPServers()
-        .catch(() => []);
-      last = (servers || []).find((server) => server.name === name);
-      if (last?.status === "connected" && (last.tools?.length ?? 0) > 0) {
-        return last;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-    return last;
-  }
-
-  /**
-   * Build the remote HTTP GitHub MCP registration (default path).
-   * A Bearer token is required for the hosted endpoint.
-   */
-  private buildGitHubHttpConfig(
-    githubConfig: GitHubConfig | undefined,
-    ghToken: string | undefined,
-    blockedTools: string[],
-  ): GitHubMCPRegistration {
-    if (!ghToken) {
-      throw new MCPServerError(
-        "GitHub remote HTTP MCP server requires a token. Set GITHUB_TOKEN " +
-          "(or GH_TOKEN / GITHUB_PERSONAL_ACCESS_TOKEN / GITHUB_ACCESS_TOKEN); " +
-          "'gh auth login' alone is not sufficient for the remote transport.",
-      );
-    }
-
-    // The hosted endpoint is slow to connect (~3-4s TLS handshake + remote auth);
-    // a generous timeout + retry/backoff prevents spurious "not connected"
-    // failures. Values mirror Curator's production GitHub MCP registration.
-    return {
-      transport: "http",
-      url: githubConfig?.url ?? DEFAULT_GITHUB_MCP_URL,
-      headers: {
-        Authorization: `Bearer ${ghToken}`,
-      },
-      blockedTools,
-      timeout: 30000,
-      retryConfig: {
-        maxAttempts: 3,
-        initialDelay: 1000,
-        maxDelay: 10000,
-        backoffMultiplier: 2,
-      },
-    };
-  }
-
-  /**
-   * Build a self-hosted / Docker stdio GitHub MCP registration.
-   * Only used when `mcpServers.github.transport === "stdio"`; requires `command`.
-   */
-  private buildGitHubStdioConfig(
-    githubConfig: GitHubConfig | undefined,
-    ghToken: string | undefined,
-    blockedTools: string[],
-  ): GitHubMCPRegistration {
-    const command = githubConfig?.command;
-    if (!command) {
-      throw new MCPServerError(
-        "GitHub stdio transport requires 'mcpServers.github.command' " +
-          "(e.g. a self-hosted/Docker GitHub MCP server binary).",
-      );
-    }
-
-    return {
-      transport: "stdio",
-      command,
-      args: githubConfig?.args ?? [],
-      env: ghToken
-        ? {
-            GITHUB_PERSONAL_ACCESS_TOKEN: ghToken,
-            GITHUB_TOKEN: ghToken,
-          }
-        : undefined,
-      blockedTools,
-    };
-  }
-
-  /**
-   * Setup Jira MCP server (hardcoded, optionally enabled)
-   */
-  private async setupJiraMCP(
-    neurolink: any,
-    blockedTools?: string[],
-  ): Promise<void> {
-    try {
-      console.log("   🔧 Registering Jira MCP server...");
-
-      // Validate required Jira environment variables
-      const jiraEmail = process.env.JIRA_EMAIL;
-      const jiraToken = process.env.JIRA_API_TOKEN;
-      const jiraBaseUrl = process.env.JIRA_BASE_URL;
-
-      if (!jiraEmail || !jiraToken || !jiraBaseUrl) {
-        console.warn(
-          "   ⚠️  Missing Jira environment variables (JIRA_EMAIL, JIRA_API_TOKEN, or JIRA_BASE_URL)",
-        );
-        console.warn("   Skipping Jira integration...");
         return;
       }
 
-      // Use the locally installed binary (same reason as Bitbucket above).
-      const jiraBin = join(process.cwd(), "node_modules/.bin/jira-mcp-server");
+      if (definition.allowedTools && definition.allowedTools.length > 0) {
+        await this.enforceAllowlist(neurolink, id, definition);
+      }
+      this.registered.set(id, definition);
 
-      await neurolink.addExternalMCPServer("jira", {
-        command: jiraBin,
-        args: [],
-        transport: "stdio",
-        env: {
-          JIRA_EMAIL: process.env.JIRA_EMAIL,
-          JIRA_API_TOKEN: process.env.JIRA_API_TOKEN,
-          JIRA_BASE_URL: process.env.JIRA_BASE_URL,
-        },
-        blockedTools: blockedTools || [],
-      });
-
-      console.log("   ✅ Jira MCP server registered and tools available");
-      if (blockedTools && blockedTools.length > 0) {
-        console.log(`   🚫 Blocked tools: ${blockedTools.join(", ")}`);
+      const toolsDiscovered = result?.metadata?.toolsDiscovered;
+      if (toolsDiscovered === undefined) {
+        console.log(`   ✅ ${id} registered`);
+      } else if (toolsDiscovered > 0) {
+        console.log(`   ✅ ${id} registered (${toolsDiscovered} tools)`);
+      } else {
+        console.warn(
+          `   ⚠️  ${id} registered but advertised 0 tools — ` +
+            `check the server's credentials/scopes and its url/command.`,
+        );
       }
     } catch (error) {
-      // Jira is optional, so we warn instead of throwing
       console.warn(
-        `   ⚠️  Failed to setup Jira MCP server: ${(error as Error).message}`,
+        `   ⚠️  Failed to register MCP server "${id}": ${(error as Error).message}`,
       );
-      console.warn("   Continuing without Jira integration...");
     }
   }
 
   /**
-   * MCP preflight diagnostics after registration.
+   * Enforce a per-server fail-closed allowlist from config: discover the tools
+   * the server actually advertises and re-register it with everything NOT on
+   * `allowedTools` added to its denylist. Tool names come from the server +
+   * config only — nothing is hardcoded.
    */
+  private async enforceAllowlist(
+    neurolink: any,
+    id: string,
+    def: McpServerDefinition,
+  ): Promise<void> {
+    const allowed = new Set(
+      (def.allowedTools ?? []).map((n) => normalizeToolName(n)),
+    );
+    // Fail closed: the allowlist can only be enforced by discovering what the
+    // server advertises. A NeuroLink without that API must not silently expose
+    // every tool — remove the unrestricted registration before bailing.
+    if (typeof neurolink.getExternalMCPServerTools !== "function") {
+      await neurolink.removeExternalMCPServer?.(id)?.catch?.(() => undefined);
+      throw new Error(
+        `allowedTools is set but this NeuroLink version cannot enumerate server tools`,
+      );
+    }
+    // Await the discovery result: the current NeuroLink API is synchronous
+    // (`getExternalMCPServerTools(serverId): ExternalMCPToolInfo[]`), but if a
+    // future version makes it async, mapping over a bare Promise would yield an
+    // empty list and the fail-closed branch below would silently remove every
+    // allowlisted server. Promise.resolve() is a no-op for the sync case.
+    const discoveredRaw = await Promise.resolve(
+      neurolink.getExternalMCPServerTools(id) || [],
+    );
+    const discovered: string[] = (
+      Array.isArray(discoveredRaw) ? discoveredRaw : []
+    )
+      .map((tool: any) => tool?.name)
+      .filter((name: unknown): name is string => typeof name === "string");
+    // Fail closed when discovery came back empty: we cannot distinguish "server
+    // has no tools" from "tools not discovered yet", and an unenforced
+    // allowlist would expose whatever appears later. Remove the registration
+    // and surface the error instead of continuing unrestricted.
+    if (discovered.length === 0) {
+      await neurolink.removeExternalMCPServer(id).catch(() => undefined);
+      throw new Error(
+        `allowedTools is set but the server advertised no tools to enforce it against`,
+      );
+    }
+    const toBlock = discovered.filter(
+      (name) => !allowed.has(normalizeToolName(name)),
+    );
+    if (toBlock.length === 0) {
+      return;
+    }
+    const blockedTools = Array.from(
+      new Set([...(def.blockedTools ?? []), ...toBlock]),
+    );
+    await neurolink.removeExternalMCPServer(id).catch(() => undefined);
+    const result: AddServerResult | undefined =
+      await neurolink.addExternalMCPServer(id, {
+        ...this.toNeuroLinkServerConfig(def),
+        blockedTools,
+      });
+    if (result?.success === false) {
+      throw new Error(
+        `re-registration with enforced allowlist failed: ${result.error ?? "unknown error"}`,
+      );
+    }
+    console.log(
+      `   🔒 ${id}: allowlist enforced (${allowed.size} allowed, ${toBlock.length} blocked)`,
+    );
+  }
+
+  /**
+   * Loudly flag a server whose auth header/env resolved to an EMPTY value — the
+   * usual cause is an unset/misnamed token env var (e.g. `${GITHUB_TOKEN}` in a
+   * composite action where the reserved name did not carry the secret). By this
+   * point `${VAR}` placeholders are already substituted, so an empty/`Bearer `-only
+   * value means the secret never arrived. Without this the failure is a cryptic
+   * remote "missing required Authorization header" much later.
+   */
+  private warnOnUnresolvedAuth(id: string, def: McpServerDefinition): void {
+    const looksEmpty = (v: string): boolean => {
+      const t = v.trim();
+      return (
+        t.length === 0 ||
+        /^(bearer|token|basic)$/i.test(t) ||
+        // "Bearer" / "token" with an empty value after the scheme
+        /^(bearer|token|basic)\s*$/i.test(t) ||
+        t.endsWith("${") ||
+        /\$\{[^}]+\}/.test(t) // an unresolved ${VAR} placeholder survived
+      );
+    };
+    const suspect = [
+      ...Object.entries(def.headers ?? {}),
+      ...Object.entries(def.env ?? {}),
+    ].filter(
+      ([k, v]) =>
+        typeof v === "string" &&
+        /^(authorization|.*token.*|.*api[_-]?key.*)$/i.test(k) &&
+        looksEmpty(v),
+    );
+    for (const [k] of suspect) {
+      console.warn(
+        `   ⚠️  MCP server "${id}": "${k}" resolved to an EMPTY/unresolved value — ` +
+          `the token env var is unset or misnamed. Set the secret and reference it ` +
+          `via a NON-reserved env name (avoid \${GITHUB_TOKEN} inside composite actions).`,
+      );
+    }
+  }
+
+  /**
+   * Map a declarative {@link McpServerDefinition} to NeuroLink's
+   * `addExternalMCPServer` config. Transport defaults to stdio unless a `url`
+   * is present (then http), matching NeuroLink's own inference.
+   *
+   * Pass-through by default: every key except the Yama-routing ones
+   * (`enabled`, `roles`, `modes`, `allowedTools`) is forwarded to NeuroLink
+   * verbatim — `timeout`, `retryConfig`, `auth`, `httpOptions`,
+   * `rateLimiting`, and any option a future NeuroLink adds — so any MCP
+   * server NeuroLink supports is configurable without a Yama code change.
+   *
+   * Transport-aware: an http/sse/ws server carries ONLY url/headers, and a
+   * stdio server ONLY command/args/env — irrelevant keys are omitted entirely
+   * (not passed as `undefined`), so a remote server is never handed stray
+   * process-launch fields that can confuse the transport. Mirrors the proven
+   * hosted-GitHub registration shape.
+   */
+  private toNeuroLinkServerConfig(
+    def: McpServerDefinition,
+  ): Record<string, unknown> {
+    const transport = def.transport ?? (def.url ? "http" : "stdio");
+    const {
+      enabled: _enabled,
+      roles: _roles,
+      modes: _modes,
+      allowedTools: _allowedTools,
+      transport: _transport,
+      command,
+      args,
+      env,
+      url,
+      headers,
+      blockedTools,
+      ...passthrough
+    } = def;
+
+    const common: Record<string, unknown> = {
+      ...passthrough,
+      transport,
+      blockedTools: blockedTools ?? [],
+    };
+
+    if (transport === "stdio") {
+      return {
+        ...common,
+        command,
+        args: args ?? [],
+        ...(env ? { env } : {}),
+      };
+    }
+
+    // Remote transports (http/sse/websocket): url + optional headers only.
+    return {
+      ...common,
+      url,
+      ...(headers ? { headers } : {}),
+    };
+  }
+
+  /** MCP preflight diagnostics after registration. */
   private async logDiagnostics(neurolink: any): Promise<void> {
     try {
       const status = await neurolink.getMCPStatus();

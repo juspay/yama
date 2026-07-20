@@ -8,7 +8,7 @@ import {
   detectProvider,
   type VCSProvider,
 } from "../../src/v2/utils/ProviderDetector.js";
-import type { ReviewRequest } from "../../src/v2/types/v2.types.js";
+import type { ReviewRequest } from "../../src/v2/types/index.js";
 
 describe("ProviderDetector", () => {
   // ============================================================================

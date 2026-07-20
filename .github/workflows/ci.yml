@@ -11,19 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20, 22]
+        node-version: [20, 22, 26]
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup PNPM
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
-          version: 9
+          version: 10.14.0
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: "pnpm"
@@ -57,17 +57,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup PNPM
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
-          version: 9
+          version: 10.14.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          node-version: "26"
           cache: "pnpm"
 
       - name: Install dependencies
@@ -86,19 +86,19 @@ jobs:
     name: 🛡️ Code Quality & Security Gate
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup PNPM
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
-          version: 9
+          version: 10.14.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          node-version: "26"
           cache: "pnpm"
 
       - name: Install dependencies
@@ -110,14 +110,20 @@ jobs:
           pnpm run validate
 
       - name: 📝 Commit Message Validation
+        # Pass attacker-controllable PR context through env vars, never interpolated
+        # into the shell (a branch name or ref can carry shell metacharacters).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           echo "📝 Validating commit message format..."
           # For PRs, validate the actual PR head commit, not the merge commit
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "PR Event: Getting head commit from ${{ github.event.pull_request.head.ref }}"
-            echo "Head SHA: ${{ github.event.pull_request.head.sha }}"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "PR Event: Getting head commit from $HEAD_REF"
+            echo "Head SHA: $HEAD_SHA"
             # Use GitHub context to get the commit message directly
-            COMMIT_MSG=$(git log -1 --pretty=format:"%s" ${{ github.event.pull_request.head.sha }})
+            COMMIT_MSG=$(git log -1 --pretty=format:"%s" "$HEAD_SHA")
             echo "Validating PR head commit: $COMMIT_MSG"
           else
             COMMIT_MSG=$(git log -1 --pretty=format:"%s")
@@ -134,6 +140,12 @@ jobs:
         run: |
           echo "🔒 Running security checks..."
           pnpm run validate:security
+
+      - name: 🛡️ Dependency Audit (production)
+        run: |
+          echo "🛡️ Auditing production dependencies (advisory — see docs/dependency-audit.md)..."
+          pnpm audit --prod || true
+        continue-on-error: true
 
       - name: 📊 ESLint Quality Report
         run: |

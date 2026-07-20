@@ -6,19 +6,7 @@
 import { existsSync } from "fs";
 import { resolve } from "path";
 import { spawnSync } from "child_process";
-import { LocalReviewRequest } from "../types/v2.types.js";
-
-export interface LocalDiffContext {
-  repoPath: string;
-  diffSource: "staged" | "uncommitted" | "range";
-  baseRef?: string;
-  headRef?: string;
-  changedFiles: string[];
-  additions: number;
-  deletions: number;
-  diff: string;
-  truncated: boolean;
-}
+import { LocalDiffContext, LocalReviewRequest } from "../types/index.js";
 
 export class LocalDiffSource {
   getDiffContext(request: LocalReviewRequest): LocalDiffContext {

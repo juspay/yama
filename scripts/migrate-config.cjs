@@ -133,7 +133,9 @@ class MigrationReport {
     }
 
     if (this.transformed.length > 0) {
-      console.log("\n⚠️  TRANSFORMED FIELDS (" + this.transformed.length + "):");
+      console.log(
+        "\n⚠️  TRANSFORMED FIELDS (" + this.transformed.length + "):",
+      );
       this.transformed.forEach(({ v1Path, v2Path, reason }) => {
         console.log(`   ${v1Path} → ${v2Path}`);
         console.log(`      └─ ${reason}`);
@@ -231,7 +233,8 @@ function migrateAIConfig(v1Config, report) {
   if (v1AI.model) report.addMigrated("providers.ai.model", "ai.model");
   if (v1AI.temperature !== undefined)
     report.addMigrated("providers.ai.temperature", "ai.temperature");
-  if (v1AI.maxTokens) report.addMigrated("providers.ai.maxTokens", "ai.maxTokens");
+  if (v1AI.maxTokens)
+    report.addMigrated("providers.ai.maxTokens", "ai.maxTokens");
   if (v1AI.timeout) report.addMigrated("providers.ai.timeout", "ai.timeout");
   if (v1AI.retryAttempts)
     report.addMigrated("providers.ai.retryAttempts", "ai.retryAttempts");
@@ -245,7 +248,10 @@ function migrateAIConfig(v1Config, report) {
 
   // Report dropped
   if (v1AI.enableFallback !== undefined) {
-    report.addDropped("providers.ai.enableFallback", "V2 uses automatic retry instead");
+    report.addDropped(
+      "providers.ai.enableFallback",
+      "V2 uses automatic retry instead",
+    );
   }
 
   return v2AI;
@@ -267,7 +273,10 @@ function migrateReviewConfig(v1Config, report) {
 
   const v2Review = {
     enabled: v1Review.enabled ?? true,
-    workflowInstructions: extractWorkflowInstructions(v1Review.systemPrompt, report),
+    workflowInstructions: extractWorkflowInstructions(
+      v1Review.systemPrompt,
+      report,
+    ),
     focusAreas: extractFocusAreas(v1Review, report),
     blockingCriteria: getDefaultBlockingCriteria(),
     excludePatterns: v1Review.excludePatterns || [
@@ -296,9 +305,15 @@ function migrateReviewConfig(v1Config, report) {
   if (v1Review.enabled !== undefined)
     report.addMigrated("features.codeReview.enabled", "review.enabled");
   if (v1Review.excludePatterns)
-    report.addMigrated("features.codeReview.excludePatterns", "review.excludePatterns");
+    report.addMigrated(
+      "features.codeReview.excludePatterns",
+      "review.excludePatterns",
+    );
   if (v1Review.contextLines)
-    report.addMigrated("features.codeReview.contextLines", "review.contextLines");
+    report.addMigrated(
+      "features.codeReview.contextLines",
+      "review.contextLines",
+    );
 
   // Report new defaults
   report.addNewDefault("review.blockingCriteria", "(V2 feature)");
@@ -310,32 +325,32 @@ function migrateReviewConfig(v1Config, report) {
   if (v1Review.batchProcessing) {
     report.addDropped(
       "features.codeReview.batchProcessing",
-      "V2 AI handles batching autonomously"
+      "V2 AI handles batching autonomously",
     );
   }
   if (v1Review.multiInstance) {
     report.addDropped(
       "features.codeReview.multiInstance",
-      "V2 uses single autonomous agent model"
+      "V2 uses single autonomous agent model",
     );
   }
   if (v1Review.semanticDeduplication) {
     report.addDropped(
       "features.codeReview.semanticDeduplication",
-      "V2 AI deduplicates naturally"
+      "V2 AI deduplicates naturally",
     );
   }
   if (v1Review.severityLevels) {
     report.addDropped(
       "features.codeReview.severityLevels",
-      "Hardcoded in V2 (CRITICAL, MAJOR, MINOR, SUGGESTION)"
+      "Hardcoded in V2 (CRITICAL, MAJOR, MINOR, SUGGESTION)",
     );
   }
   if (v1Review.categories) {
     report.addTransformed(
       "features.codeReview.categories",
       "review.focusAreas",
-      "Merged into focusAreas descriptions"
+      "Merged into focusAreas descriptions",
     );
   }
 
@@ -350,7 +365,7 @@ function extractWorkflowInstructions(systemPrompt, report) {
   report.addTransformed(
     "features.codeReview.systemPrompt",
     "review.workflowInstructions",
-    "Long system prompt converted to workflow instructions"
+    "Long system prompt converted to workflow instructions",
   );
 
   // Extract a shorter workflow instruction from the long system prompt
@@ -389,7 +404,7 @@ function extractFocusAreas(v1Review, report) {
     report.addTransformed(
       "features.codeReview.focusAreas",
       "review.focusAreas",
-      "Converted to structured format with priority and description"
+      "Converted to structured format with priority and description",
     );
   }
 
@@ -491,11 +506,6 @@ function getDefaultBlockingCriteria() {
       action: "BLOCK",
       reason: "Too many significant bugs/performance issues",
     },
-    {
-      condition: "Jira requirement coverage < 70% (only when Jira is enabled)",
-      action: "BLOCK",
-      reason: "Incomplete implementation of requirements",
-    },
   ];
 }
 
@@ -514,24 +524,24 @@ function migrateEnhancementConfig(v1Config, report) {
   if (v1Enh.enabled !== undefined)
     report.addMigrated(
       "features.descriptionEnhancement.enabled",
-      "descriptionEnhancement.enabled"
+      "descriptionEnhancement.enabled",
     );
   if (v1Enh.preserveContent !== undefined)
     report.addMigrated(
       "features.descriptionEnhancement.preserveContent",
-      "descriptionEnhancement.preserveContent"
+      "descriptionEnhancement.preserveContent",
     );
   if (v1Enh.autoFormat !== undefined)
     report.addMigrated(
       "features.descriptionEnhancement.autoFormat",
-      "descriptionEnhancement.autoFormat"
+      "descriptionEnhancement.autoFormat",
     );
 
   // Report dropped
   if (v1Enh.outputTemplate) {
     report.addDropped(
       "features.descriptionEnhancement.outputTemplate",
-      "V2 generates structure from requiredSections"
+      "V2 generates structure from requiredSections",
     );
   }
 
@@ -543,11 +553,11 @@ function extractEnhancementInstructions(v1Enh, report) {
     report.addTransformed(
       "features.descriptionEnhancement.systemPrompt",
       "descriptionEnhancement.instructions",
-      "Simplified to workflow instructions"
+      "Simplified to workflow instructions",
     );
   }
 
-  return `Enhance the PR description using Jira requirements and diff analysis.
+  return `Enhance the PR description using diff analysis.
 Generate comprehensive, well-structured description with all required sections.`;
 }
 
@@ -559,14 +569,15 @@ function migrateRequiredSections(v1Sections, report) {
   report.addTransformed(
     "features.descriptionEnhancement.requiredSections",
     "descriptionEnhancement.requiredSections",
-    "Added description field to each section"
+    "Added description field to each section",
   );
 
   return v1Sections.map((section) => ({
     key: section.key || section.name?.toLowerCase().replace(/\s+/g, "_"),
     name: addEmojiToSection(section.name || section.key),
     required: section.required ?? true,
-    description: section.description || getDefaultSectionDescription(section.key),
+    description:
+      section.description || getDefaultSectionDescription(section.key),
   }));
 }
 
@@ -578,7 +589,6 @@ function addEmojiToSection(name) {
     testcases: "🧪 Test Cases",
     testing: "🧪 Testing Strategy",
     config_changes: "⚙️ Config Changes",
-    jira: "🎫 Jira Reference",
     impact: "⚡ Impact & Considerations",
   };
 
@@ -594,7 +604,6 @@ function getDefaultSectionDescription(key) {
     testcases: "Test cases and scenarios to validate",
     testing: "How changes were tested and validation approach",
     config_changes: "CAC or service configuration changes",
-    jira: "Link to Jira ticket and requirement coverage",
     impact: "Business impact, performance implications, breaking changes",
   };
 
@@ -614,12 +623,6 @@ function getDefaultRequiredSections() {
       name: "🔧 Changes Made",
       required: true,
       description: "Specific technical changes with file references",
-    },
-    {
-      key: "jira",
-      name: "🎫 Jira Reference",
-      required: false,
-      description: "Link to Jira ticket and requirement coverage",
     },
     {
       key: "testing",
@@ -654,7 +657,7 @@ function migrateMonitoringConfig(v1Config, report) {
     report.addTransformed(
       "reporting.formats",
       "monitoring.exportFormat",
-      "Only first format used in V2"
+      "Only first format used in V2",
     );
   }
 
@@ -694,7 +697,10 @@ function migratePerformanceConfig(v1Config, report) {
 
   // Report dropped V1 performance settings
   if (v1Perf.batch) {
-    report.addDropped("performance.batch", "V2 AI handles batching autonomously");
+    report.addDropped(
+      "performance.batch",
+      "V2 AI handles batching autonomously",
+    );
   }
   if (v1Perf.optimization) {
     report.addDropped("performance.optimization", "V2 uses MCP optimizations");
@@ -714,10 +720,10 @@ function migrateGitConfig(v1Config, report) {
   if (v1Git.platform || v1Git.credentials) {
     report.addDropped(
       "providers.git",
-      "V2 uses MCP servers (configured via environment variables)"
+      "V2 uses MCP servers (configured via environment variables)",
     );
     report.addWarning(
-      "Git credentials should be set via BITBUCKET_USERNAME, BITBUCKET_TOKEN, and BITBUCKET_BASE_URL env vars"
+      "Git credentials should be set via BITBUCKET_USERNAME, BITBUCKET_TOKEN, and BITBUCKET_BASE_URL env vars",
     );
   }
 }
@@ -729,7 +735,7 @@ function migrateRulesConfig(v1Config, report) {
     report.addTransformed(
       "rules",
       "projectStandards.additionalFocusAreas",
-      "Custom rules can be added as focus areas in V2"
+      "Custom rules can be added as focus areas in V2",
     );
   }
 }
@@ -744,7 +750,7 @@ function migrateSecurityScanConfig(v1Config, report) {
   if (v1Config.features?.securityScan) {
     report.addDropped(
       "features.securityScan",
-      "V2 AI performs security analysis as part of review"
+      "V2 AI performs security analysis as part of review",
     );
   }
 }
@@ -754,7 +760,7 @@ function migrateAnalyticsConfig(v1Config, report) {
     report.addTransformed(
       "features.analytics",
       "monitoring",
-      "Analytics merged into monitoring in V2"
+      "Analytics merged into monitoring in V2",
     );
   }
 }
@@ -780,20 +786,14 @@ function generateV2Config(v1Config) {
 
     ai: migrateAIConfig(v1Config, report),
 
-    mcpServers: {
-      jira: {
-        enabled: false,
-      },
-    },
-
     review: migrateReviewConfig(v1Config, report),
 
     descriptionEnhancement: migrateEnhancementConfig(v1Config, report),
 
     memoryBank: {
       enabled: true,
-      path: "memory-bank",
-      fallbackPaths: ["docs/memory-bank", ".memory-bank"],
+      path: ".yama/standards",
+      fallbackPaths: ["memory-bank", "docs/memory-bank", ".memory-bank"],
       standardFiles: [
         "project-overview.md",
         "architecture.md",
@@ -876,15 +876,23 @@ function generateYamlWithComments(config) {
 
 function getSectionComment(key) {
   const comments = {
-    display: "============================================================================\nDisplay & Streaming Configuration\n============================================================================",
+    display:
+      "============================================================================\nDisplay & Streaming Configuration\n============================================================================",
     ai: "============================================================================\nAI Configuration\n============================================================================",
-    mcpServers: "============================================================================\nMCP Servers Configuration\n============================================================================",
-    review: "============================================================================\nReview Configuration\n============================================================================",
-    descriptionEnhancement: "============================================================================\nPR Description Enhancement\n============================================================================",
-    memoryBank: "============================================================================\nMemory Bank & Project Context\n============================================================================",
-    projectStandards: "============================================================================\nProject-Specific Standards\n============================================================================",
-    monitoring: "============================================================================\nMonitoring & Analytics\n============================================================================",
-    performance: "============================================================================\nPerformance & Cost Controls\n============================================================================",
+    mcpServers:
+      "============================================================================\nMCP Servers Configuration\n============================================================================",
+    review:
+      "============================================================================\nReview Configuration\n============================================================================",
+    descriptionEnhancement:
+      "============================================================================\nPR Description Enhancement\n============================================================================",
+    memoryBank:
+      "============================================================================\nMemory Bank & Project Context\n============================================================================",
+    projectStandards:
+      "============================================================================\nProject-Specific Standards\n============================================================================",
+    monitoring:
+      "============================================================================\nMonitoring & Analytics\n============================================================================",
+    performance:
+      "============================================================================\nPerformance & Cost Controls\n============================================================================",
   };
 
   return comments[key] || null;
@@ -927,7 +935,9 @@ function main() {
       }
     }
 
-    console.log("\nUsage: node scripts/migrate-config.cjs --input <v1-config-file>");
+    console.log(
+      "\nUsage: node scripts/migrate-config.cjs --input <v1-config-file>",
+    );
     process.exit(1);
   }
 
@@ -962,9 +972,13 @@ function main() {
     console.log("\n🎉 Migration complete!");
     console.log("\nNext steps:");
     console.log("   1. Review the generated config");
-    console.log("   2. Set environment variables for MCP servers:");
-    console.log("      - BITBUCKET_USERNAME, BITBUCKET_TOKEN, BITBUCKET_BASE_URL");
-    console.log("      - JIRA_EMAIL, JIRA_API_TOKEN, JIRA_BASE_URL (if using Jira)");
+    console.log(
+      "   2. Set environment variables for the MCP servers you enabled:",
+    );
+    console.log("      - GitHub: GITHUB_TOKEN");
+    console.log(
+      "      - Bitbucket: BITBUCKET_USERNAME, BITBUCKET_TOKEN, BITBUCKET_BASE_URL",
+    );
     console.log("   3. Test with: npx yama review --dry-run");
   }
 }

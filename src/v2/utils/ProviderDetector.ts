@@ -3,9 +3,7 @@
  * Automatically detects GitHub vs Bitbucket from environment, CLI params, or URLs
  */
 
-import type { ReviewRequest } from "../types/v2.types.js";
-
-export type VCSProvider = "github" | "bitbucket";
+import type { ReviewRequest, VCSProvider } from "../types/index.js";
 
 export class ProviderDetector {
   /**

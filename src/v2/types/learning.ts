@@ -3,7 +3,7 @@
  * Type definitions for the knowledge base and learning extraction system
  */
 
-import type { VCSProviderName } from "../providers/ProviderToolset.js";
+import type { VCSProvider } from "./config.js";
 
 // ============================================================================
 // Learning Categories
@@ -38,7 +38,7 @@ export const CATEGORY_SECTION_NAMES: Record<LearningCategory, string> = {
 /**
  * A single learning extracted from PR feedback
  */
-export interface ExtractedLearning {
+export type ExtractedLearning = {
   /** Unique hash for deduplication */
   id: string;
   /** Category of the learning */
@@ -56,7 +56,7 @@ export interface ExtractedLearning {
     prId: number;
     timestamp: string;
   };
-}
+};
 
 // ============================================================================
 // Knowledge Base Structure
@@ -65,27 +65,27 @@ export interface ExtractedLearning {
 /**
  * Metadata section of the knowledge base
  */
-export interface KnowledgeBaseMetadata {
+export type KnowledgeBaseMetadata = {
   lastUpdated: string;
   totalLearnings: number;
   lastSummarization?: string;
-}
+};
 
 /**
  * A section in the knowledge base (maps to a category)
  */
-export interface KnowledgeBaseSection {
+export type KnowledgeBaseSection = {
   category: LearningCategory;
   subcategories: Map<string, string[]>; // subcategory -> learnings
-}
+};
 
 /**
  * Full parsed knowledge base structure
  */
-export interface KnowledgeBase {
+export type KnowledgeBase = {
   metadata: KnowledgeBaseMetadata;
   sections: Map<LearningCategory, KnowledgeBaseSection>;
-}
+};
 
 // ============================================================================
 // Learn Command Request/Result
@@ -102,11 +102,11 @@ export interface KnowledgeBase {
  */
 export type LearnCommitMode = "kb" | "memory" | "all";
 
-export interface LearnRequest {
+export type LearnRequest = {
   workspace: string;
   repository: string;
   pullRequestId: number;
-  provider?: VCSProviderName; // "github" | "bitbucket" (defaults to "bitbucket" for backward compatibility)
+  provider?: VCSProvider; // "github" | "bitbucket" (defaults to "bitbucket" for backward compatibility)
   dryRun?: boolean;
   /** @deprecated Use commitMode instead */
   commit?: boolean;
@@ -115,12 +115,12 @@ export interface LearnRequest {
   summarize?: boolean;
   outputPath?: string;
   outputFormat?: "md" | "json";
-}
+};
 
 /**
  * Result from the learn command
  */
-export interface LearnResult {
+export type LearnResult = {
   success: boolean;
   prId: number;
   learningsFound: number;
@@ -131,7 +131,7 @@ export interface LearnResult {
   committed?: boolean;
   summarized?: boolean;
   error?: string;
-}
+};
 
 // ============================================================================
 // Comment Analysis Types
@@ -140,7 +140,7 @@ export interface LearnResult {
 /**
  * A comment from a PR
  */
-export interface PRComment {
+export type PRComment = {
   id: number;
   text: string;
   author: {
@@ -152,17 +152,17 @@ export interface PRComment {
   filePath?: string;
   lineNumber?: number;
   parentId?: number; // For threaded comments
-}
+};
 
 /**
  * A pair of AI comment and developer reply
  */
-export interface CommentPair {
+export type CommentPair = {
   aiComment: PRComment;
   developerReply: PRComment;
   filePath?: string;
   codeContext?: string;
-}
+};
 
 // ============================================================================
 // AI Extraction Types
@@ -171,10 +171,10 @@ export interface CommentPair {
 /**
  * Output format from AI learning extraction
  */
-export interface AIExtractionOutput {
+export type AIExtractionOutput = {
   category: LearningCategory;
   subcategory?: string;
   learning: string;
   filePatterns?: string[];
   reasoning: string;
-}
+};

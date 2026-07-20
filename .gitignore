@@ -23,6 +23,10 @@ build/
 *.swo
 *~
 
+# Stray `~` directory created by a mis-set $HOME (has leaked a credential file
+# before). Explicit rule so it can never be committed even if `*~` changes.
+/~/
+
 # OS generated files
 .DS_Store
 .DS_Store?
@@ -126,3 +130,4 @@ simple-test.js
 *.old.js
 *.backup.js
 .claude/
+.yama/state/

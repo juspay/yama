@@ -24,9 +24,7 @@ ai:
   enableAnalytics: true # Track token usage and costs
   enableEvaluation: false # Enable quality evaluation (slower)
   timeout: "15m" # Maximum time for review
-  retryAttempts: 3 # Number of retries on failure
-  enableToolFiltering: false # Enable query-level MCP tool filtering
-  toolFilteringMode: "off" # off | log-only | active
+  retryAttempts: 3 # Total generate attempts on transient errors (initial + retries)
 
   # Conversation memory for maintaining review state
   conversationMemory:
@@ -49,28 +47,100 @@ ai:
 # ============================================================================
 # MCP Servers Configuration
 # ============================================================================
-# Bitbucket MCP is always enabled (hardcoded)
-# Jira MCP can be enabled/disabled here
-# Use blockedTools to prevent AI from using specific MCP tools
+# EVERY MCP server is defined here — the code hardcodes none of them. Each entry
+# is a full server definition. Secrets come from the environment via ${VAR}.
+#   roles:        which agents get the server (review / explore). Default: both.
+#   modes:        which review modes (pr / local). Default: both.
+#   blockedTools: denylist — hide these tool names from the agent.
+#   allowedTools: fail-closed allowlist — ONLY these tools are exposed.
+# Everything else is forwarded to NeuroLink's addExternalMCPServer verbatim
+# (after ${ENV} substitution, including nested values), so ANY MCP server kind
+# NeuroLink supports works from config alone: transport stdio|http|sse|websocket,
+# command/args/env, url/headers, timeout, retryConfig, auth (oauth2/bearer/
+# api-key), httpOptions, rateLimiting — and future NeuroLink options too.
 mcpServers:
-  bitbucket:
-    # Optional: Block specific Bitbucket tools from AI access
-    # This prevents the AI from performing certain actions
-    blockedTools: []
-    # Example blocked tools (uncomment to use):
-    # - merge_pull_request      # Prevent AI from merging PRs
-    # - delete_branch           # Prevent AI from deleting branches
-    # - set_pr_approval         # Prevent AI from changing approval status
-    # - set_review_status       # Prevent AI from requesting/removing changes
+  servers:
+    bitbucket:
+      enabled: true
+      transport: stdio
+      command: npx
+      args: ["-y", "@nexus2520/bitbucket-mcp-server@latest"]
+      env:
+        BITBUCKET_USERNAME: ${BITBUCKET_USERNAME}
+        BITBUCKET_TOKEN: ${BITBUCKET_TOKEN}
+        BITBUCKET_BASE_URL: ${BITBUCKET_BASE_URL}
+      roles: [review, explore]
+      modes: [pr]
+      # Destructive tools the review/enhance flow never needs. Comments,
+      # approval, and update_pull_request are intentionally NOT blocked.
+      blockedTools:
+        - merge_pull_request
+        - decline_pull_request
+        - delete_branch
+        - delete_comment
+        - create_pull_request
 
-  jira:
-    enabled: true # Set to false to disable Jira integration
-    # Optional: Block specific Jira tools from AI access
-    blockedTools: []
-    # Example blocked tools (uncomment to use):
-    # - jira_issues             # Block issue get/create/update/assign actions
-    # - jira_search             # Block issue/project/user/metadata search
-    # - jira_comments           # Block reading/adding issue comments
+    github:
+      enabled: false
+      transport: http
+      url: https://api.githubcopilot.com/mcp/
+      headers:
+        Authorization: "Bearer ${GITHUB_TOKEN}"
+      roles: [review, explore]
+      modes: [pr]
+      blockedTools:
+        - push_files
+        - create_or_update_file
+        - create_branch
+        - delete_file
+        - merge_pull_request
+
+    local-git:
+      enabled: true
+      transport: stdio
+      command: npm
+      args: ["run", "-s", "mcp:git:server"]
+      roles: [review, explore]
+      modes: [local]
+      # Read-only git inspection only.
+      allowedTools:
+        - git_status
+        - git_log
+        - git_show
+        - git_diff
+        - git_diff_staged
+        - git_diff_unstaged
+        - git_blame
+
+    serena:
+      # Code intelligence (LSP-backed) for review-beyond-the-diff. Needs uvx.
+      enabled: false
+      transport: stdio
+      command: uvx
+      args:
+        [
+          "--from",
+          "git+https://github.com/oraios/serena",
+          "serena",
+          "start-mcp-server",
+          "--context",
+          "ide-assistant",
+        ]
+      roles: [review, explore]
+      modes: [pr, local]
+      # Read-only: block Serena's mutating/shell tools; keep onboarding + reads.
+      blockedTools:
+        - create_text_file
+        - replace_symbol_body
+        - insert_after_symbol
+        - insert_before_symbol
+        - replace_regex
+        - replace_lines
+        - delete_lines
+        - insert_at_line
+        - execute_shell_command
+        - write_memory
+        - delete_memory
 
 # ============================================================================
 # Review Configuration
@@ -81,7 +151,7 @@ review:
   # High-level workflow instructions (combined with base system prompt)
   workflowInstructions: |
     Follow the autonomous review workflow:
-    1. Read PR details and find Jira ticket
+    1. Read PR details
     2. Read project standards from memory-bank
     3. Analyze files one-by-one
     4. Search code for context as needed
@@ -131,10 +201,6 @@ review:
   #     action: "BLOCK"
   #     reason: "Too many significant bugs/performance issues"
   #
-  #   - condition: "Jira requirement coverage < 70%"
-  #     action: "BLOCK"
-  #     reason: "Incomplete implementation of requirements"
-
   # Files to exclude from analysis
   excludePatterns:
     - "*.lock"
@@ -166,7 +232,7 @@ descriptionEnhancement:
   enabled: true
 
   instructions: |
-    Enhance the PR description using Jira requirements and diff analysis.
+    Enhance the PR description using diff analysis.
     Generate comprehensive, well-structured description with all required sections.
 
   requiredSections:
@@ -179,11 +245,6 @@ descriptionEnhancement:
       name: "🔧 Changes Made"
       required: true
       description: "Specific technical changes with file references"
-
-    - key: "jira"
-      name: "🎫 Jira Reference"
-      required: false
-      description: "Link to Jira ticket and requirement coverage"
 
     - key: "testing"
       name: "🧪 Testing Strategy"
@@ -296,3 +357,47 @@ performance:
   costControls:
     maxCostPerReview: 2.0 # USD limit per review
     warningThreshold: 1.5 # Warn at $1.50
+
+# ============================================================================
+# v3 additions (all optional — defaults shown)
+# ============================================================================
+
+# Cross-run review state: makes re-reviews incremental (no duplicate comments,
+# fixed findings resolved, repeatedly-ignored findings auto-suppressed).
+# store: file | inline | github-artifact | jenkins-artifact
+# The CI-artifact stores wrap the file store — your workflow moves the state
+# file across runs (actions/upload-artifact / archiveArtifacts).
+# state:
+#   enabled: true
+#   store: file
+#   path: .yama/state
+
+# Finding verification before posting (the submit_review gate):
+#   off    — dedup only
+#   basic  — tools-off critic pass kills incoherent/inflated/evidence-free findings
+#   strict — critic + code evidence check; uncertain findings are rejected
+# review:
+#   verification: basic
+
+# Agentic-loop guards (previously decorative, now enforced):
+# performance:
+#   loop:
+#     maxSteps: 100          # tool-loop step cap per generate() call
+#     toolTimeoutMs: 300000  # per-tool-call timeout
+#     # turnTimeoutMs: 900000  # whole-turn cap (defaults to maxReviewDuration)
+#     # stallTimeoutMs: 120000 # no-progress watchdog
+
+# Context management (NeuroLink):
+# ai:
+#   conversationMemory:
+#     contextCompaction:
+#       enabled: true        # auto-compact at 80% of the model context window
+#       threshold: 0.8
+#   mcpOutputLimits:
+#     strategy: externalize  # page oversized tool outputs (huge diffs) on demand
+#     maxBytes: 100000
+#     warnBytes: 50000
+
+# Team rules live in .yama/rules/**/*.yaml — see .yama/rules/example.yaml
+# (scaffolded by `yama init`). Findings cite rules via their `rule` field;
+# violated blocking rules force the verdict to BLOCKED.

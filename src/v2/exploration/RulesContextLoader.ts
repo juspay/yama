@@ -1,12 +1,15 @@
 import { readdir, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join, resolve } from "path";
-import {
-  MemoryBankConfig,
-  ProjectStandardsConfig,
-} from "../types/config.types.js";
+import { MemoryBankConfig, ProjectStandardsConfig } from "../types/index.js";
 
-const ROOT_RULE_FILES = ["CLAUDE.md", ".clinerules", "CONTRIBUTING.md"];
+const ROOT_RULE_FILES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".clinerules",
+  ".cursorrules",
+  "CONTRIBUTING.md",
+];
 const CONTEXT_EXTENSIONS = new Set([".md", ".txt", ".yml", ".yaml"]);
 
 export class RulesContextLoader {
@@ -16,15 +19,29 @@ export class RulesContextLoader {
     private readonly projectRoot: string = process.cwd(),
   ) {}
 
-  async load(): Promise<string | null> {
+  /**
+   * Root-level project docs (AGENTS.md, CLAUDE.md, …) alone — injected into
+   * the MAIN review prompt as team conventions. The full load() (docs +
+   * memory-bank) remains the explorer's richer context.
+   */
+  async loadRootDocs(): Promise<string | null> {
     const sections: string[] = [];
-
     for (const file of ROOT_RULE_FILES) {
       const absolutePath = resolve(this.projectRoot, file);
       const content = await this.tryReadFile(absolutePath);
       if (content) {
         sections.push(`## ${file}\n\n${content}`);
       }
+    }
+    return sections.length > 0 ? sections.join("\n\n---\n\n") : null;
+  }
+
+  async load(): Promise<string | null> {
+    const sections: string[] = [];
+
+    const rootDocs = await this.loadRootDocs();
+    if (rootDocs) {
+      sections.push(rootDocs);
     }
 
     const memoryBankDir = this.resolveMemoryBankDir();

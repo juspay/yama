@@ -2,7 +2,7 @@ import {
   ExplorerSupportingContext,
   ExploreContextInput,
   ExploreRuntimeContext,
-} from "./types.js";
+} from "../types/index.js";
 
 export class ExplorerPromptBuilder {
   buildPrompt(
@@ -73,7 +73,7 @@ Return this exact JSON shape:
   ],
   "evidence": [
     {
-      "sourceType": "file|commit|diff|jira|memory|rules|kb",
+      "sourceType": "file|commit|diff|memory|rules|kb",
       "ref": "string",
       "snippet": "string",
       "reason": "string"

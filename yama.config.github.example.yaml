@@ -20,8 +20,6 @@ mcpServers:
     # here are added on top of those defaults; the defaults can never be un-blocked.
     # blockedTools:
     #   - delete_file
-  jira:
-    enabled: false
 
 review:
   focusAreas:

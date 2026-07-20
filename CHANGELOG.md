@@ -8,92 +8,79 @@
 
 ## [2.7.1](https://github.com/juspay/yama/compare/v2.7.0...v2.7.1) (2026-06-15)
 
-
 ### Bug Fixes
 
-* **v2:** bump neurolink to 9.70.7 and fix review/config correctness bugs ([d0c62f7](https://github.com/juspay/yama/commit/d0c62f767bb3f38fed0bc5dcc1a64845529ec3b6))
+- **v2:** bump neurolink to 9.70.7 and fix review/config correctness bugs ([d0c62f7](https://github.com/juspay/yama/commit/d0c62f767bb3f38fed0bc5dcc1a64845529ec3b6))
 
 # [2.7.0](https://github.com/juspay/yama/compare/v2.6.0...v2.7.0) (2026-06-11)
 
-
 ### Features
 
-* **setup:** add one-command GitHub integration setup script ([6a014b0](https://github.com/juspay/yama/commit/6a014b05ccf12e4ca362316e5f69c9441a93618f))
+- **setup:** add one-command GitHub integration setup script ([6a014b0](https://github.com/juspay/yama/commit/6a014b05ccf12e4ca362316e5f69c9441a93618f))
 
 # [2.6.0](https://github.com/juspay/yama/compare/v2.5.0...v2.6.0) (2026-06-04)
 
-
 ### Features
 
-* **action:** add Yama self-review workflow with LiteLLM/Vertex auth ([5ebb73f](https://github.com/juspay/yama/commit/5ebb73f2450951b5f97d97a6a3caa89377a150af))
+- **action:** add Yama self-review workflow with LiteLLM/Vertex auth ([5ebb73f](https://github.com/juspay/yama/commit/5ebb73f2450951b5f97d97a6a3caa89377a150af))
 
 # [2.5.0](https://github.com/juspay/yama/compare/v2.4.2...v2.5.0) (2026-06-03)
 
-
 ### Features
 
-* **github:** add GitHub provider for PR reviews ([0b8e45f](https://github.com/juspay/yama/commit/0b8e45f30a95a30988c0dc6f84e929d2338108fe))
+- **github:** add GitHub provider for PR reviews ([0b8e45f](https://github.com/juspay/yama/commit/0b8e45f30a95a30988c0dc6f84e929d2338108fe))
 
 ## [2.4.2](https://github.com/juspay/yama/compare/v2.4.1...v2.4.2) (2026-04-24)
 
-
 ### Bug Fixes
 
-* **docs:** list get_file_blame in Bitbucket MCP tools ([c5f2ab6](https://github.com/juspay/yama/commit/c5f2ab6315fa4ac76b9dc6ec34631409e1647ffa))
+- **docs:** list get_file_blame in Bitbucket MCP tools ([c5f2ab6](https://github.com/juspay/yama/commit/c5f2ab6315fa4ac76b9dc6ec34631409e1647ffa))
 
 ## [2.4.1](https://github.com/juspay/yama/compare/v2.4.0...v2.4.1) (2026-04-16)
 
-
 ### Bug Fixes
 
-* **deps:** pin undici to 5.x for Node 20 compatibility ([c8f92de](https://github.com/juspay/yama/commit/c8f92de3009f20f451d1848a568912d4c752a024))
+- **deps:** pin undici to 5.x for Node 20 compatibility ([c8f92de](https://github.com/juspay/yama/commit/c8f92de3009f20f451d1848a568912d4c752a024))
 
 # [2.4.0](https://github.com/juspay/yama/compare/v2.3.0...v2.4.0) (2026-04-15)
 
-
 ### Features
 
-* **v2:** bootstrap repo standards from recent PRs before review ([8c5b1cd](https://github.com/juspay/yama/commit/8c5b1cdd38b684397e7445e04b4db4bc45b5f2a8))
+- **v2:** bootstrap repo standards from recent PRs before review ([8c5b1cd](https://github.com/juspay/yama/commit/8c5b1cdd38b684397e7445e04b4db4bc45b5f2a8))
 
 # [2.3.0](https://github.com/juspay/yama/compare/v2.2.2...v2.3.0) (2026-04-01)
 
-
 ### Features
 
-* **memory:** add per-repo memory management and configuration ([0b1fd5d](https://github.com/juspay/yama/commit/0b1fd5de8f0e46402f3c54766a5e0c7bd937cca2))
+- **memory:** add per-repo memory management and configuration ([0b1fd5d](https://github.com/juspay/yama/commit/0b1fd5de8f0e46402f3c54766a5e0c7bd937cca2))
 
 ## [2.2.2](https://github.com/juspay/yama/compare/v2.2.1...v2.2.2) (2026-03-26)
 
-
 ### Bug Fixes
 
-* **core:** fix MCP timeout, local review output format, and ReDoS in JSON parser ([89dbc27](https://github.com/juspay/yama/commit/89dbc27bd35b738dc808ffa2eaa31807dceab2b5))
+- **core:** fix MCP timeout, local review output format, and ReDoS in JSON parser ([89dbc27](https://github.com/juspay/yama/commit/89dbc27bd35b738dc808ffa2eaa31807dceab2b5))
 
 ## [2.2.1](https://github.com/juspay/yama/compare/v2.2.0...v2.2.1) (2026-02-23)
 
-
 ### Bug Fixes
 
-* **version:** Added commit for version bump ([818cfae](https://github.com/juspay/yama/commit/818cfaeff0a3476dd2e4c1a3c22cd973882dfbf1))
+- **version:** Added commit for version bump ([818cfae](https://github.com/juspay/yama/commit/818cfaeff0a3476dd2e4c1a3c22cd973882dfbf1))
 
 # [2.2.0](https://github.com/juspay/yama/compare/v2.1.0...v2.2.0) (2026-01-28)
 
-
 ### Features
 
-* **prompts:** switch add_comment to use line_number and line_type from structured diff ([25e2d0a](https://github.com/juspay/yama/commit/25e2d0ac356d47ba6c4a4a5b646714dd87a46fa3))
+- **prompts:** switch add_comment to use line_number and line_type from structured diff ([25e2d0a](https://github.com/juspay/yama/commit/25e2d0ac356d47ba6c4a4a5b646714dd87a46fa3))
 
 # [2.1.0](https://github.com/juspay/yama/compare/v2.0.0...v2.1.0) (2025-12-31)
 
-
 ### Bug Fixes
 
-* **ci:** migrate to npm trusted publishing with OIDC authentication ([c836a0c](https://github.com/juspay/yama/commit/c836a0c0b3c7077f96fe0ffc8731296e997106c2))
-
+- **ci:** migrate to npm trusted publishing with OIDC authentication ([c836a0c](https://github.com/juspay/yama/commit/c836a0c0b3c7077f96fe0ffc8731296e997106c2))
 
 ### Features
 
-* **learn:** add knowledge base learning from PR feedback ([a9c3d9d](https://github.com/juspay/yama/commit/a9c3d9d75175048caf5468a94949f8fe61bcb0f9))
+- **learn:** add knowledge base learning from PR feedback ([a9c3d9d](https://github.com/juspay/yama/commit/a9c3d9d75175048caf5468a94949f8fe61bcb0f9))
 
 # [2.0.0](https://github.com/juspay/yama/compare/v1.6.0...v2.0.0) (2025-11-26)
 

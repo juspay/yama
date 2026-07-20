@@ -1,16 +1,9 @@
+import type { ObservabilityConfig } from "../types/index.js";
+
 /**
  * Observability Configuration Builder
  * Builds NeuroLink observability config from environment variables
  */
-
-export interface ObservabilityConfig {
-  langfuse?: {
-    publicKey: string;
-    secretKey: string;
-    baseUrl?: string;
-    enabled: boolean;
-  };
-}
 
 /**
  * Build observability config from environment variables

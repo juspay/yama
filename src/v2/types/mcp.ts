@@ -2,7 +2,7 @@
  * MCP (Model Context Protocol) response type definitions.
  *
  * These describe the shapes Yama reads back from VCS MCP tool calls
- * (Bitbucket / GitHub pull requests, diffs, code search, Jira issues).
+ * (Bitbucket / GitHub pull requests, diffs, code search).
  *
  * The fictional `NeuroLinkAPI`/`callTool` interface and the unused
  * server-management helper types were removed when the dead VCSProvider
@@ -13,7 +13,7 @@
 /**
  * Bitbucket/GitHub Pull Request response from a PR-read tool call
  */
-export interface GetPullRequestResponse {
+export type GetPullRequestResponse = {
   id?: number | string;
   number?: number;
   title?: string;
@@ -60,12 +60,12 @@ export interface GetPullRequestResponse {
   };
   html_url?: string;
   [key: string]: unknown;
-}
+};
 
 /**
  * Pull request diff response from a diff-read tool call
  */
-export interface GetPullRequestDiffResponse {
+export type GetPullRequestDiffResponse = {
   diffs?: Array<{
     source?: {
       path?: string;
@@ -88,32 +88,12 @@ export interface GetPullRequestDiffResponse {
     deletions?: number;
   }>;
   [key: string]: unknown;
-}
-
-/**
- * Jira issue response from an issue-read tool call
- */
-export interface GetIssueResponse {
-  key?: string;
-  id?: string;
-  fields?: {
-    summary?: string;
-    description?: string;
-    status?: {
-      name?: string;
-    };
-    issuetype?: {
-      name?: string;
-    };
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-}
+};
 
 /**
  * Code search response from a code-search tool call
  */
-export interface SearchCodeResponse {
+export type SearchCodeResponse = {
   results?: Array<{
     file?: {
       path?: string;
@@ -126,4 +106,4 @@ export interface SearchCodeResponse {
     content?: string;
   }>;
   [key: string]: unknown;
-}
+};

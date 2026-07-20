@@ -7,8 +7,8 @@ import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { parse as parseYAML } from "yaml";
 import { resolve } from "path";
-import { YamaConfig, MemoryConfig } from "../types/config.types.js";
-import { ConfigurationError } from "../types/v2.types.js";
+import { YamaConfig, MemoryConfig } from "../types/index.js";
+import { ConfigurationError } from "../types/index.js";
 import { DefaultConfig } from "./DefaultConfig.js";
 
 export class ConfigLoader {
@@ -108,17 +108,19 @@ export class ConfigLoader {
     if (mode === "pr") {
       if (provider === "github") {
         // GitHub provider: require a GitHub token instead of Bitbucket creds.
-        // Token resolution order mirrors MCPServerManager: GITHUB_TOKEN →
-        // GH_TOKEN → GITHUB_PERSONAL_ACCESS_TOKEN → GITHUB_ACCESS_TOKEN
-        // (GITHUB_ACCESS_TOKEN is the dedicated PAT used in Curator/DNV).
+        // Token resolution order mirrors MCPServerManager: YAMA_GITHUB_TOKEN
+        // (the var the action forwards and .yama configs reference) →
+        // GITHUB_TOKEN → GH_TOKEN → GITHUB_PERSONAL_ACCESS_TOKEN →
+        // GITHUB_ACCESS_TOKEN (the dedicated PAT used in Curator/DNV).
         if (
+          !process.env.YAMA_GITHUB_TOKEN &&
           !process.env.GITHUB_TOKEN &&
           !process.env.GH_TOKEN &&
           !process.env.GITHUB_PERSONAL_ACCESS_TOKEN &&
           !process.env.GITHUB_ACCESS_TOKEN
         ) {
           errors.push(
-            "GitHub provider selected but no GitHub token found. Set GITHUB_TOKEN (or GH_TOKEN / GITHUB_PERSONAL_ACCESS_TOKEN / GITHUB_ACCESS_TOKEN).",
+            "GitHub provider selected but no GitHub token found. Set YAMA_GITHUB_TOKEN (or GITHUB_TOKEN / GH_TOKEN / GITHUB_PERSONAL_ACCESS_TOKEN / GITHUB_ACCESS_TOKEN).",
           );
         }
       } else {
@@ -131,18 +133,6 @@ export class ConfigLoader {
         }
         if (!process.env.BITBUCKET_BASE_URL) {
           errors.push("BITBUCKET_BASE_URL environment variable not set");
-        }
-      }
-
-      if (this.config.mcpServers.jira.enabled) {
-        if (!process.env.JIRA_EMAIL) {
-          errors.push("JIRA_EMAIL environment variable not set");
-        }
-        if (!process.env.JIRA_API_TOKEN) {
-          errors.push("JIRA_API_TOKEN environment variable not set");
-        }
-        if (!process.env.JIRA_BASE_URL) {
-          errors.push("JIRA_BASE_URL environment variable not set");
         }
       }
     }
@@ -169,16 +159,24 @@ export class ConfigLoader {
       return resolvedPath;
     }
 
-    // Search for default config files
-    const defaultPaths = [
-      "yama.config.yaml",
-      "config/yama.config.yaml",
-      ".yama/config.yaml",
-    ];
+    // Search for default config files. `.yama/config.yaml` (the consolidated
+    // project directory) takes precedence; the root/`config/` locations are
+    // legacy fallbacks kept for back-compat and warned about on use.
+    const preferredPath = ".yama/config.yaml";
+    const legacyPaths = ["yama.config.yaml", "config/yama.config.yaml"];
 
-    for (const path of defaultPaths) {
+    const resolvedPreferred = resolve(preferredPath);
+    if (existsSync(resolvedPreferred)) {
+      return resolvedPreferred;
+    }
+
+    for (const path of legacyPaths) {
       const resolvedPath = resolve(path);
       if (existsSync(resolvedPath)) {
+        console.warn(
+          `⚠️  Using legacy config location "${path}". Move it to "${preferredPath}" — ` +
+            `the legacy paths are deprecated and will be removed in a future major version.`,
+        );
         return resolvedPath;
       }
     }
@@ -272,18 +270,6 @@ export class ConfigLoader {
       }
     }
 
-    if (process.env.AI_ENABLE_TOOL_FILTERING) {
-      config.ai.enableToolFiltering =
-        process.env.AI_ENABLE_TOOL_FILTERING === "true";
-    }
-
-    if (process.env.AI_TOOL_FILTERING_MODE) {
-      const mode = process.env.AI_TOOL_FILTERING_MODE;
-      if (mode === "off" || mode === "log-only" || mode === "active") {
-        config.ai.toolFilteringMode = mode;
-      }
-    }
-
     if (process.env.AI_EXPLORE_ENABLED) {
       config.ai.explore.enabled = process.env.AI_EXPLORE_ENABLED === "true";
     }
@@ -372,6 +358,21 @@ export class ConfigLoader {
 
     if (!config.mcpServers) {
       throw new ConfigurationError("MCP servers configuration missing");
+    }
+
+    // Detect the legacy flat schema ({ mcpServers: { bitbucket: {...} } }).
+    // After the deep merge with defaults it would silently produce ZERO
+    // registered servers and a toolless review — fail loudly with migration
+    // guidance instead.
+    const legacyKeys = Object.keys(config.mcpServers).filter(
+      (key) => key !== "servers",
+    );
+    if (legacyKeys.length > 0) {
+      throw new ConfigurationError(
+        `Legacy mcpServers config detected (key(s): ${legacyKeys.join(", ")}). ` +
+          `Server definitions now live under "mcpServers.servers.<id>" — ` +
+          `see MIGRATION.md and yama.config.example.yaml for the new schema.`,
+      );
     }
 
     if (!config.review) {

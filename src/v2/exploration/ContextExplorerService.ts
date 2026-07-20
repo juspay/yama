@@ -2,24 +2,17 @@ import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { NeuroLink } from "@juspay/neurolink";
-import { YamaConfig } from "../types/config.types.js";
+import { YamaConfig, McpServerDefinition } from "../types/index.js";
 import {
   ExplorationEvidence,
   ExplorationFinding,
   ExplorationResult,
-} from "../types/v2.types.js";
+} from "../types/index.js";
 import { SessionManager } from "../core/SessionManager.js";
 import { MCPServerManager } from "../core/MCPServerManager.js";
 import { MemoryManager } from "../memory/MemoryManager.js";
 import { KnowledgeBaseManager } from "../learning/KnowledgeBaseManager.js";
-import {
-  buildObservabilityConfigFromEnv,
-  validateObservabilityConfig,
-} from "../utils/ObservabilityConfig.js";
-import {
-  getProviderToolset,
-  type VCSProviderName,
-} from "../providers/ProviderToolset.js";
+import { NeuroLinkFactory } from "../core/NeuroLinkFactory.js";
 import { clampMaxTokens, MAX_EXTRACTION_TOKENS } from "../utils/tokenLimits.js";
 import { isMutatingGitTool } from "../utils/toolPolicy.js";
 import { ExplorerPromptBuilder } from "./ExplorerPromptBuilder.js";
@@ -28,15 +21,15 @@ import {
   ExploreContextInput,
   ExploreExecutionResult,
   ExploreRuntimeContext,
-} from "./types.js";
+} from "../types/index.js";
 
 export class ContextExplorerService {
   private readonly promptBuilder = new ExplorerPromptBuilder();
   private readonly rulesContextLoader: RulesContextLoader;
   private readonly mcpManager = new MCPServerManager();
   private neurolink: NeuroLink;
-  private prMcpInitialized = false;
-  private localMcpInitialized = false;
+  // Mode the explorer's MCP was last set up for; re-register on a mode switch.
+  private mcpMode: "pr" | "local" | null = null;
 
   constructor(
     private readonly config: YamaConfig,
@@ -52,43 +45,35 @@ export class ContextExplorerService {
     this.neurolink = this.initializeNeurolink();
   }
 
+  /**
+   * Register the explore sub-agent's own MCP servers: the config servers merged
+   * with any opt-in project servers from `.yama/mcp.json` (same id = override),
+   * filtered to this mode + the "explore" role. Servers are chosen by config,
+   * not by provider.
+   */
   async initialize(
     mode: "pr" | "local",
-    provider: VCSProviderName = "bitbucket",
+    projectServers: Record<string, McpServerDefinition> = {},
   ): Promise<void> {
-    if (mode === "pr" && !this.prMcpInitialized) {
-      // The explore subagent gets its own MCP servers; they MUST match the
-      // detected provider, otherwise a GitHub run would try to start Bitbucket
-      // MCP (and fail on missing Bitbucket credentials).
-      await this.mcpManager.setupMCPServers(
-        this.neurolink,
-        this.config.mcpServers,
-        provider,
-      );
-      this.prMcpInitialized = true;
+    if (this.mcpMode === mode) {
       return;
     }
-
-    if (mode === "local" && !this.localMcpInitialized) {
-      await this.mcpManager.setupLocalGitMCPServer(this.neurolink);
-      this.localMcpInitialized = true;
-    }
+    await this.mcpManager.setupMCPServers(
+      this.neurolink,
+      { servers: { ...this.config.mcpServers.servers, ...projectServers } },
+      mode,
+      "explore",
+    );
+    this.mcpMode = mode;
   }
 
   async explore(
     input: ExploreContextInput,
     runtimeContext: ExploreRuntimeContext,
   ): Promise<ExploreExecutionResult> {
-    // Pass the runtime provider through when it is a known VCS provider;
-    // otherwise fall back to the read-only default. VCSProviderName is the
-    // single source of truth for supported providers, so adding one there is
-    // all that's needed for the explore subagent to honour it.
-    const explorerProvider: VCSProviderName =
-      runtimeContext.provider === "github" ||
-      runtimeContext.provider === "bitbucket"
-        ? runtimeContext.provider
-        : "bitbucket";
-    await this.initialize(runtimeContext.mode, explorerProvider);
+    // Defensive: the orchestrator already initialized the explorer for this
+    // mode; this is a no-op when already set up.
+    await this.initialize(runtimeContext.mode);
 
     const normalizedInput = this.normalizeInput(input);
     const cacheKey = this.buildCacheKey(normalizedInput, runtimeContext);
@@ -136,6 +121,9 @@ export class ContextExplorerService {
         this.config.ai.explore.maxTokens ?? this.config.ai.maxTokens,
       ),
       timeout: this.config.ai.explore.timeout || this.config.ai.timeout,
+      // Prefer streaming transport for the tool-using research loop (chunked
+      // SSE keeps slow self-hosted backends responsive end-to-end).
+      stream: true,
       skipToolPromptInjection: true,
       ...this.getToolFilteringOptions(runtimeContext.mode),
       context: {
@@ -270,9 +258,23 @@ export class ContextExplorerService {
     return `${workspace}-${repository}`.toLowerCase();
   }
 
+  /**
+   * Runtime tool filtering for the read-only explore subagent.
+   *
+   * Provider tool policy (which comment/approval/mutation tools an MCP server
+   * exposes) is enforced at REGISTRATION by config-driven `blockedTools` /
+   * `allowedTools` — no provider tool names are hardcoded here. The only
+   * additional runtime guard is the fail-closed git read-only allow-list in
+   * local mode (any git_* tool not on the read-only list is treated as
+   * mutating), which is config-independent and closes gaps like git_branch /
+   * git_mv / git_pull.
+   */
   private getToolFilteringOptions(mode: "pr" | "local"): {
     excludeTools?: string[];
   } {
+    if (mode !== "local") {
+      return {};
+    }
     try {
       const externalTools = (this.neurolink as any).getExternalMCPTools?.();
       if (!Array.isArray(externalTools)) {
@@ -282,53 +284,12 @@ export class ContextExplorerService {
       const excludeTools = externalTools
         .map((tool: any) => tool?.name)
         .filter((name: unknown): name is string => typeof name === "string")
-        .filter((name) => this.shouldExcludeTool(mode, name));
+        .filter((name) => isMutatingGitTool(name));
 
       return excludeTools.length > 0 ? { excludeTools } : {};
     } catch {
       return {};
     }
-  }
-
-  /**
-   * Provider-agnostic mutation block list for the read-only explore subagent.
-   * Derived once from each provider toolset's mutationToolNames (Bitbucket +
-   * GitHub) so the source of truth stays in ProviderToolset, not re-hardcoded
-   * here. Names are lower-cased for case-insensitive matching against the
-   * normalized tool name.
-   */
-  private static readonly MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set(
-    (["bitbucket", "github"] as const).flatMap((provider) =>
-      getProviderToolset(provider).mutationToolNames.map((name) =>
-        name.toLowerCase(),
-      ),
-    ),
-  );
-
-  private shouldExcludeTool(mode: "pr" | "local", toolName: string): boolean {
-    const normalized = this.normalizeToolName(toolName);
-
-    // Provider (non-git) mutation tools — Bitbucket/GitHub write tools derived
-    // from each provider toolset — are always excluded for the read-only
-    // explore subagent.
-    if (
-      ContextExplorerService.MUTATION_TOOL_NAMES.has(normalized.toLowerCase())
-    ) {
-      return true;
-    }
-
-    // Git tools are filtered with the shared fail-closed allow-list in local
-    // mode (any git_* tool not on the read-only list is treated as mutating),
-    // closing the gaps the old regex missed (git_branch, git_mv, git_pull, …).
-    if (mode === "local") {
-      return isMutatingGitTool(toolName);
-    }
-
-    return false;
-  }
-
-  private normalizeToolName(name: string): string {
-    return name.split(/[.:/]/).pop() || name;
   }
 
   private normalizeResult(task: string, content: unknown): ExplorationResult {
@@ -421,7 +382,7 @@ Return ONLY valid JSON with this exact shape:
   ],
   "evidence": [
     {
-      "sourceType": "file|commit|diff|jira|memory|rules|kb",
+      "sourceType": "file|commit|diff|memory|rules|kb",
       "ref": "string",
       "snippet": "string",
       "reason": "string"
@@ -538,7 +499,6 @@ Rules:
       normalized === "file" ||
       normalized === "commit" ||
       normalized === "diff" ||
-      normalized === "jira" ||
       normalized === "memory" ||
       normalized === "rules" ||
       normalized === "kb"
@@ -677,20 +637,10 @@ Rules:
   }
 
   private initializeNeurolink(): NeuroLink {
-    const observabilityConfig = buildObservabilityConfigFromEnv();
-    const neurolinkConfig: Record<string, unknown> = {
-      conversationMemory: {
-        enabled: false,
-      },
-    };
-
-    if (observabilityConfig) {
-      if (!validateObservabilityConfig(observabilityConfig)) {
-        throw new Error("Invalid observability configuration");
-      }
-      neurolinkConfig.observability = observabilityConfig;
-    }
-
-    return new NeuroLink(neurolinkConfig);
+    // The explorer sub-agent runs stateless (no conversation memory). Its
+    // read-only guarantee comes from config-driven per-server filtering
+    // (blockedTools/allowedTools) plus the local-git read-only allow-list
+    // applied at query time, not a hardcoded instance-level tool denylist.
+    return NeuroLinkFactory.create({ conversationMemory: false });
   }
 }
