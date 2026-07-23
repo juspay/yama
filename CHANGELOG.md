@@ -1,3 +1,11 @@
+## [2.7.2](https://github.com/juspay/yama/compare/v2.7.1...v2.7.2) (2026-07-23)
+
+
+### Bug Fixes
+
+* **deps:** bump @juspay/neurolink to 10.1.2 for litellm timeout defaults ([fe1de54](https://github.com/juspay/yama/commit/fe1de54cb2e015b679bc5edbed0cb2f3f35e5944)), closes [juspay/neurolink#1216](https://github.com/juspay/neurolink/issues/1216)
+* **release:** run release.yml on Node 24 so npm@latest OIDC install succeeds ([9fa4e96](https://github.com/juspay/yama/commit/9fa4e962e687b559f613c615246e9a84a452fcdf))
+
 ## [2.7.1](https://github.com/juspay/yama/compare/v2.7.0...v2.7.1) (2026-06-15)
 
 
