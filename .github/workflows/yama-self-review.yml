@@ -93,17 +93,12 @@ jobs:
         with:
           github-token: ${{ secrets.YAMA_GITHUB_TOKEN }}
           ai-provider: litellm
-          # Empirically validated (run 29823266055): the CI LiteLLM key caps
-          # "external paid models" at $5/month, so claude/gemini models are
-          # rejected; its FREE internal set is the glm/kimi family. Also,
-          # gemini-2.5-flash function calls break in LiteLLM's Vertex adapter
-          # (thoughtSignature parsing). To run sonnet+gemini-flash in CI, add
-          # Vertex credentials (google-application-credentials input) — that
-          # combination is validated end-to-end locally on Vertex direct.
-          # private-large for both roles — tool calling verified locally via
-          # the proxy (free internal model on this key class).
-          ai-model: private-large
-          explore-model: private-large
+          # dev-test key on the grid.breezehq.dev proxy: all models, no budget
+          # cap. `coder` validated against the proxy on 2026-07-24 — chat and
+          # OpenAI-shape tool calling (finish_reason=tool_calls) both confirmed,
+          # which the MCP-driven review requires.
+          ai-model: coder
+          explore-model: coder
           litellm-base-url: ${{ secrets.LITELLM_BASE_URL }}
           litellm-api-key: ${{ secrets.LITELLM_API_KEY }}
           focus-areas: security,performance,codeQuality
