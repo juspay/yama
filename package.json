@@ -10,7 +10,6 @@
     "automation",
     "bitbucket",
     "github",
-    "gitlab",
     "security",
     "quality"
   ],
@@ -51,7 +50,6 @@
     "MIGRATION.md",
     "LICENSE",
     "yama.config.example.yaml",
-    ".mcp-config.example.json",
     ".yama/mcp.example.json",
     ".yama/README.md"
   ],

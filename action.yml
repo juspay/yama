@@ -66,6 +66,10 @@ inputs:
     description: "Run the review only and skip PR description enhancement"
     required: false
     default: "false"
+  fail-on-blocked:
+    description: "Fail the check when the review verdict is BLOCKED. Set to 'false' for advisory mode: the verdict summary comment and outputs are still produced, but the check stays green. Infrastructure failures always fail the check."
+    required: false
+    default: "true"
 
 outputs:
   decision:
@@ -74,6 +78,9 @@ outputs:
   summary:
     description: "Review summary text"
     value: ${{ steps.review.outputs.summary }}
+  findings:
+    description: "Markdown list of the findings behind the verdict (the reasons for a block)"
+    value: ${{ steps.review.outputs.findings }}
   critical-issues:
     description: "Number of critical issues found"
     value: ${{ steps.review.outputs.critical-issues }}
@@ -90,16 +97,17 @@ outputs:
 # Composite action that runs the built Yama CLI (`node dist/cli/cli.js review`)
 # with the GitHub PR context wired through environment variables and CLI flags.
 #
-# Why composite instead of a bundled `node20` JavaScript action:
-# The orchestrator depends on @juspay/neurolink, which imports `interceptors`
-# from `undici`. The repository pins `undici` to the 5.x line for Node 20
-# runtime compatibility, but the `interceptors` named export only exists in
-# undici 6.x. As a result, `ncc` cannot statically bundle the action entry
-# (`Error: export 'interceptors' was not found in 'undici'`). Marking undici as
-# `--external` would build but ship a runner with no undici at all (node20
-# actions get no `npm install`), silently breaking the action at runtime.
-# Running the already-built CLI via a composite action avoids the bundler
-# entirely while preserving full review behavior and parity with the CLI path.
+# Why composite instead of a bundled `node20`/`node24` JavaScript action:
+# The orchestrator depends on @juspay/neurolink, whose dependency tree has
+# proven hostile to static bundling with `ncc` (an earlier `undici` 5.x pin
+# failed outright on a missing `interceptors` export; the repo now pins
+# `undici` to ~7.22.0 via pnpm overrides). Marking such deps `--external`
+# would build but ship a runner missing them at runtime (bundled actions get
+# no `npm install`). A bundled action also runs on the runner's fixed Node
+# version, while NeuroLink's memory layer needs `node:sqlite` (see the
+# setup-node step below). Running the already-built CLI via a composite action
+# avoids the bundler entirely while preserving full review behavior and parity
+# with the CLI path.
 runs:
   using: "composite"
   steps:
@@ -114,11 +122,11 @@ runs:
     - name: Set up Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        # Node 24: NeuroLink's memory layer requires the `node:sqlite` built-in,
-        # which does not exist on Node 20 and is flag-gated on Node 22. Node 24
-        # ships node:sqlite without an experimental flag. actions/setup-node
-        # downloads and provisions this version on any runner, so it does not
-        # depend on the runner's pre-installed Node.
+        # Node 26: NeuroLink's memory layer requires the `node:sqlite` built-in,
+        # which does not exist on Node 20 and is flag-gated on Node 22
+        # (unflagged from Node 24; the Action runs Node 26, matching CI).
+        # actions/setup-node downloads and provisions this version on any
+        # runner, so it does not depend on the runner's pre-installed Node.
         node-version: "26"
 
     - name: Install dependencies and build CLI
@@ -196,8 +204,10 @@ runs:
           echo "major-issues=0" >> "$GITHUB_OUTPUT"
           echo "minor-issues=0" >> "$GITHUB_OUTPUT"
           echo "total-comments=0" >> "$GITHUB_OUTPUT"
+          echo "exit-code=0" >> "$GITHUB_OUTPUT"
           exit 0
         fi
+        echo "pr-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
         OWNER="${REPO_FULL%%/*}"
         REPO="${REPO_FULL#*/}"
@@ -234,7 +244,81 @@ runs:
         [ "${VERBOSE}" = "true" ] && ARGS+=(--verbose)
 
         echo "::group::Yama review (PR #$PR_NUMBER in $OWNER/$REPO)"
-        node "$YAMA_ACTION_PATH/dist/cli/cli.js" "${ARGS[@]}"
-        STATUS=$?
+        STATUS=0
+        node "$YAMA_ACTION_PATH/dist/cli/cli.js" "${ARGS[@]}" || STATUS=$?
         echo "::endgroup::"
-        exit $STATUS
+
+        # Defer the pass/fail decision to the "Enforce verdict" step so the
+        # verdict summary comment is posted even when the check must fail.
+        echo "exit-code=$STATUS" >> "$GITHUB_OUTPUT"
+
+    # A blocking verdict must never be invisible. The agent posts inline
+    # comments itself, but when it fails to (or the findings lack detail) the
+    # check would otherwise go red with no explanation on the PR — so this
+    # deterministic step publishes the verdict + findings as one idempotent,
+    # marker-keyed comment whenever the review did not approve.
+    - name: Post verdict summary comment
+      if: ${{ !cancelled() && inputs.dry-run != 'true' && steps.review.outputs.pr-number != '' && (steps.review.outputs.decision == 'BLOCKED' || steps.review.outputs.decision == 'CHANGES_REQUESTED') }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO_FULL: ${{ github.repository }}
+        PR_NUMBER: ${{ steps.review.outputs.pr-number }}
+        DECISION: ${{ steps.review.outputs.decision }}
+        SUMMARY: ${{ steps.review.outputs.summary }}
+        FINDINGS: ${{ steps.review.outputs.findings }}
+        CRITICAL: ${{ steps.review.outputs.critical-issues }}
+        MAJOR: ${{ steps.review.outputs.major-issues }}
+        MINOR: ${{ steps.review.outputs.minor-issues }}
+      run: |
+        set -euo pipefail
+        MARKER="<!-- yama-verdict-summary -->"
+        BODY_FILE="$(mktemp)"
+        {
+          echo "$MARKER"
+          echo "## 🛡️ Yama Review Verdict: $DECISION"
+          echo
+          echo "Severity counts — 🔒 CRITICAL: ${CRITICAL:-0} · ⚠️ MAJOR: ${MAJOR:-0} · 💡 MINOR: ${MINOR:-0}"
+          echo
+          if [ -n "${SUMMARY:-}" ]; then
+            printf '%s\n\n' "$SUMMARY"
+          fi
+          if [ -n "${FINDINGS:-}" ]; then
+            echo "### Findings behind this verdict"
+            printf '%s\n' "$FINDINGS"
+          else
+            echo "_The verdict reported findings but carried no detail — treat it as unverified and re-run the review or inspect manually._"
+          fi
+        } > "$BODY_FILE"
+
+        EXISTING_ID="$(gh api "repos/${REPO_FULL}/issues/${PR_NUMBER}/comments" --paginate \
+          --jq '.[] | select(.body | startswith("<!-- yama-verdict-summary -->")) | .id' 2>/dev/null | head -n1 || true)"
+        if [ -n "$EXISTING_ID" ]; then
+          gh api -X PATCH "repos/${REPO_FULL}/issues/comments/${EXISTING_ID}" -F body=@"$BODY_FILE" >/dev/null
+          echo "Updated existing verdict comment (id ${EXISTING_ID})."
+        else
+          gh api -X POST "repos/${REPO_FULL}/issues/${PR_NUMBER}/comments" -F body=@"$BODY_FILE" >/dev/null
+          echo "Posted verdict comment."
+        fi
+
+    # Verdict-aware exit. Infrastructure failures (nonzero exit without a
+    # BLOCKED verdict) are always fatal. A BLOCKED verdict fails the check
+    # unless fail-on-blocked is 'false' (advisory mode: verdict comment and
+    # outputs only, check stays green).
+    - name: Enforce verdict
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        STATUS: ${{ steps.review.outputs.exit-code }}
+        DECISION: ${{ steps.review.outputs.decision }}
+        FAIL_ON_BLOCKED: ${{ inputs.fail-on-blocked }}
+      run: |
+        STATUS="${STATUS:-0}"
+        if [ "$STATUS" = "0" ]; then
+          exit 0
+        fi
+        if [ "$DECISION" = "BLOCKED" ] && [ "$FAIL_ON_BLOCKED" = "false" ]; then
+          echo "::notice::Yama verdict is BLOCKED, but fail-on-blocked is 'false' — advisory mode, the check stays green. See the verdict summary comment on the PR for the reasons."
+          exit 0
+        fi
+        exit "$STATUS"

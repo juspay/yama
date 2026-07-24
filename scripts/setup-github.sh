@@ -10,7 +10,7 @@
 #
 # What it writes:
 #   • .github/workflows/yama-review.yml  — provider-aware review workflow
-#   • yama.config.yaml                   — a standard, working config with clearly
+#   • .yama/config.yaml                  — a standard, working config with clearly
 #                                          marked TODOs you tune to "what to catch"
 #
 # Run it from the target repo (no install needed):
@@ -26,12 +26,13 @@
 #   --provider <id>     litellm | anthropic | openai | google-ai | vertex
 #   --model <name>      model id for the provider (a sensible default is offered)
 #   --branches <list>   target branch(es), comma/space separated (default: repo default)
-#   --ref <ref>         action ref to pin: a tag/SHA (default: v2.6.0), or a full
-#                       owner/repo[@ref] to use a fork
+#   --ref <ref>         action ref to pin: a branch/tag/SHA (default: main), or a
+#                       full owner/repo[@ref] to use a fork
 #   --name <name>       workflow + required-check name (default: "Yama PR Review")
 #   --workflow-file <f> workflow filename under .github/workflows (default: yama-review.yml)
-#   --config-path <p>   config filename (default: yama.config.yaml)
-#   --no-config         don't write yama.config.yaml (Yama uses built-in defaults)
+#   --config-path <p>   config path (default: .yama/config.yaml)
+#   --no-config         don't write .yama/config.yaml (NOT recommended: Yama ships
+#                       zero built-in MCP servers, so the review runs toolless)
 #   --no-enforce        review posts comments but never fails the check (advisory)
 #   --vertex-location   Vertex AI region (default: us-central1)
 #   --force             overwrite existing files without asking
@@ -42,10 +43,12 @@
 
 set -euo pipefail
 
-# Action repo + default ref. Owned by juspay, so a tag pin is acceptable; for
-# strict supply-chain immutability replace the tag with the commit SHA behind it.
+# Action repo + default ref. The generated config uses the v3
+# `mcpServers.servers` schema, which pre-v3 tags do not understand — default to
+# `main` until a v3 tag is published, then pin that tag (or, for strict
+# supply-chain immutability, the commit SHA behind it) via --ref.
 readonly ACTION_REPO="juspay/yama"
-readonly DEFAULT_REF="v2.6.0"
+readonly DEFAULT_REF="main"
 # pnpm version the action pins via pnpm/action-setup. Repos that declare a
 # DIFFERENT pnpm in package.json "packageManager" trigger a clash we work around.
 readonly ACTION_PNPM="10.14.0"
@@ -103,7 +106,7 @@ then prints a checklist of what you still need to do.
 
 Writes:
   .github/workflows/yama-review.yml   provider-aware review workflow
-  yama.config.yaml                    standard config with TODOs you tune
+  .yama/config.yaml                   standard config with TODOs you tune
 
 Usage:
   bash setup-github.sh [flags]
@@ -113,11 +116,12 @@ Flags:
   --provider <id>      litellm | anthropic | openai | google-ai | vertex
   --model <name>       model id for the provider (a sensible default is offered)
   --branches <list>    target branch(es), comma/space separated (default: repo default)
-  --ref <ref>          action ref to pin: tag/SHA (default: v2.6.0), or owner/repo[@ref]
+  --ref <ref>          action ref to pin: branch/tag/SHA (default: main), or owner/repo[@ref]
   --name <name>        workflow + required-check name (default: "Yama PR Review")
   --workflow-file <f>  filename under .github/workflows (default: yama-review.yml)
-  --config-path <p>    config filename (default: yama.config.yaml)
-  --no-config          don't write yama.config.yaml (Yama uses built-in defaults)
+  --config-path <p>    config path (default: .yama/config.yaml)
+  --no-config          don't write .yama/config.yaml (not recommended: Yama ships
+                       zero built-in MCP servers, so the review runs toolless)
   --no-enforce         review posts comments but never fails the check (advisory)
   --vertex-location    Vertex AI region (default: us-central1)
   --force              overwrite existing files (backs up the old file to .bak)
@@ -129,7 +133,7 @@ USAGE
 
 # ----------------------------------------------------------------------- inputs
 PROVIDER=""; MODEL=""; BRANCHES=""; REF="$DEFAULT_REF"; NAME="Yama PR Review"
-WORKFLOW_FILE="yama-review.yml"; CONFIG_PATH="yama.config.yaml"
+WORKFLOW_FILE="yama-review.yml"; CONFIG_PATH=".yama/config.yaml"
 WRITE_CONFIG=1; ENFORCE=1; VERTEX_LOCATION="us-central1"
 FORCE=""; DRY_RUN=""; ASSUME_YES=""
 
@@ -262,7 +266,16 @@ set +f; IFS=$_saved_ifs
 BRANCHES_YAML="[$_branch_list]"
 
 # ------------------------------------------------------------------- other opts
-[ -n "$ASSUME_YES" ] || ask REF "Pin the action to which ref (tag or commit SHA)?" "$REF"
+[ -n "$ASSUME_YES" ] || ask REF "Pin the action to which ref (branch, tag or commit SHA)?" "$REF"
+# A branch ref is MUTABLE: whoever controls it controls the code your workflow
+# runs with repo secrets. Tags (vX.Y.Z) and commit SHAs are the immutable pins.
+_ref_tail="${REF##*@}"
+case "$_ref_tail" in
+  v[0-9]*) : ;;                                  # version tag — immutable enough
+  *) if ! printf '%s' "$_ref_tail" | grep -qE '^[0-9a-f]{7,40}$'; then
+       warn "'$REF' is a mutable branch ref — the workflow will run whatever that branch points to (supply-chain risk). Pin a tag or commit SHA via --ref once a v3 release exists."
+     fi ;;
+esac
 [ -n "$ASSUME_YES" ] || ask NAME "Workflow / required-check name:" "$NAME"
 if [ -z "$ASSUME_YES" ] && [ "$ENFORCE" = "1" ]; then
   confirm "Fail the check on a BLOCKED verdict (so it can gate merges)?" "y" && ENFORCE=1 || ENFORCE=0
@@ -531,7 +544,7 @@ EOF
 WF="$(gen_workflow)"
 
 # =============================================================================
-# The standard yama.config.yaml — a working config with clearly-marked TODOs the
+# The standard .yama/config.yaml — a working config with clearly-marked TODOs the
 # repo owner tunes to "what they want to catch". Provider/model are intentionally
 # OMITTED (the workflow controls them via ai-provider / ai-model).
 # =============================================================================
@@ -540,8 +553,9 @@ IFS= read -r -d '' CONFIG_BODY <<'YAMACONFIG' || true
 # Yama PR Review configuration
 # =============================================================================
 # Consumed by the @juspay/yama GitHub Action (.github/workflows). Auto-discovered
-# from the repo root (search order: yama.config.yaml → config/yama.config.yaml →
-# .yama/config.yaml) and also passed explicitly via the workflow `config-path`.
+# from the repo root (search order: .yama/config.yaml → yama.config.yaml →
+# config/yama.config.yaml; the last two are deprecated legacy locations that
+# print a warning) and also passed explicitly via the workflow `config-path`.
 #
 # WHERE THE REVIEW RULES COME FROM
 #   Yama automatically loads, from this repo root, if present:
@@ -579,13 +593,38 @@ ai:
     timeout: "5m"
     cacheResults: true
 
-# GitHub MCP only. Bitbucket off so no extra credentials are needed. Yama's
-# built-in denylist already blocks repo-mutating GitHub tools; this is a
-# read + review-comment workflow.
+# GitHub MCP only — no Bitbucket credentials needed. Yama ships ZERO built-in
+# MCP servers, so this block is what gives the reviewer its tools, and the
+# blockedTools list below IS the denylist: there is no built-in write-block
+# list in Yama, so write-safety comes entirely from this config. Removing an
+# entry here re-exposes that tool to the reviewer — keep the list intact for a
+# read + review-comment-only workflow.
 mcpServers:
-  github:
-    enabled: true
-    # transport defaults to "http" (hosted GitHub MCP at api.githubcopilot.com).
+  servers:
+    github:
+      enabled: true
+      transport: http
+      url: https://api.githubcopilot.com/mcp/
+      headers:
+        # YAMA_GITHUB_TOKEN is forwarded by the action from the github-token
+        # input (a non-reserved env name that survives composite-action rules).
+        Authorization: "Bearer ${YAMA_GITHUB_TOKEN}"
+      roles: [review, explore]
+      modes: [pr]
+      # The hosted endpoint is slow to handshake; a generous timeout + retry
+      # prevents spurious "not connected" failures on the first tool call.
+      timeout: 30000
+      retryConfig:
+        maxAttempts: 3
+        initialDelay: 1000
+        maxDelay: 10000
+        backoffMultiplier: 2
+      blockedTools:
+        - push_files
+        - create_or_update_file
+        - create_branch
+        - delete_file
+        - merge_pull_request
 
 review:
   enabled: true
@@ -717,7 +756,7 @@ write_file "$WF_PATH" "$WF" || true
 if [ "$WRITE_CONFIG" = "1" ]; then
   write_file "$CONFIG_PATH" "$CONFIG_BODY" || true
 else
-  info "Skipping $CONFIG_PATH (--no-config); Yama will use built-in defaults."
+  warn "Skipping $CONFIG_PATH (--no-config). Yama ships zero built-in MCP servers — without a config defining mcpServers.servers.github the review runs toolless."
 fi
 
 # =============================================================================
@@ -769,6 +808,7 @@ ${C_BOLD}3) Review & ship the change${C_RESET}
 $( [ "$WRITE_CONFIG" = "1" ] && printf '   • Tune %s — the TODO-marked focusAreas / blockingCriteria define\n     what Yama actually catches and blocks on.' "$CONFIG_PATH" )
    • Commit and open a PR (or merge to your default branch) — your call.
      The workflow runs on PRs targeting: ${C_BOLD}$BRANCHES_YAML${C_RESET}.
+$( case "${REF##*@}" in v[0-9]*) : ;; *) printf '%s' "${REF##*@}" | grep -qE '^[0-9a-f]{7,40}$' || printf '   • %sPin the action%s: "%s" is a mutable ref. Once a v3 tag exists, re-run with\n     --ref <tag-or-sha> (or edit `uses:` in the workflow) for supply-chain safety.' "$C_BOLD" "$C_RESET" "$REF" ;; esac )
 
 ${C_DIM}Notes: the action self-builds (~2–3 min) on first run. Fork PRs and runs with
 missing secrets are skipped cleanly so the check never deadlocks merges.${C_RESET}
