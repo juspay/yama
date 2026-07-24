@@ -14,12 +14,12 @@ Thank you for your interest in contributing to Yama! This guide will help you ge
 2. **Setup Development Environment**
 
    ```bash
-   pnpm run setup:setup
+   pnpm install
    ```
 
 3. **Start Development**
    ```bash
-   pnpm run dev
+   pnpm run dev:run    # run the CLI from source (tsx src/cli/cli.ts)
    ```
 
 ## 📋 Development Workflow
@@ -30,19 +30,19 @@ Thank you for your interest in contributing to Yama! This guide will help you ge
 # Install dependencies
 pnpm install
 
-# Validate setup
-pnpm run env:validate
+# Validate environment
+pnpm run validate:env
 ```
 
 ### 2. Development Commands
 
 ```bash
-# Start development server
-pnpm run dev
+# Run the CLI from source
+pnpm run dev:run        # tsx src/cli/cli.ts
+pnpm run dev            # watch mode
 
 # Run tests
-pnpm run test           # All tests
-pnpm run test:watch     # Watch mode
+pnpm test               # jest (unit tests in tests/)
 
 # Code quality
 pnpm run lint           # Check linting
@@ -50,25 +50,24 @@ pnpm run lint:fix       # Fix linting issues
 pnpm run format         # Format code
 pnpm run type-check     # TypeScript check
 
-# Health monitoring
-pnpm run health         # Full health check
-pnpm run validate       # Build validation
+# Build
+pnpm run build          # rimraf dist && tsc && tsc-alias
 ```
+
+**Recommended workflow:** edit → `pnpm run type-check` → `pnpm run lint` →
+`pnpm test` → `pnpm run build`.
 
 ### 3. Testing
 
-- **Unit Tests**: Located in `tests/unit/`
-- **E2E Tests**: Located in `tests/e2e/`
-- **Performance Tests**: Located in `tests/performance/`
+Tests live under `tests/`, mirroring `src/v2/`:
+`tests/{unit,v2,integration,features,benchmarks,__mocks__}`.
 
 ```bash
-# Run specific test types
-pnpm run test:unit
-pnpm run test:e2e
-pnpm run test:performance
+# Run all tests
+pnpm test
 
-# Coverage reporting
-pnpm run test:coverage
+# Run a specific directory or file
+pnpm test -- tests/v2/core
 ```
 
 ## 🔧 Code Standards
@@ -78,6 +77,9 @@ pnpm run test:coverage
 - Use strict TypeScript configuration
 - All code must be properly typed (no `any` types)
 - Follow existing code patterns and conventions
+- Repo-specific coding rules (zero `interface`, all exported types in the
+  `src/v2/types/` barrel, config-driven MCP, etc.) live in
+  [CLAUDE.md](CLAUDE.md) — read it before writing code
 
 ### Code Style
 
@@ -94,10 +96,10 @@ We use [Conventional Commits](https://conventionalcommits.org/):
 type(scope): description
 
 Examples:
-feat(guardian): add new security scan feature
+feat(review): add new security scan feature
 fix(cli): resolve argument parsing issue
 docs(readme): update installation instructions
-test(core): add unit tests for ContextGatherer
+test(core): add unit tests for ReviewResultParser
 ```
 
 **Types:**
@@ -115,12 +117,12 @@ test(core): add unit tests for ContextGatherer
 
 ### Pre-commit Hooks
 
-Pre-commit hooks automatically run:
+Pre-commit hooks automatically run on staged files (via lint-staged):
 
 - Code formatting (Prettier)
 - Linting (ESLint)
-- Type checking (TypeScript)
-- Related tests
+
+The pre-push hook additionally runs validation and the test suite.
 
 ## 🏗️ Architecture Overview
 
@@ -128,33 +130,38 @@ Pre-commit hooks automatically run:
 
 ```
 src/
-├── core/                 # Core business logic
-│   ├── Guardian.ts       # Main orchestrator
-│   ├── ContextGatherer.ts # Context collection
-│   └── providers/        # Platform providers
-├── features/             # Feature implementations
-│   ├── CodeReviewer.ts   # AI code review
-│   └── DescriptionEnhancer.ts # PR description enhancement
-├── cli/                  # Command-line interface
-├── types/                # TypeScript type definitions
-└── utils/                # Utility functions
+├── index.ts              # Public SDK entry (sanctioned type re-exporter)
+├── cli/cli.ts            # commander CLI (review | enhance | learn | init)
+└── v2/
+    ├── core/             # YamaOrchestrator, MCPServerManager, McpRegistry,
+    │                     # NeuroLinkFactory, ReviewResultParser, reviewDecision
+    ├── config/           # ConfigLoader (merge + validation), DefaultConfig
+    ├── prompts/          # PromptBuilder + review/enhancement/learning prompts
+    ├── exploration/      # ContextExplorerService (research sub-agent)
+    ├── harness/          # Critic + submit_review gate
+    ├── rules/            # RuleLoader — .yama/rules/** structured team rules
+    ├── state/            # ReviewStateStore — cross-run incremental review
+    ├── learning/         # KnowledgeBaseManager (.yama/knowledge-base.md)
+    ├── memory/           # MemoryManager (per-repo condensed memory)
+    ├── types/            # ALL type definitions — barrel at index.ts
+    └── utils/            # toolPolicy, tokenLimits, ProviderDetector, ...
 ```
 
 ### Adding New Features
 
-1. **Core Logic**: Add to `src/core/` or `src/features/`
-2. **Types**: Define in `src/types/`
-3. **Tests**: Add to `tests/unit/` and `tests/e2e/`
-4. **CLI**: Extend `src/cli/` if needed
+1. **Core Logic**: Add to the appropriate `src/v2/` module (`core/`, `harness/`, ...)
+2. **Types**: Define in `src/v2/types/` (the barrel — see [CLAUDE.md](CLAUDE.md))
+3. **Tests**: Add to `tests/` mirroring `src/v2/`
+4. **CLI**: Extend `src/cli/cli.ts` if needed
 
-### Platform Providers
+### Platform and Tool Integrations
 
-To add a new platform provider:
-
-1. Implement the provider interface in `src/core/providers/`
-2. Add configuration types in `src/types/`
-3. Add comprehensive tests
-4. Update documentation
+VCS platforms and tool integrations are **config, not code**: every MCP server
+(Bitbucket, GitHub, code intelligence, custom) is a `mcpServers.servers.<id>`
+config entry with `roles`/`modes`/`blockedTools`/`allowedTools`. To add one,
+edit the config (see `.yama/README.md` and `yama.config.example.yaml`) — there
+is no provider interface to implement, and tool/server names must not appear
+in `src/`.
 
 ## 🧪 Testing Guidelines
 
@@ -166,23 +173,22 @@ To add a new platform provider:
 - Use descriptive test names
 
 ```typescript
-describe("ContextGatherer", () => {
-  describe("gatherContext", () => {
-    it("should gather complete context successfully", async () => {
+describe("ReviewResultParser", () => {
+  describe("parse", () => {
+    it("should normalize structuredData into a ReviewResult", async () => {
       // Test implementation
     });
   });
 });
 ```
 
-### E2E Tests
+### Integration Tests (`tests/integration/`)
 
 - Test complete workflows
 - Use real-world scenarios
-- Test CLI commands
-- Verify integrations
+- Verify module interactions
 
-### Performance Tests
+### Benchmarks (`tests/benchmarks/`)
 
 - Monitor memory usage
 - Test large file handling
@@ -219,7 +225,8 @@ We use semantic versioning and automated releases:
 
 1. Ensure all tests pass
 2. Update documentation
-3. Run `pnpm run release:prepare`
+3. Run the full check locally:
+   `pnpm run type-check && pnpm run lint && pnpm test && pnpm run build`
 4. Create PR to `main` branch
 5. Merge triggers automated release
 
@@ -256,8 +263,8 @@ What actually happens
 ## Environment
 
 - OS: [e.g. macOS 13.0]
-- Node.js: [e.g. 18.15.0]
-- Yama: [e.g. 1.1.0]
+- Node.js: [e.g. 20.18.1 — Yama requires >=20.18.1]
+- Yama: [e.g. 2.7.2]
 - Platform: [e.g. GitHub, Bitbucket]
 ```
 
@@ -333,7 +340,8 @@ We appreciate all contributions! Contributors will be:
 
 ## 📜 Code of Conduct
 
-Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+Be respectful and constructive in all project spaces — issues, PRs,
+discussions, and reviews. Harassment or personal attacks are not tolerated.
 
 ---
 

@@ -1,22 +1,34 @@
-# Migration guide — breaking changes (next major)
+# Migration guide — the next release (v3 line)
 
-This refactor contains **breaking changes** and must be released as a **major
-version** (commit with a `BREAKING CHANGE:` footer / `feat!:` so semantic-release
-bumps the major). Summary of what changed and how to migrate.
+This release contains **breaking changes** (release with a `BREAKING CHANGE:`
+footer / `feat!:` so semantic-release bumps accordingly). The breaking item is
+the **legacy flat `mcpServers` config shape being rejected at startup** — see
+"Config changes" below. The v3-foundations features further down ship in the
+same release and are all backward compatible. Summary of what changed and how
+to migrate.
 
-## Removed public API
+## Public API: removed and deprecated
+
+Removed:
 
 | Removed                        | Replacement                                    |
 | ------------------------------ | ---------------------------------------------- |
-| `YamaV2Orchestrator` (export)  | `YamaOrchestrator`                             |
-| `createYamaV2()`               | `createYama()`                                 |
-| `YamaV2Config` (type)          | `YamaConfig`                                   |
 | `setupV2CLI()`                 | `setupCLI()`                                   |
 | `src/cli/v2.cli.ts` entrypoint | `src/cli/cli.ts` (the `yama` bin is unchanged) |
 | `GetIssueResponse` (type)      | removed with Jira                              |
 
-The runtime class was already named `YamaOrchestrator`; only the aliases and the
-`v2.cli` shim are gone. Update imports from `YamaV2Orchestrator` → `YamaOrchestrator`.
+Deprecated — still exported as back-compat aliases, will be removed in the
+next major:
+
+| Deprecated alias              | Use instead        |
+| ----------------------------- | ------------------ |
+| `YamaV2Orchestrator` (export) | `YamaOrchestrator` |
+| `createYamaV2()`              | `createYama()`     |
+| `YamaV2Config` (type)         | `YamaConfig`       |
+
+The runtime class was already named `YamaOrchestrator`; the `V2` names are thin
+`@deprecated` aliases kept so existing consumers keep working. Update imports
+from `YamaV2Orchestrator` → `YamaOrchestrator` before the next major.
 
 ## Jira removed
 
@@ -39,8 +51,9 @@ If you still want Jira context, add it as a **user-configured MCP server** in
   produce a review with no tools. Copy the `mcpServers.servers` block from
   `yama.config.example.yaml` and move your per-server settings into it.
 - Removed `ai.enableToolFiltering` and `ai.toolFilteringMode` (the query-level
-  Jira-only filter they drove is gone; destructive-tool safety is now enforced by
-  NeuroLink's native fail-closed `tools.exclude`). Remove these keys.
+  Jira-only filter they drove is gone; destructive-tool safety is now enforced
+  per server via each definition's `blockedTools` denylist and fail-closed
+  `allowedTools` allowlist). Remove these keys.
 - **Config precedence:** `.yama/config.yaml` is now preferred. The legacy
   `yama.config.yaml` / `config/yama.config.yaml` still load but emit a deprecation
   warning — move your config to `.yama/config.yaml`.
@@ -78,13 +91,13 @@ unset in CI that reviews untrusted PRs. See `.yama/README.md`.
 
 ## NeuroLink
 
-Upgraded to `@juspay/neurolink@^10.1.2` (Node `>=20.18.1`). If you consume Yama as a
+Upgraded to `@juspay/neurolink@^10.4.1` (Node `>=20.18.1`). If you consume Yama as a
 library, ensure your runtime meets that floor.
 
-## 2.7.x → 2.8.0 (v3 foundations)
+## v3 foundations (same release)
 
-**No breaking changes.** All new capabilities are opt-out/opt-in config keys
-with behavior-preserving defaults:
+**No additional breaking changes.** All new capabilities are opt-out/opt-in
+config keys with behavior-preserving defaults:
 
 | New key                                   | Default                                  | Effect                                                                                                                                                                              |
 | ----------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

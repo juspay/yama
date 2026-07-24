@@ -10,17 +10,17 @@
 
 ## Architecture
 
-| Aspect                    | Legacy                 | Current                       |
-| ------------------------- | ---------------------- | ----------------------------- |
-| **Architecture**          | Coded orchestration    | AI autonomous orchestration   |
-| **Bitbucket Integration** | Direct handler imports | External MCP server           |
-| **Context Strategy**      | Pre-fetch everything   | Lazy load on-demand           |
-| **AI Role**               | Static analyzer        | Autonomous agent with tools   |
-| **Decision Making**       | TypeScript code        | AI decides                    |
-| **Tool Access**           | None                   | All operations via MCP        |
-| **File Analysis**         | All at once in prompt  | File-by-file AI loop          |
-| **Comment Posting**       | Batch after analysis   | Real-time as found            |
-| **PR Blocking**           | Manual logic           | AI decision based on criteria |
+| Aspect               | Legacy                 | Current                                                        |
+| -------------------- | ---------------------- | -------------------------------------------------------------- |
+| **Architecture**     | Coded orchestration    | AI autonomous orchestration                                    |
+| **VCS Integration**  | Direct handler imports | Config-driven MCP servers (`mcpServers.servers.*`)             |
+| **Context Strategy** | Pre-fetch everything   | Lazy load on-demand                                            |
+| **AI Role**          | Static analyzer        | Autonomous agent with tools                                    |
+| **Decision Making**  | TypeScript code        | AI reports an advisory verdict; final decision is code-derived |
+| **Tool Access**      | None                   | All operations via MCP                                         |
+| **File Analysis**    | All at once in prompt  | File-by-file AI loop                                           |
+| **Comment Posting**  | Batch after analysis   | Gated by `submit_review` (dedup + critic verification)         |
+| **PR Blocking**      | Manual logic           | Deterministic policy: any CRITICAL or 3+ MAJOR findings block  |
 
 ## Architecture Overview
 
@@ -31,7 +31,7 @@ MemoryManager (per-repo condensed memory)
     ↓
 NeuroLink AI Agent (Autonomous)
     ↓
-MCP Tools (Bitbucket / GitHub)
+MCP Tools (config-defined: Bitbucket / GitHub / Serena / local-git / custom)
     ↓
 Pull Request Operations
 ```
@@ -48,17 +48,17 @@ Pull Request Operations
    - Reads each file diff individually
    - Searches code for context when needed
    - Reads reference files to understand patterns
-   - Comments on issues immediately
+   - Submits candidate findings through the `submit_review` gate (dedup + verification) before posting
 
 3. **PR Description Enhancement** (AI-driven)
    - Analyzes changes and requirements
    - Generates comprehensive description
    - Updates PR with enhanced content
 
-4. **Final Decision** (AI-driven)
-   - Evaluates all findings
-   - Applies blocking criteria
-   - Approves or blocks PR
+4. **Final Decision** (code-derived)
+   - The AI reports an advisory decision alongside its findings
+   - `deriveDecision` enforces the blocking criteria deterministically
+   - A partial (truncated) review can never end APPROVED
 
 ## Installation & Setup
 
@@ -82,9 +82,16 @@ BITBUCKET_USERNAME=your.email@company.com
 BITBUCKET_TOKEN=your-http-access-token
 BITBUCKET_BASE_URL=https://bitbucket.yourcompany.com
 
+# GitHub (when reviewing GitHub PRs) — first match wins:
+# YAMA_GITHUB_TOKEN → GITHUB_TOKEN → GH_TOKEN → GITHUB_PERSONAL_ACCESS_TOKEN → GITHUB_ACCESS_TOKEN
+YAMA_GITHUB_TOKEN=your-github-token
+
 # AI Provider (optional - defaults to auto)
 AI_PROVIDER=google-ai
 AI_MODEL=gemini-2.5-pro
+
+# Opt in to project-level MCP config (.yama/mcp.json + .yama/mcp.d/*.json)
+YAMA_ENABLE_PROJECT_MCP=true
 
 # Langfuse Observability (optional)
 LANGFUSE_PUBLIC_KEY=your-public-key
@@ -92,25 +99,36 @@ LANGFUSE_SECRET_KEY=your-secret-key
 LANGFUSE_BASE_URL=https://cloud.langfuse.com
 ```
 
+For the GitHub composite Action setup, see [GITHUB_SETUP.md](GITHUB_SETUP.md).
+
 ### 3. Initialize Configuration
 
 ```bash
-# Create default config
+# Create a starter config (also scaffolds an example rule in .yama/rules/)
 npx yama init
 
-# Or copy example
-cp yama.config.example.yaml yama.config.yaml
+# Preferred location: .yama/config.yaml
+mkdir -p .yama && cp yama.config.example.yaml .yama/config.yaml
 
 # Edit configuration
-vim yama.config.yaml
+vim .yama/config.yaml
 ```
+
+Yama resolves the config from `.yama/config.yaml` first; the legacy root
+`yama.config.yaml` and `config/yama.config.yaml` locations still load, with a
+deprecation warning. When upgrading from an older version, see
+[MIGRATION.md](MIGRATION.md).
 
 ### 4. Verify Setup
 
 ```bash
-# Test initialization
-npx yama review --help
+# Validate the config and report the capability profile
+npx yama doctor --config .yama/config.yaml
 ```
+
+`yama doctor` lists every configured MCP server (transport, roles, modes, tool
+policy) and warns when a mode has no review-role servers — in that case the
+reviewer has no tools and reviews degrade to dry-run analysis.
 
 ## Usage
 
@@ -128,7 +146,16 @@ npx yama review \
   --workspace YOUR_WORKSPACE \
   --repository my-repo \
   --branch feature/new-feature
+
+# Review a GitHub PR
+npx yama review --owner your-org --repo my-repo --pr 123
 ```
+
+Useful flags (both providers):
+
+- `--review-only` — skip description enhancement, only review code
+- `--focus <areas>` — comma-separated review focus areas
+- `--prompt <text>` — additional review instruction
 
 ### Dry Run Mode
 
@@ -150,6 +177,21 @@ npx yama enhance \
   --pr 123
 ```
 
+### Learn from a Merged PR
+
+```bash
+npx yama learn \
+  --workspace YOUR_WORKSPACE \
+  --repository my-repo \
+  --pr 123
+
+# GitHub: npx yama learn --owner your-org --repo my-repo --pr 123
+```
+
+Extracts learnings from a merged PR into the knowledge base
+(`.yama/knowledge-base.md` by default; `--output` overrides, `--commit`
+auto-commits the change).
+
 ### Programmatic Usage
 
 ```typescript
@@ -170,10 +212,17 @@ console.log("Decision:", result.decision);
 console.log("Issues:", result.statistics.issuesFound);
 ```
 
-### Local SDK Mode (No Config File Required)
+### Local SDK Mode (No PR Provider Required)
 
-Note: Local mode initializes Git MCP internally via the package script
-`mcp:git:server` (`uvx mcp-server-git` with `npx @modelcontextprotocol/server-git` fallback).
+Local mode reviews a git diff (staged, uncommitted, or a ref range) without any
+PR provider — the diff is read directly from the repository, so no Bitbucket or
+GitHub credentials are needed. Tools are config-driven like everything else: no
+MCP server is registered from code, and the defaults ship zero servers. Enable
+a `local-git` server entry (see
+[yama.config.example.yaml](yama.config.example.yaml)) to give the agent
+read-only git inspection; without one the review still runs on the raw diff,
+but the agent has no tools — `yama doctor` reports this as degrading to
+dry-run analysis.
 
 ```typescript
 import { createYama } from "@juspay/yama";
@@ -200,7 +249,7 @@ const yama = createYama({
   configOverrides: {
     ai: {
       provider: "anthropic",
-      model: "claude-3-7-sonnet-latest",
+      model: "claude-sonnet-5",
     },
   },
 });
@@ -228,12 +277,31 @@ ai:
   model: "gemini-2.5-pro"
   temperature: 0.2
 
+# Every MCP server is a config entry — nothing is hardcoded in Yama.
 mcpServers:
-  bitbucket:
-    blockedTools: []
+  servers:
+    bitbucket:
+      enabled: true
+      transport: stdio
+      command: npx
+      args: ["-y", "@nexus2520/bitbucket-mcp-server@latest"]
+      env:
+        BITBUCKET_USERNAME: ${BITBUCKET_USERNAME}
+        BITBUCKET_TOKEN: ${BITBUCKET_TOKEN}
+        BITBUCKET_BASE_URL: ${BITBUCKET_BASE_URL}
+      roles: [review, explore]
+      modes: [pr]
+      # Destructive tools the review flow never needs.
+      blockedTools:
+        - merge_pull_request
+        - decline_pull_request
+        - delete_branch
+        - delete_comment
+        - create_pull_request
 
 review:
   enabled: true
+  verification: basic # off | basic | strict — critic pass before findings post
   focusAreas:
     - name: "Security Analysis"
       priority: "CRITICAL"
@@ -241,9 +309,16 @@ review:
       priority: "MAJOR"
 ```
 
+Note: the legacy flat shape (`mcpServers.bitbucket: ...`) is rejected at
+startup with a migration error — server definitions live under
+`mcpServers.servers.<id>`. See [MIGRATION.md](MIGRATION.md).
+
 ### Advanced Configuration
 
-See [yama.config.example.yaml](yama.config.example.yaml) for complete configuration options.
+See [yama.config.example.yaml](yama.config.example.yaml) for complete
+configuration options (GitHub, Serena, local-git servers, cross-run state,
+loop guards), and this repo's own [.yama/config.yaml](.yama/config.yaml) for a
+live example.
 
 ## Project-Specific Standards
 
@@ -282,13 +357,31 @@ AI reads only what it needs:
 - Needs to understand import? → `get_file_content("path/to/file.ts")`
 - Confused about structure? → `list_directory_content("src/")`
 
-### Real-Time Feedback
+### Verified, Deduplicated Findings
 
-AI comments as it finds issues:
+Every candidate finding passes the `submit_review` gate before it may be posted:
 
-- No batching - immediate feedback
+- Deterministic dedup against cross-run state, this run's findings, and auto-suppressions
+- A critic verification pass (`review.verification`: `off` | `basic` | `strict`, default `basic`) rejects incoherent, inflated, or evidence-free findings; `strict` additionally requires code evidence
 - Severity-based emojis (🔒 CRITICAL, ⚠️ MAJOR, 💡 MINOR, 💬 SUGGESTION)
 - Actionable suggestions with code examples
+
+### Incremental Reviews (Cross-Run State)
+
+Re-reviewing the same PR is incremental:
+
+- Previously-reported findings are never re-posted
+- Findings the agent verifies as fixed are marked resolved
+- Findings ignored for 3+ consecutive runs are auto-suppressed as learned false positives
+- Configure via `state` (`store`: `file` | `inline` | `github-artifact` | `jenkins-artifact`; default: `file` at `.yama/state`) — see [yama.config.example.yaml](yama.config.example.yaml)
+
+### Team Rules
+
+Structured team rules live in `.yama/rules/**` (YAML or JSON; one rule per
+file, or a `rules:` array). Findings cite a rule by id; a violated
+`blocking: true` rule forces the verdict to BLOCKED, advisory rules are
+enforced with proportionate severity. `npx yama init` scaffolds an example
+rule.
 
 ### Code Context Understanding
 
@@ -311,7 +404,10 @@ AI learns from past reviews and remembers across PRs:
 
 ## Blocking Criteria
 
-AI applies these criteria automatically:
+The verdict is code-derived, never model-trusted: the AI's reported decision is
+advisory, and `deriveDecision` (`src/v2/core/reviewDecision.ts`) enforces the
+blocking policy deterministically — a prompt-injected "approve" can never clear
+blocking findings.
 
 1. **ANY CRITICAL issue** → BLOCKS PR
    - Security vulnerabilities
@@ -323,15 +419,27 @@ AI applies these criteria automatically:
    - Performance problems
    - Logic errors
 
+3. **Violated blocking team rule** → BLOCKS PR (see Team Rules above)
+
+4. **Partial review** (step cap, timeout, truncated output) → can never end APPROVED
+
 ## MCP Servers
 
-Yama uses MCP (Model Context Protocol) servers for tool access:
+Every MCP server — Bitbucket, GitHub, Serena, local-git, or any custom server —
+is a config entry under `mcpServers.servers.*`; nothing is hardcoded. Each
+entry declares:
 
-### Bitbucket MCP
+- `roles`: which agents get the server (`review` / `explore`)
+- `modes`: which review modes it applies to (`pr` / `local`)
+- `blockedTools`: denylist — hide these tool names from the agent
+- `allowedTools`: fail-closed allowlist — only these tools are exposed; if the
+  server's tools cannot be discovered, registration fails rather than running
+  with an unenforced allowlist
 
-- **Package**: `@nexus2520/bitbucket-mcp-server`
-- **Tools**: get_pull_request, add_comment, search_code, get_file_blame, etc.
-- **Status**: Production ready
+See [yama.config.example.yaml](yama.config.example.yaml) for ready-made
+Bitbucket, GitHub, Serena, and local-git definitions. Projects can also ship
+server definitions in `.yama/mcp.json` (plus `.yama/mcp.d/*.json` drop-ins),
+gated behind `YAMA_ENABLE_PROJECT_MCP=true`.
 
 ## Monitoring & Analytics
 
@@ -356,6 +464,9 @@ Analytics include:
 ### MCP Server Connection Issues
 
 ```bash
+# First stop: validate config + capability profile
+npx yama doctor --config .yama/config.yaml
+
 # Verify environment variables
 echo $BITBUCKET_USERNAME
 echo $BITBUCKET_TOKEN
@@ -407,6 +518,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ## Support
 
 - **Documentation**: [GitHub Wiki](https://github.com/juspay/yama/wiki)
+- **GitHub Action setup**: [GITHUB_SETUP.md](GITHUB_SETUP.md)
+- **Upgrading**: [MIGRATION.md](MIGRATION.md)
 - **Issues**: [GitHub Issues](https://github.com/juspay/yama/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/juspay/yama/discussions)
 

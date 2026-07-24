@@ -2,14 +2,16 @@
 
 Everything Yama reads for a project lives here, so customization is config, not code.
 
-| File / dir          | Purpose                                                                     | Authored by |
-| ------------------- | --------------------------------------------------------------------------- | ----------- |
-| `config.yaml`       | Main config (AI provider/model, review focus areas, blocking criteria)      | you         |
-| `mcp.json`          | MCP server definitions (see below); `mcp.d/*.json` are merged in name order | you         |
-| `prompts/`          | Custom prompt / standards overrides                                         | you         |
-| `standards/`        | Coding-standard docs (`*.md`) used as review context                        | you         |
-| `knowledge-base.md` | Learnings accumulated by `yama learn` (committed)                           | Yama        |
-| `memory/`           | Per-repo condensed review memory (committed)                                | Yama        |
+| File / dir          | Purpose                                                                                                                                     | Authored by |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `config.yaml`       | Main config (AI provider/model, review focus areas, blocking criteria)                                                                      | you         |
+| `mcp.json`          | MCP server definitions (see below); `mcp.d/*.json` are merged in name order                                                                 | you         |
+| `prompts/`          | Custom prompt / standards overrides                                                                                                         | you         |
+| `standards/`        | Coding-standard docs (`*.md`) used as review context                                                                                        | you         |
+| `rules/`            | Structured team rules (YAML/JSON) — id/scope/severity/blocking + examples; violated blocking rules force BLOCKED. Scaffolded by `yama init` | you         |
+| `knowledge-base.md` | Learnings accumulated by `yama learn` (committed)                                                                                           | Yama        |
+| `memory/`           | Per-repo condensed review memory (committed)                                                                                                | Yama        |
+| `state/`            | Cross-run review state (default file-store path) — powers incremental re-review                                                             | Yama        |
 
 ## MCP servers (`mcp.json`)
 
@@ -24,17 +26,21 @@ environment at load time, so secrets stay out of the committed file. See
 > environment variable **`YAMA_ENABLE_PROJECT_MCP=true`** is set. Set that flag
 > only from a **trusted** context (e.g. your own repo, not an untrusted fork/PR):
 > it must be set outside the checkout so a PR cannot enable itself. In CI that
-> reviews untrusted PRs, leave it unset — the built-in provider servers still run.
+> reviews untrusted PRs, leave it unset — the `mcpServers.servers` entries from
+> the main (trusted) config still run.
 
-- A **`bitbucket`** / **`github`** key overrides the built-in VCS-provider defaults
-  (e.g. pin/upgrade the Bitbucket server: `"args": ["-y", "@nexus2520/bitbucket-mcp-server@2.0.4"]`).
+- A key with the **same id** as a `mcpServers.servers` entry in the main config
+  (e.g. `bitbucket`, `github`) **overrides** that entry — useful to pin/upgrade a
+  server: `"args": ["-y", "@nexus2520/bitbucket-mcp-server@2.0.4"]`.
 - Any **other** key registers an additional server, exposed to the `review` and/or
   `explore` agents via its optional `roles` field.
-- **On the built-in provider servers**, Yama's fail-closed denylist blocks the known
-  destructive VCS tools (merge/decline/delete/push/etc.) instance-wide. A **custom**
-  server can expose any tool name it likes, so those are only as safe as the server
-  you configure — review what a custom server exposes, restrict it with its own
-  `blockedTools`, and enable project MCP only for trusted checkouts (see above).
+- **Tool blocking is per-server config, not a built-in code-level denylist.**
+  Restrict each server through its own definition: `blockedTools` (denylist) and
+  `allowedTools` (fail-closed allowlist — if the server's tools cannot be
+  enumerated, registration fails rather than running unrestricted). Any server
+  can expose any tool name it likes, so a server is only as safe as the
+  `blockedTools`/`allowedTools` you give it — review what it exposes, restrict
+  it, and enable project MCP only for trusted checkouts (see above).
 
 ## Code intelligence — reviewing beyond the diff
 

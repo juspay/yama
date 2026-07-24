@@ -8,6 +8,7 @@ import { Command } from "commander";
 import dotenv from "dotenv";
 import { VERSION, createYama, McpRegistry } from "../index.js";
 import { createLearningOrchestrator } from "../v2/core/LearningOrchestrator.js";
+import { formatFindingsMarkdown } from "../v2/utils/findingsSummary.js";
 import type {
   LocalReviewRequest,
   ReviewRequest,
@@ -290,10 +291,14 @@ async function writeGitHubOutputs(result: ReviewResult): Promise<void> {
 
   const issues = result.statistics?.issuesFound;
   const summary = (result.summary || "").trim();
+  // Markdown trail of the findings behind the verdict, so the Action can post
+  // WHY a review blocked even if the agent posted no inline comments.
+  const findings = formatFindingsMarkdown(result.issues);
 
   const lines = [
     `decision=${result.decision}`,
     `summary<<EOF\n${summary}\nEOF`,
+    `findings<<YAMA_FINDINGS_EOF\n${findings}\nYAMA_FINDINGS_EOF`,
     `critical-issues=${issues?.critical ?? 0}`,
     `major-issues=${issues?.major ?? 0}`,
     `minor-issues=${issues?.minor ?? 0}`,

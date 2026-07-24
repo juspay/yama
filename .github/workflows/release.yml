@@ -91,10 +91,16 @@ jobs:
 
       - name: Publish to GitHub Packages
         run: |
-          if [ -f "package.json" ]; then
-            echo "📦 Publishing to GitHub Packages..."
-            pnpm publish --access public --no-git-checks --registry https://npm.pkg.github.com
-            echo "✅ Published to GitHub Packages successfully!"
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@juspay/yama@${VERSION}" version --registry https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "ℹ️ @juspay/yama@${VERSION} already on GitHub Packages — skipping."
+            exit 0
           fi
+          echo "📦 Publishing @juspay/yama@${VERSION} to GitHub Packages..."
+          # git-checks must come from config, not argv: pnpm forwards unknown CLI
+          # flags to npm, and npm errors on --git-checks (EUNKNOWNCONFIG).
+          pnpm config set git-checks false
+          pnpm publish --access public --registry https://npm.pkg.github.com
+          echo "✅ Published to GitHub Packages successfully!"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
