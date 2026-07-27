@@ -1,3 +1,18 @@
+# [3.0.0](https://github.com/juspay/yama/compare/v2.7.2...v3.0.0) (2026-07-27)
+
+
+### Bug Fixes
+
+* **release:** repair GitHub Packages publish and refresh v3 docs ([705efe9](https://github.com/juspay/yama/commit/705efe9beff7b8c809950458df9d3fe429238bdf))
+
+
+### BREAKING CHANGES
+
+* **release:** the v3 line rejects the legacy flat mcpServers.<provider>
+config shape at startup - move servers under mcpServers.servers.<id> (see
+MIGRATION.md). Marker carried here because the v3 refactor merged as a
+non-releasing refactor commit.
+
 ## [2.7.2](https://github.com/juspay/yama/compare/v2.7.1...v2.7.2) (2026-07-23)
 
 
