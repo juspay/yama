@@ -63,7 +63,7 @@ jobs:
       # PATH before the review runs. The composite action inherits the runner
       # PATH, so installing it here makes `uvx` available to the serena server.
       - name: Set up uv (for the Serena MCP server)
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       # Cross-run review state (github-artifact store): restore the newest
       # state artifact for this PR so the review is incremental — previously
       # posted findings are never duplicated, fixed ones get resolved.
