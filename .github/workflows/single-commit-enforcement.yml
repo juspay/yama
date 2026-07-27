@@ -224,7 +224,7 @@ jobs:
 
       - name: Post Minimal Success Comment
         if: steps.validate.outputs.status == 'compliant' && steps.check-permissions.outputs.can_comment == 'true'
-        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
         continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
