@@ -38,6 +38,7 @@ import {
   prReviewVerdictSchema,
 } from "./reviewSchema.js";
 import { clampMaxTokens } from "../utils/tokenLimits.js";
+import { temperatureOption } from "../utils/generateOptions.js";
 import { parseDurationMs } from "../utils/duration.js";
 import {
   buildFindingId,
@@ -291,7 +292,7 @@ export class YamaOrchestrator {
             input: { text: instructions },
             provider: this.config.ai.provider,
             model: this.config.ai.model,
-            temperature: this.config.ai.temperature,
+            ...temperatureOption(this.config.ai.temperature),
             maxTokens: clampMaxTokens(this.config.ai.maxTokens),
             timeout: this.config.ai.timeout,
             // Prefer streaming transport for the long agentic loop (chunked
@@ -403,7 +404,7 @@ export class YamaOrchestrator {
             input: { text: instructions },
             provider: this.config.ai.provider,
             model: this.config.ai.model,
-            temperature: this.config.ai.temperature,
+            ...temperatureOption(this.config.ai.temperature),
             maxTokens: clampMaxTokens(this.config.ai.maxTokens),
             timeout: this.config.ai.timeout,
             enableAnalytics: this.config.ai.enableAnalytics,
@@ -520,7 +521,7 @@ export class YamaOrchestrator {
         input: { text: reviewInstructions },
         provider: this.config.ai.provider,
         model: this.config.ai.model,
-        temperature: this.config.ai.temperature,
+        ...temperatureOption(this.config.ai.temperature),
         maxTokens: clampMaxTokens(this.config.ai.maxTokens),
         timeout: this.config.ai.timeout,
         // Prefer streaming transport for the long agentic loop (chunked SSE
@@ -584,7 +585,7 @@ export class YamaOrchestrator {
           input: { text: enhanceInstructions },
           provider: this.config.ai.provider,
           model: this.config.ai.model,
-          temperature: this.config.ai.temperature,
+          ...temperatureOption(this.config.ai.temperature),
           maxTokens: clampMaxTokens(this.config.ai.maxTokens),
           timeout: this.config.ai.timeout,
           skipToolPromptInjection: true,

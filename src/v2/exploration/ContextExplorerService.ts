@@ -14,6 +14,7 @@ import { MemoryManager } from "../memory/MemoryManager.js";
 import { KnowledgeBaseManager } from "../learning/KnowledgeBaseManager.js";
 import { NeuroLinkFactory } from "../core/NeuroLinkFactory.js";
 import { clampMaxTokens, MAX_EXTRACTION_TOKENS } from "../utils/tokenLimits.js";
+import { temperatureOption } from "../utils/generateOptions.js";
 import { isMutatingGitTool } from "../utils/toolPolicy.js";
 import { ExplorerPromptBuilder } from "./ExplorerPromptBuilder.js";
 import { RulesContextLoader } from "./RulesContextLoader.js";
@@ -115,8 +116,9 @@ export class ContextExplorerService {
       input: { text: prompt },
       provider: this.config.ai.explore.provider || this.config.ai.provider,
       model: this.config.ai.explore.model || this.config.ai.model,
-      temperature:
+      ...temperatureOption(
         this.config.ai.explore.temperature ?? this.config.ai.temperature,
+      ),
       maxTokens: clampMaxTokens(
         this.config.ai.explore.maxTokens ?? this.config.ai.maxTokens,
       ),
