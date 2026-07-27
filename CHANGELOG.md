@@ -1,3 +1,10 @@
+## [3.0.1](https://github.com/juspay/yama/compare/v3.0.0...v3.0.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **config:** make ai temperature optional, omit when unset ([10116a8](https://github.com/juspay/yama/commit/10116a85faa08d1a7d13e18048d7d11c45fc71db))
+
 # [3.0.0](https://github.com/juspay/yama/compare/v2.7.2...v3.0.0) (2026-07-27)
 
 
