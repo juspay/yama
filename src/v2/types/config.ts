@@ -59,7 +59,11 @@ export type AIProvider = string;
 export type AIConfig = {
   provider: AIProvider;
   model: string;
-  temperature: number;
+  /**
+   * Sampling temperature. Optional — when unset, the field is omitted from
+   * NeuroLink `generate()` calls entirely and the provider default applies.
+   */
+  temperature?: number;
   maxTokens: number;
   enableAnalytics: boolean;
   enableEvaluation: boolean;
@@ -75,6 +79,7 @@ export type ExploreAIConfig = {
   enabled: boolean;
   provider?: AIProvider;
   model?: string;
+  /** Falls back to `ai.temperature`; when both are unset, omitted from the call. */
   temperature?: number;
   maxTokens?: number;
   timeout?: string;

@@ -19,7 +19,7 @@ display:
 ai:
   provider: "auto" # auto | google-ai | anthropic | openai | bedrock
   model: "gemini-2.5-pro" # or claude-3-7-sonnet-20250219-v1:0, gpt-4, etc.
-  temperature: 0.2 # Lower = more deterministic (0.0-1.0)
+  temperature: 0.2 # Optional. Lower = more deterministic (0.0-1.0); omit to use the provider default
   maxTokens: 128000 # Maximum tokens per AI call
   enableAnalytics: true # Track token usage and costs
   enableEvaluation: false # Enable quality evaluation (slower)
@@ -39,7 +39,7 @@ ai:
     enabled: true
     provider: "auto"
     model: "gemini-2.5-flash"
-    temperature: 0.1
+    temperature: 0.1 # Optional; falls back to ai.temperature, else provider default
     maxTokens: 32000
     timeout: "5m"
     cacheResults: true

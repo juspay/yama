@@ -57,6 +57,13 @@ If you still want Jira context, add it as a **user-configured MCP server** in
 - **Config precedence:** `.yama/config.yaml` is now preferred. The legacy
   `yama.config.yaml` / `config/yama.config.yaml` still load but emit a deprecation
   warning — move your config to `.yama/config.yaml`.
+- **`ai.temperature` no longer defaults to `0.2`** (and `ai.explore.temperature`
+  no longer defaults to `0.1`). When unset, the field is omitted from NeuroLink
+  `generate()` calls entirely and the provider's own default applies. Set
+  `ai.temperature: 0.2` (and `ai.explore.temperature: 0.1`) explicitly to keep
+  the previous behavior. Internal deterministic passes (critic, verdict
+  follow-up, extraction, learning, memory condensation) keep their fixed low
+  temperatures.
 
 ## Project MCP is opt-in (security)
 

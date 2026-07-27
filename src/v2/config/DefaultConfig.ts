@@ -21,7 +21,8 @@ export class DefaultConfig {
       ai: {
         provider: "auto",
         model: "gemini-2.5-pro",
-        temperature: 0.2,
+        // temperature deliberately has no default: unset means "omit from the
+        // NeuroLink call" so the provider's own default applies.
         // Sane output ceiling (NeuroLink clamps further per-model server-side).
         maxTokens: 32000,
         enableAnalytics: true,
@@ -52,7 +53,6 @@ export class DefaultConfig {
           enabled: true,
           provider: "auto",
           model: "gemini-2.5-flash",
-          temperature: 0.1,
           // Lighter sub-task: sane output ceiling (NeuroLink clamps further per-model server-side).
           maxTokens: 16000,
           timeout: "5m",
