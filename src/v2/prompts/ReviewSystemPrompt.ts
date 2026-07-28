@@ -22,6 +22,7 @@ export function buildReviewSystemPrompt(): string {
     <rule>BE ACTIONABLE. Every finding names a file and line and gives a concrete fix. Include a real, executable code suggestion for CRITICAL and MAJOR findings.</rule>
     <rule>USE THE TOOLS YOU HAVE. Discover the tools available to you and use them to read the PR and its diff, to post inline comments, and (in live mode) to record your review decision. Do NOT assume or invent tool names — call only tools that actually exist for you.</rule>
     <rule>GATE BEFORE POSTING. Before posting ANY inline comment, submit your candidate findings for the current file (or batch) to the submit_review tool, each with concrete evidence (file:line citations or quoted code). Post comments ONLY for findings it accepts. For a rejected finding: either gather stronger evidence and resubmit it ONCE, or drop it. Findings listed in &lt;previous-review&gt; already have comments — never re-post them; verify instead whether they are fixed and report their ids in resolvedIssueIds.</rule>
+    <rule>POST IMMEDIATELY AFTER ACCEPTANCE. The moment submit_review accepts findings, post their inline comments BEFORE moving to the next file. Never save posting for the end of the review — a finding that is accepted but unposted helps nobody.</rule>
   </method>
 
   <severity>
@@ -41,7 +42,7 @@ export function buildReviewSystemPrompt(): string {
         { "severity": "CRITICAL|MAJOR|MINOR|SUGGESTION", "category": "string", "title": "string", "description": "string", "filePath": "string", "line": 1, "suggestion": "string" }
       ]
     }
-    Yama derives the AUTHORITATIVE decision from these findings (any CRITICAL blocks; enough MAJORs block), so list every issue you found here — even the ones you already posted as comments.
+    Yama derives the AUTHORITATIVE decision from the gate-verified findings (any CRITICAL blocks; enough MAJORs block). "issues" must list exactly the findings submit_review ACCEPTED — never invent, pad, or restate project rules as findings; an issue that was not gated is discarded as unverified.
   </output>
 
   <anti-patterns>

@@ -10,13 +10,18 @@
  */
 
 import { SessionManager } from "./SessionManager.js";
-import { deriveDecision } from "./reviewDecision.js";
+import {
+  deriveDecision,
+  DEFAULT_MAJOR_BLOCK_THRESHOLD,
+} from "./reviewDecision.js";
 import { isVerdictShaped } from "./reviewSchema.js";
+import { reconcileVerdictWithGate } from "../harness/verdictReconciler.js";
 
 import {
   LocalDiffContext,
   ReviewCompletion,
   ReviewDecisionResult,
+  ReviewGateSnapshot,
   ReviewResult,
   IssuesBySeverity,
   TokenUsage,
@@ -40,6 +45,7 @@ export class ReviewResultParser {
     startTime: number,
     sessionId: string,
     severityOverrides?: Record<string, string>,
+    gate?: ReviewGateSnapshot,
   ): ReviewResult {
     const session = this.sessionManager.getSession(sessionId);
     const duration = Math.round((Date.now() - startTime) / 1000);
@@ -58,11 +64,43 @@ export class ReviewResultParser {
           `(structuredData keys: ${parsed ? Object.keys(parsed).join(", ") || "<empty>" : "<absent>"})`,
       );
     }
-    const issues = this.normalizeFindings(
+    const verdictIssues = this.normalizeFindings(
       parsed?.issues,
       "issue",
       severityOverrides,
     );
+
+    // Anchor the verdict to the gate: once the agent has used submit_review,
+    // only gate-accepted (deduped + critic-verified) findings may drive the
+    // decision. Verdict issues that never passed the gate are quarantined as
+    // advisory — on partial runs the verdict recovery has been observed to
+    // fabricate whole issue lists out of the rules prompt, and counting those
+    // would block PRs on findings nobody verified.
+    const gateAnchored = gate?.invoked === true;
+    let issues = verdictIssues;
+    let ungatedIssues: LocalReviewFinding[] = [];
+    if (gateAnchored) {
+      const gatedFindings = this.normalizeFindings(
+        gate.accepted,
+        "issue",
+        severityOverrides,
+      );
+      const reconciled = reconcileVerdictWithGate({
+        gatedFindings,
+        verdictIssues,
+      });
+      issues = reconciled.issues;
+      ungatedIssues = reconciled.ungatedIssues;
+      if (ungatedIssues.length > 0) {
+        console.warn(
+          `   🛡️  ${ungatedIssues.length} verdict issue(s) never passed the ` +
+            `submit_review gate — quarantined as advisory (not posted, not ` +
+            `decision-driving): ` +
+            ungatedIssues.map((issue) => `"${issue.title}"`).join(", "),
+        );
+      }
+    }
+
     const issuesBySeverity = this.countFindingsBySeverity(issues);
     const aiDecision: ReviewDecisionResult = conforming
       ? this.normalizeDecision(parsed?.decision, issuesBySeverity)
@@ -74,15 +112,40 @@ export class ReviewResultParser {
           `${completion.jsonTruncated ? ", jsonTruncated" : ""}) — result is PARTIAL.`,
       );
     }
-    const decision = deriveDecision(aiDecision, issuesBySeverity, {
+    let decision = deriveDecision(aiDecision, issuesBySeverity, {
       partial: completion.partial,
     });
+    // Unverified (ungated) blocking claims are fail-safe in BOTH directions:
+    // they may not block on their own, but they may not be approved-over
+    // either — a human should look before this PR is greenlit.
+    const ungatedCounts = this.countFindingsBySeverity(ungatedIssues);
+    if (
+      decision === "APPROVED" &&
+      (ungatedCounts.critical > 0 ||
+        ungatedCounts.major >= DEFAULT_MAJOR_BLOCK_THRESHOLD)
+    ) {
+      decision = "CHANGES_REQUESTED";
+      console.log(
+        `   🛡️  ${ungatedCounts.critical} critical / ${ungatedCounts.major} major ` +
+          `unverified claim(s) exist — APPROVED capped at CHANGES_REQUESTED.`,
+      );
+    }
     if (decision !== aiDecision) {
       console.log(
         `   🛡️  Decision reconciled: AI reported ${aiDecision}, Yama enforces ${decision} ` +
           `(critical=${issuesBySeverity.critical}, major=${issuesBySeverity.major}).`,
       );
     }
+
+    // A partial (or verdict-less) run's model summary is untrustworthy — it is
+    // reconstructed from a compacted session and has described entirely
+    // different PRs. With gate data available, build the summary from what was
+    // actually verified instead.
+    const summary =
+      gateAnchored && (completion.partial || !conforming)
+        ? this.buildGateAnchoredSummary(issues, ungatedIssues, completion)
+        : this.sanitizeLocalSummary(parsed?.summary) ||
+          this.extractSummary(aiResponse);
 
     const toolCalls = session.toolCalls || [];
     const filesReviewed = new Set(
@@ -100,11 +163,11 @@ export class ReviewResultParser {
         codeQualityScore: 0,
         toolCallsMade: toolCalls.length,
         cacheHits: 0,
+        // With the gate active this is the number of verified findings
+        // cleared for posting — not the length of whatever the model claimed.
         totalComments: issues.length,
       },
-      summary:
-        this.sanitizeLocalSummary(parsed?.summary) ||
-        this.extractSummary(aiResponse),
+      summary,
       duration,
       tokenUsage: {
         input: this.toSafeNumber(aiResponse?.usage?.input),
@@ -115,12 +178,53 @@ export class ReviewResultParser {
       sessionId,
       completion,
       issues,
+      ungatedIssues: ungatedIssues.length > 0 ? ungatedIssues : undefined,
       resolvedIssueIds: Array.isArray(parsed?.resolvedIssueIds)
         ? parsed.resolvedIssueIds.filter(
             (id: unknown): id is string => typeof id === "string",
           )
         : undefined,
     };
+  }
+
+  /**
+   * Deterministic summary for runs whose model-written summary can't be
+   * trusted (partial loop or missing verdict): lists exactly the gate-verified
+   * findings, flags the early stop, and mentions quarantined claims.
+   */
+  private buildGateAnchoredSummary(
+    issues: LocalReviewFinding[],
+    ungatedIssues: LocalReviewFinding[],
+    completion: ReviewCompletion,
+  ): string {
+    const lines: string[] = ["## 🤖 Yama Review Summary", ""];
+    if (completion.partial) {
+      lines.push(
+        `⚠️ The review loop ended early (\`${completion.stopReason}\`` +
+          `${completion.stepsUsed ? `, ${completion.stepsUsed} steps` : ""}) — ` +
+          `this verdict is built strictly from gate-verified findings.`,
+        "",
+      );
+    }
+    if (issues.length === 0) {
+      lines.push("No verified findings were accepted by the review gate.");
+    } else {
+      lines.push(`**Verified findings (${issues.length}):**`, "");
+      for (const issue of issues) {
+        const location = issue.filePath
+          ? ` — \`${issue.filePath}${issue.line ? `:${issue.line}` : ""}\``
+          : "";
+        lines.push(`- **${issue.severity}**: ${issue.title}${location}`);
+      }
+    }
+    if (ungatedIssues.length > 0) {
+      lines.push(
+        "",
+        `_${ungatedIssues.length} additional claim(s) in the model verdict ` +
+          `never passed verification and were quarantined (see ungatedIssues)._`,
+      );
+    }
+    return lines.join("\n");
   }
 
   /**

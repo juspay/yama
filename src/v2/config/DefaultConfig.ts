@@ -207,10 +207,19 @@ export class DefaultConfig {
         logTokenUsage: true,
         exportFormat: "json",
         exportPath: ".yama/analytics/",
+        report: {
+          enabled: true,
+          path: ".yama/reports",
+        },
       },
 
       performance: {
-        maxReviewDuration: "15m",
+        // No maxReviewDuration default: the review is bounded by WORK
+        // (loop.maxSteps, the submit_review gate, per-step ai.timeout and
+        // toolTimeoutMs hang guards) — not by wall-clock. A default time cap
+        // used to cut long reviews mid-loop, losing posted-comment follow-ups
+        // and forcing a fabrication-prone verdict recovery. Set it explicitly
+        // only if an external scheduler requires a hard ceiling.
         loop: {
           maxSteps: 100,
           toolTimeoutMs: 300_000,

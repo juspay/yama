@@ -5,8 +5,17 @@
  */
 
 import { Command } from "commander";
+import { setMaxListeners } from "node:events";
 import dotenv from "dotenv";
 import { VERSION, createYama, McpRegistry } from "../index.js";
+
+// NeuroLink's agentic loop attaches one abort listener per step to each
+// generate() call's AbortSignal without removing them, so any loop past 10
+// steps spams MaxListenersExceededWarning (observed at every explore_context
+// launch). Raise the default for EventTargets created in this process until
+// that is fixed upstream — the listeners are released when the call settles;
+// this is warning noise, not a leak.
+setMaxListeners(100);
 import { createLearningOrchestrator } from "../v2/core/LearningOrchestrator.js";
 import { formatFindingsMarkdown } from "../v2/utils/findingsSummary.js";
 import type {
