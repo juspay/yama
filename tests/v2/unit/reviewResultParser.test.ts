@@ -277,3 +277,165 @@ describe("ReviewResultParser regression guards", () => {
     expect(calls[1].result?.value).toBe("second");
   });
 });
+
+describe("ReviewResultParser.parseReviewResult (gate anchoring)", () => {
+  const session = () => {
+    const sm = new SessionManager();
+    const parser = new ReviewResultParser(sm);
+    const sessionId = sm.createSession({
+      mode: "pr",
+      workspace: "w",
+      repository: "r",
+      pullRequestId: 496,
+    });
+    return { parser, sessionId };
+  };
+
+  it("quarantines fabricated verdict issues on a partial run — they must not drive BLOCKED", () => {
+    const { parser, sessionId } = session();
+
+    // Reproduces the observed failure: the loop died on a limit, the verdict
+    // recovery restated four project rules as MAJOR "findings" about files
+    // that were never gated. Only ONE finding actually passed submit_review.
+    const fabricated = (title: string) => ({
+      severity: "MAJOR",
+      category: "conventions",
+      title,
+      description: "restated project rule",
+      filePath: "src/features/tara/tools/commands/index.ts",
+    });
+    const result = parser.parseReviewResult(
+      {
+        structuredData: {
+          decision: "CHANGES_REQUESTED",
+          summary: "This PR adds a new Slack slash command...",
+          issues: [
+            fabricated("interface keyword used instead of type"),
+            fabricated("types outside src/types/"),
+            fabricated("env var instead of feature flag"),
+            fabricated("missing matching AI tool"),
+          ],
+        },
+        stopReason: "step-cap",
+        usage: {},
+      },
+      Date.now(),
+      sessionId,
+      undefined,
+      {
+        invoked: true,
+        accepted: [
+          {
+            id: "gated-1",
+            severity: "MAJOR",
+            title: "Envelope may still exceed maxBytes",
+            filePath: "src/features/tara/services/mcp.ts",
+            line: 122,
+          },
+        ],
+      },
+    );
+
+    // 1 verified MAJOR < threshold → not BLOCKED; the 4 fabrications are
+    // quarantined, not counted, not persisted.
+    expect(result.decision).toBe("CHANGES_REQUESTED");
+    expect(result.statistics.issuesFound.major).toBe(1);
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues?.[0].title).toBe("Envelope may still exceed maxBytes");
+    expect(result.ungatedIssues).toHaveLength(4);
+    expect(result.statistics.totalComments).toBe(1);
+    // Partial-run summary is rebuilt from verified findings, not model prose.
+    expect(result.summary).toContain("gate-verified");
+    expect(result.summary).not.toContain("Slack slash command");
+  });
+
+  it("caps APPROVED at CHANGES_REQUESTED when unverified CRITICAL claims exist", () => {
+    const { parser, sessionId } = session();
+    const result = parser.parseReviewResult(
+      {
+        structuredData: {
+          decision: "APPROVED",
+          summary: "ok",
+          issues: [
+            {
+              severity: "CRITICAL",
+              category: "security",
+              title: "Possible secret in config",
+              description: "never gated",
+              filePath: "src/x.ts",
+            },
+          ],
+        },
+        stopReason: "completed",
+        usage: {},
+      },
+      Date.now(),
+      sessionId,
+      undefined,
+      { invoked: true, accepted: [] },
+    );
+
+    expect(result.decision).toBe("CHANGES_REQUESTED");
+    expect(result.statistics.issuesFound.critical).toBe(0);
+    expect(result.ungatedIssues).toHaveLength(1);
+  });
+
+  it("still blocks on gate-accepted CRITICALs even if the verdict omits them", () => {
+    const { parser, sessionId } = session();
+    const result = parser.parseReviewResult(
+      {
+        structuredData: { decision: "APPROVED", summary: "ok", issues: [] },
+        stopReason: "completed",
+        usage: {},
+      },
+      Date.now(),
+      sessionId,
+      undefined,
+      {
+        invoked: true,
+        accepted: [
+          {
+            id: "gated-crit",
+            severity: "CRITICAL",
+            title: "SQL injection",
+            filePath: "src/db.ts",
+            line: 10,
+          },
+        ],
+      },
+    );
+
+    expect(result.decision).toBe("BLOCKED");
+    expect(result.statistics.issuesFound.critical).toBe(1);
+  });
+
+  it("keeps legacy behaviour when the gate was never invoked", () => {
+    const { parser, sessionId } = session();
+    const result = parser.parseReviewResult(
+      {
+        structuredData: {
+          decision: "APPROVED",
+          summary: "ok",
+          issues: [
+            {
+              severity: "CRITICAL",
+              category: "security",
+              title: "SQL injection",
+              description: "d",
+              filePath: "src/a.ts",
+            },
+          ],
+        },
+        usage: {},
+      },
+      Date.now(),
+      sessionId,
+      undefined,
+      { invoked: false, accepted: [] },
+    );
+
+    expect(result.decision).toBe("BLOCKED");
+    expect(result.statistics.issuesFound.critical).toBe(1);
+    expect(result.ungatedIssues).toBeUndefined();
+  });
+});

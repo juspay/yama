@@ -13,6 +13,7 @@ export * from "./exploration.js";
 export * from "./harness.js";
 export * from "./learning.js";
 export * from "./mcp.js";
+export * from "./report.js";
 export * from "./review.js";
 export * from "./rules.js";
 export * from "./state.js";

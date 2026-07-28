@@ -395,6 +395,21 @@ export type MonitoringConfig = {
   logTokenUsage: boolean;
   exportFormat: "json" | "csv";
   exportPath: string;
+  /** Per-run review report artifact (markdown + JSON). */
+  report?: RunReportConfig;
+};
+
+/**
+ * Per-run report: the human-readable record of what the review actually did —
+ * bootstrap standards, explore investigations, gate batches with critic
+ * verdicts, finalization, and the reconciled verdict. Written locally (a log,
+ * not a PR side effect), so CI can archive it next to the state file.
+ */
+export type RunReportConfig = {
+  /** Default true. */
+  enabled?: boolean;
+  /** Directory for report files. Default ".yama/reports". */
+  path?: string;
 };
 
 // ============================================================================
@@ -402,7 +417,16 @@ export type MonitoringConfig = {
 // ============================================================================
 
 export type PerformanceConfig = {
-  maxReviewDuration: string;
+  /**
+   * OPTIONAL wall-clock cap per agentic review turn (the fallback for
+   * loop.turnTimeoutMs — each generate() call gets its own clock; retries,
+   * finalization, and enhancement turns are capped individually, not the
+   * whole CLI run). Unset by default: reviews are bounded by WORK
+   * (loop.maxSteps + the submit_review gate), not by time — a wall clock
+   * cuts the loop mid-review and loses quality, so only set this when an
+   * external scheduler truly requires it.
+   */
+  maxReviewDuration?: string;
   tokenBudget: TokenBudgetConfig;
   costControls: CostControlsConfig;
   /** Agentic-loop guards, passed to NeuroLink generate() calls. */
@@ -410,13 +434,15 @@ export type PerformanceConfig = {
 };
 
 /**
- * Bounds for the agentic tool-calling loop. All optional — defaults are
- * conservative and derived from `maxReviewDuration` where sensible.
+ * Bounds for the agentic tool-calling loop. All optional. Step/stall/tool
+ * guards protect against hangs and runaways; there is deliberately no default
+ * whole-turn wall clock (see PerformanceConfig.maxReviewDuration).
  */
 export type LoopGuardConfig = {
   /** Max tool-loop steps per generate() call (NeuroLink default is 200). */
   maxSteps?: number;
-  /** Whole-turn wall-clock cap in ms (falls back to maxReviewDuration). */
+  /** Whole-turn wall-clock cap in ms (falls back to maxReviewDuration).
+   *  Off by default — prefer step bounds over time bounds. */
   turnTimeoutMs?: number;
   /** No-progress watchdog in ms. */
   stallTimeoutMs?: number;

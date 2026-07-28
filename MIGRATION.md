@@ -104,7 +104,8 @@ library, ensure your runtime meets that floor.
 ## v3 foundations (same release)
 
 **No additional breaking changes.** All new capabilities are opt-out/opt-in
-config keys with behavior-preserving defaults:
+config keys with behavior-preserving defaults — with one intentional default
+change (`performance.maxReviewDuration`, called out after the table):
 
 | New key                                   | Default                                  | Effect                                                                                                                                                                              |
 | ----------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -114,6 +115,16 @@ config keys with behavior-preserving defaults:
 | `ai.conversationMemory.contextCompaction` | enabled, threshold 0.8                   | NeuroLink auto-compaction for long reviews.                                                                                                                                         |
 | `ai.mcpOutputLimits`                      | `externalize` at 100 KB                  | Oversized MCP tool outputs are paged on demand instead of flooding context.                                                                                                         |
 | `.yama/rules/**`                          | none                                     | Structured team rules (id/scope/severity/blocking + examples). Violated blocking rules force BLOCKED deterministically.                                                             |
+
+**One intentional default change:** `performance.maxReviewDuration` is now
+**unset** by default (was `15m`), so review behavior changes after upgrading —
+reviews are bounded by work (`loop.maxSteps`, per-step `ai.timeout`,
+`toolTimeoutMs`/`stallTimeoutMs` hang guards), not by wall clock, and long
+reviews may take longer than before. The old default cut long reviews mid-loop,
+losing comment posting and forcing a fabrication-prone verdict recovery. Set
+`performance.maxReviewDuration` (or `performance.loop.turnTimeoutMs`) explicitly
+to restore a hard ceiling; note it caps each agentic review turn, not the whole
+CLI run.
 
 Behavioral notes:
 

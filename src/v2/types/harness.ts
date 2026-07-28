@@ -39,3 +39,17 @@ export type SubmitReviewResult = {
   /** What the agent should do next, stated explicitly. */
   instruction: string;
 };
+
+/**
+ * What the submit_review gate saw during one run — the ground truth the final
+ * verdict is anchored to. When `invoked` is true, only gate-accepted findings
+ * may drive the decision; verdict issues that never passed the gate are
+ * quarantined as advisory (they are unverified claims, and on partial runs
+ * often outright fabrications reconstructed from the rules prompt).
+ */
+export type ReviewGateSnapshot = {
+  /** True when the agent called submit_review at least once this run. */
+  invoked: boolean;
+  /** Findings the gate accepted (deduped + critic-verified). */
+  accepted: SubmitReviewAccepted[];
+};

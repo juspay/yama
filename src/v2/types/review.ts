@@ -76,6 +76,12 @@ export type ReviewResult = {
   completion?: ReviewCompletion;
   /** Normalized findings from the structured verdict (source for state). */
   issues?: LocalReviewFinding[];
+  /**
+   * Verdict issues that never passed the submit_review gate — unverified
+   * claims, quarantined out of `issues`: they do not drive the decision, are
+   * not posted, and are not persisted to state. Surfaced for transparency.
+   */
+  ungatedIssues?: LocalReviewFinding[];
   /** Prior-finding ids the agent verified as fixed this run. */
   resolvedIssueIds?: string[];
   /** Per-rule compliance derived from findings (.yama/rules). */

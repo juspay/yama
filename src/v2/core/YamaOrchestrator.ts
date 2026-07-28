@@ -32,6 +32,7 @@ import {
 } from "../types/index.js";
 import { NeuroLinkFactory } from "./NeuroLinkFactory.js";
 import { ReviewResultParser } from "./ReviewResultParser.js";
+import { RunReporter } from "./RunReporter.js";
 import {
   isVerdictShaped,
   localReviewVerdictSchema,
@@ -58,7 +59,11 @@ import {
 import { RulesContextLoader } from "../exploration/RulesContextLoader.js";
 import type { YamaRule } from "../types/index.js";
 import { gateFindings } from "../harness/submitReviewGate.js";
-import type { SubmitReviewAccepted, SubmittedFinding } from "../types/index.js";
+import type {
+  ReviewGateSnapshot,
+  SubmitReviewAccepted,
+  SubmittedFinding,
+} from "../types/index.js";
 import { isMutatingGitTool, normalizeToolName } from "../utils/toolPolicy.js";
 import { VERSION } from "../utils/version.js";
 
@@ -86,9 +91,15 @@ export class YamaOrchestrator {
   private previousOpenIds = new Set<string>();
   /** Finding ids accepted by submit_review during the current run. */
   private acceptedFindingIds = new Set<string>();
+  /** Full accepted findings this run — the final verdict is anchored to these. */
+  private acceptedFindings: SubmitReviewAccepted[] = [];
+  /** How many times the agent invoked submit_review this run. */
+  private submitReviewCalls = 0;
   /** Learned false positives (dismissed / ignored 3+ runs) — never re-posted. */
   private suppressedFindingIds = new Set<string>();
   private currentToolContext: Record<string, unknown> | null = null;
+  /** Per-run report collector (PR flows); null outside a review run. */
+  private runReporter: RunReporter | null = null;
   private initOptions: YamaInitOptions;
   private bootstrapStandardsCache: Map<string, string> = new Map();
   private loadedRules: YamaRule[] = [];
@@ -241,12 +252,19 @@ export class YamaOrchestrator {
     const sessionId = this.sessionManager.createSession(request);
 
     this.logReviewStart(request, sessionId);
+    this.runReporter = this.createRunReporter(sessionId, request);
 
     try {
       const bootstrapStandards = await this.getBootstrappedStandards(
         request,
         sessionId,
       );
+      if (bootstrapStandards) {
+        this.runReporter.record({
+          kind: "bootstrap",
+          chars: bootstrapStandards.length,
+        });
+      }
       const previousReview = await this.loadPreviousReview(request);
 
       // Build comprehensive AI instructions
@@ -317,7 +335,7 @@ export class YamaOrchestrator {
         "code-review",
       );
       this.resultParser.recordToolCallsFromResponse(sessionId, aiResponse);
-      const verdictResponse = await this.ensureStructuredVerdict(
+      const verdictResponse = await this.ensureVerdictAndPosting(
         aiResponse,
         prReviewVerdictSchema,
         sessionId,
@@ -325,13 +343,14 @@ export class YamaOrchestrator {
         "code-review-verdict",
       );
 
-      // Extract and parse results
+      // Extract and parse results — anchored to the submit_review gate.
       const result = this.applyRuleCompliance(
         this.resultParser.parseReviewResult(
           verdictResponse,
           startTime,
           sessionId,
           this.config.projectStandards?.severityOverrides,
+          this.buildGateSnapshot(),
         ),
       );
 
@@ -341,11 +360,13 @@ export class YamaOrchestrator {
       this.sessionManager.completeSession(sessionId, result);
 
       this.logReviewComplete(result);
+      await this.writeRunReport(result);
 
       return result;
     } catch (error) {
       this.sessionManager.failSession(sessionId, error as Error);
       console.error("\n❌ Review failed:", (error as Error).message);
+      await this.writeRunReport(undefined, (error as Error).message);
       throw error;
     }
   }
@@ -472,6 +493,7 @@ export class YamaOrchestrator {
     const sessionId = this.sessionManager.createSession(request);
 
     this.logReviewStart(request, sessionId);
+    this.runReporter = this.createRunReporter(sessionId, request);
 
     try {
       // ========================================================================
@@ -482,6 +504,12 @@ export class YamaOrchestrator {
         request,
         sessionId,
       );
+      if (bootstrapStandards) {
+        this.runReporter.record({
+          kind: "bootstrap",
+          chars: bootstrapStandards.length,
+        });
+      }
 
       const previousReview = await this.loadPreviousReview(request);
 
@@ -544,7 +572,7 @@ export class YamaOrchestrator {
         enableEvaluation: this.config.ai.enableEvaluation,
       } as unknown as Parameters<NeuroLink["generate"]>[0]);
       this.resultParser.recordToolCallsFromResponse(sessionId, reviewResponse);
-      const verdictResponse = await this.ensureStructuredVerdict(
+      const verdictResponse = await this.ensureVerdictAndPosting(
         reviewResponse,
         prReviewVerdictSchema,
         sessionId,
@@ -552,13 +580,14 @@ export class YamaOrchestrator {
         "code-review-verdict",
       );
 
-      // Parse review results
+      // Parse review results — anchored to the submit_review gate.
       const reviewResult = this.applyRuleCompliance(
         this.resultParser.parseReviewResult(
           verdictResponse,
           startTime,
           sessionId,
           this.config.projectStandards?.severityOverrides,
+          this.buildGateSnapshot(),
         ),
       );
 
@@ -621,11 +650,13 @@ export class YamaOrchestrator {
       this.sessionManager.completeSession(sessionId, reviewResult);
 
       this.logReviewComplete(reviewResult);
+      await this.writeRunReport(reviewResult);
 
       return reviewResult;
     } catch (error) {
       this.sessionManager.failSession(sessionId, error as Error);
       console.error("\n❌ Review failed:", (error as Error).message);
+      await this.writeRunReport(undefined, (error as Error).message);
       throw error;
     }
   }
@@ -761,6 +792,153 @@ export class YamaOrchestrator {
   private setToolContext(context: Record<string, unknown>): void {
     this.currentToolContext = context;
     (this.neurolink as any).setToolContext(context);
+  }
+
+  /** Fresh report collector for a PR review run. */
+  private createRunReporter(
+    sessionId: string,
+    request: ReviewRequest,
+  ): RunReporter {
+    return new RunReporter({
+      sessionId,
+      workspace: request.workspace || request.owner,
+      repository: request.repository || request.repo,
+      pullRequestId: request.pullRequestId ?? request.prNumber,
+      provider: this.detectedProvider,
+      aiProvider: this.config.ai.provider,
+      aiModel: this.config.ai.model,
+      dryRun: request.dryRun === true,
+      startedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Write the run report (best-effort) and release the collector, keeping the
+   * "null outside a review run" invariant true for reused instances.
+   */
+  private async writeRunReport(
+    result?: ReviewResult,
+    error?: string,
+  ): Promise<void> {
+    const reporter = this.runReporter;
+    this.runReporter = null;
+    await reporter?.write(this.config.monitoring?.report, result, error);
+  }
+
+  /** The gate's view of this run — what the final verdict is anchored to. */
+  private buildGateSnapshot(): ReviewGateSnapshot {
+    return {
+      invoked: this.submitReviewCalls > 0,
+      accepted: [...this.acceptedFindings],
+    };
+  }
+
+  /**
+   * Close out the PR review phase with the reliability the agentic loop cannot
+   * guarantee on its own:
+   *
+   * 1. POSTING PASS (tools ON, same session): if the gate accepted findings in
+   *    a live run, the loop may still have ended (step cap, stall, tool step)
+   *    between acceptance and posting — historically the #1 way findings ended
+   *    up only in logs. One bounded follow-up turn instructs the agent to
+   *    verify every accepted finding has its inline comment and post the
+   *    missing ones, then return the structured verdict in the same turn.
+   *    Step-bounded, no wall clock.
+   * 2. VERDICT FALLBACK (tools OFF): if structure is still missing, fall back
+   *    to the plain same-session verdict request. The parser anchors whatever
+   *    comes back to the gate, so a fabricated issues list cannot drive the
+   *    decision either way.
+   */
+  private async ensureVerdictAndPosting(
+    response: any,
+    schema: unknown,
+    sessionId: string,
+    userId: string,
+    operation: string,
+  ): Promise<any> {
+    const dryRun = this.currentToolContext?.dryRun === true;
+    const acceptedCount = this.acceptedFindings.length;
+    const needsPostingPass = !dryRun && acceptedCount > 0;
+
+    if (needsPostingPass) {
+      console.log(
+        `   📮 Finalization: ensuring all ${acceptedCount} accepted finding(s) ` +
+          `are posted (same session, tools on)...`,
+      );
+      try {
+        const loop = this.config.performance?.loop || {};
+        const finalization = await this.neurolink.generate({
+          input: {
+            text:
+              `Review finalization. The submit_review gate accepted ${acceptedCount} ` +
+              `finding(s) this run. Step 1: verify each accepted finding has exactly ` +
+              `ONE inline comment posted on the pull request (severity marker first). ` +
+              `Post any accepted finding that is still missing its comment now. Never ` +
+              `post rejected or unsubmitted findings, and never post a duplicate for a ` +
+              `finding you already posted. Step 2: return the final review verdict as ` +
+              `the strict JSON object defined in the output contract, where "issues" ` +
+              `lists exactly the gate-accepted findings.`,
+          },
+          provider: this.config.ai.provider,
+          model: this.config.ai.model,
+          temperature: 0,
+          maxTokens: clampMaxTokens(this.config.ai.maxTokens),
+          timeout: this.config.ai.timeout,
+          stream: true,
+          schema,
+          skipToolPromptInjection: true,
+          // Bounded by WORK, never by wall clock: enough steps to post every
+          // accepted finding plus margin, without exceeding the operator's
+          // configured step budget; stall/tool guards catch hangs.
+          maxSteps: Math.min(
+            Math.max(20, acceptedCount * 2 + 5),
+            loop.maxSteps ?? 100,
+          ),
+          ...(loop.stallTimeoutMs
+            ? { stallTimeoutMs: loop.stallTimeoutMs }
+            : {}),
+          ...(loop.toolTimeoutMs ? { toolTimeoutMs: loop.toolTimeoutMs } : {}),
+          context: { sessionId, userId, operation: `${operation}-finalize` },
+          memory: { enabled: false },
+        } as unknown as Parameters<NeuroLink["generate"]>[0]);
+        this.resultParser.recordToolCallsFromResponse(sessionId, finalization);
+
+        if (isVerdictShaped(finalization?.structuredData)) {
+          this.runReporter?.record({
+            kind: "finalization",
+            outcome: "verdict",
+          });
+          // Keep the MAIN loop's completion signals (stopReason/stepsUsed):
+          // a partial main review stays partial no matter how cleanly the
+          // finalization turn ended.
+          return { ...response, structuredData: finalization.structuredData };
+        }
+        console.warn(
+          "   ⚠️  Finalization turn returned no structured verdict — falling back.",
+        );
+        this.runReporter?.record({
+          kind: "finalization",
+          outcome: "no-verdict",
+        });
+      } catch (error) {
+        console.warn(
+          `   ⚠️  Finalization turn failed: ${(error as Error).message} — falling back.`,
+        );
+        this.runReporter?.record({
+          kind: "finalization",
+          outcome: "error",
+          detail: (error as Error).message,
+        });
+      }
+    }
+
+    return this.ensureStructuredVerdict(
+      response,
+      schema,
+      sessionId,
+      userId,
+      operation,
+    );
   }
 
   /**
@@ -1019,6 +1197,8 @@ export class YamaOrchestrator {
     const key = this.buildStateKey(request);
     this.previousOpenIds = new Set();
     this.acceptedFindingIds = new Set();
+    this.acceptedFindings = [];
+    this.submitReviewCalls = 0;
     this.suppressedFindingIds = new Set();
     if (!this.stateStore || !key) {
       return { key, block: "" };
@@ -1106,9 +1286,11 @@ export class YamaOrchestrator {
 
   /**
    * Loop guards for agentic generate() calls, wired from `performance.*`
-   * config (previously decorative). `turnTimeoutMs` falls back to
-   * `performance.maxReviewDuration`; steps default bounded well below
-   * NeuroLink's own 200-step ceiling.
+   * config. Steps default bounded well below NeuroLink's own 200-step
+   * ceiling. There is NO default wall clock: `turnTimeoutMs` (or its
+   * `performance.maxReviewDuration` fallback) applies only when explicitly
+   * configured — reviews are bounded by work, not time, so quality never
+   * loses to a clock. Stall/tool timeouts remain as hang protection.
    */
   private getLoopGuardOptions(): Record<string, unknown> {
     const loop = this.config.performance?.loop || {};
@@ -1241,6 +1423,15 @@ export class YamaOrchestrator {
           runtimeContext,
         );
 
+        this.runReporter?.record({
+          kind: "explore",
+          task: String(rawParams.task || "")
+            .trim()
+            .slice(0, 300),
+          cached,
+          summary: (result.summary || "").slice(0, 500),
+        });
+
         return {
           success: true,
           data: {
@@ -1302,6 +1493,7 @@ export class YamaOrchestrator {
         required: ["findings"],
       },
       execute: async (params: unknown) => {
+        this.submitReviewCalls += 1;
         const raw = (params || {}) as { findings?: unknown };
         const submitted: SubmittedFinding[] = Array.isArray(raw.findings)
           ? (raw.findings as SubmittedFinding[]).filter(
@@ -1348,10 +1540,28 @@ export class YamaOrchestrator {
         });
         for (const finding of result.accepted) {
           this.acceptedFindingIds.add(finding.id);
+          this.acceptedFindings.push(finding);
         }
         console.log(
           `   🛡️  submit_review: ${result.accepted.length} accepted, ${result.rejected.length} rejected (mode: ${mode}).`,
         );
+        this.runReporter?.record({
+          kind: "submit",
+          mode,
+          accepted: result.accepted.map((finding) => ({
+            severity: finding.severity,
+            title: finding.title,
+            filePath: finding.filePath,
+            line: finding.line,
+          })),
+          rejected: result.rejected.map((entry) => ({
+            severity: entry.finding.severity,
+            title: entry.finding.title,
+            filePath: entry.finding.filePath,
+            line: entry.finding.line,
+            reason: entry.reason,
+          })),
+        });
         return { success: true, data: result };
       },
     });
