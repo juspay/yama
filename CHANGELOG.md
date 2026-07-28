@@ -1,3 +1,10 @@
+## [3.0.2](https://github.com/juspay/yama/compare/v3.0.1...v3.0.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* **review:** gate-anchored verdicts, posting finalization, no default wall clock ([b842f24](https://github.com/juspay/yama/commit/b842f24983bccdf065c87e9c3bb0be74299e39fb))
+
 ## [3.0.1](https://github.com/juspay/yama/compare/v3.0.0...v3.0.1) (2026-07-27)
 
 
