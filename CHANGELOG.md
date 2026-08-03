@@ -1,3 +1,10 @@
+## [3.0.3](https://github.com/juspay/yama/compare/v3.0.2...v3.0.3) (2026-08-03)
+
+
+### Bug Fixes
+
+* correct commit example in README to Conventional Commits so releases publish ([2efcdef](https://github.com/juspay/yama/commit/2efcdefe2d182ca381d51a6837fe612f801cfa63))
+
 ## [3.0.2](https://github.com/juspay/yama/compare/v3.0.1...v3.0.2) (2026-07-28)
 
 
