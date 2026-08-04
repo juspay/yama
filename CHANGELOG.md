@@ -1,3 +1,10 @@
+## [3.0.4](https://github.com/juspay/yama/compare/v3.0.3...v3.0.4) (2026-08-04)
+
+
+### Bug Fixes
+
+* bump @juspay/neurolink to 10.8.3 ([a95e2fc](https://github.com/juspay/yama/commit/a95e2fc0adc98caf0ad58f190b53b0f9790e2e6b))
+
 ## [3.0.3](https://github.com/juspay/yama/compare/v3.0.2...v3.0.3) (2026-08-03)
 
 
