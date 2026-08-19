@@ -18,10 +18,10 @@ importers:
     dependencies:
       "@juspay/hippocampus":
         specifier: ^0.1.7
-        version: 0.1.7(@juspay/neurolink@10.8.3)
+        version: 0.1.7(@juspay/neurolink@11.2.3)
       "@juspay/neurolink":
-        specifier: ^10.8.3
-        version: 10.8.3(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)
+        specifier: ^11.2.3
+        version: 11.2.3(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)
       "@nexus2520/bitbucket-mcp-server":
         specifier: 2.0.4
         version: 2.0.4(@cfworker/json-schema@4.1.1)(debug@4.4.1)(zod@4.3.6)
@@ -187,6 +187,15 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  "@ai-sdk/anthropic@4.0.39":
+    resolution:
+      {
+        integrity: sha512-JAMGtYeEuaBzqbsPO4fkho6vQyNoVhsHASM4o59wmJRU6Vh7prjOp490Kmc7YQTY+ioU1/xYzXvWOtxZBup0Xw==,
+      }
+    engines: { node: ">=22" }
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   "@ai-sdk/gateway@3.0.83":
     resolution:
       {
@@ -196,12 +205,39 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  "@ai-sdk/google-vertex@5.0.56":
+    resolution:
+      {
+        integrity: sha512-UgPtXhBB6qqPqWmaxJpgT8eW5wWi0iVMUtg28EbSAVakOCAsyNcg+LrHEVG0qN8s++/kdYPtroXHnBw8E9v84Q==,
+      }
+    engines: { node: ">=22" }
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  "@ai-sdk/google@4.0.45":
+    resolution:
+      {
+        integrity: sha512-1oLHhc2twSQzm7O8j/HaRWLfBh+tPjQP55d8yXmrZvvopoH6/P7WaDznVJqjouGSof429lR+tYdINkjvUl+8Qg==,
+      }
+    engines: { node: ">=22" }
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   "@ai-sdk/mistral@3.0.27":
     resolution:
       {
         integrity: sha512-ZXe7nZQgliDdjz5ufH5RKpHWxbN72AzmzzKGbF/z+0K9GN5tUCnftrQRvTRFHA5jAzTapcm2BEevmGLVbMkW+A==,
       }
     engines: { node: ">=18" }
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  "@ai-sdk/openai-compatible@3.0.31":
+    resolution:
+      {
+        integrity: sha512-g6kbWJzI1mfHoZp2vXPyb/fiMrK8pNRU2dbum8rBHxemx+ryBJWFAwTndBaVefm+gx9A6fK7J/hSrdfRdVJlQQ==,
+      }
+    engines: { node: ">=22" }
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
@@ -223,12 +259,28 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  "@ai-sdk/provider-utils@5.0.27":
+    resolution:
+      {
+        integrity: sha512-EzAn4pdgG5g0xXtH6lE2zyNmfjDQIDjATkfqzuidEI35g++hh4+07vnjzkT/RmGmIClPZiRj/Q2GMPV2V7mkHw==,
+      }
+    engines: { node: ">=22" }
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   "@ai-sdk/provider@3.0.8":
     resolution:
       {
         integrity: sha512-oGMAgGoQdBXbZqNG0Ze56CHjDZ1IDYOwGYxYjO5KLSlz5HiNQ9udIXsPZ61VWaHGZ5XW/jyjmr6t2xz2jGVwbQ==,
       }
     engines: { node: ">=18" }
+
+  "@ai-sdk/provider@4.0.7":
+    resolution:
+      {
+        integrity: sha512-6or44XprPzKbr8zkmzosowSE0pxkvJcoojBL+mCZvPUt3kvXp3XSNqeVun9golb1acEfSo6yaEBRT18h2VU+1Q==,
+      }
+    engines: { node: ">=22" }
 
   "@ampproject/remapping@2.3.0":
     resolution:
@@ -2187,10 +2239,10 @@ packages:
       better-sqlite3:
         optional: true
 
-  "@juspay/neurolink@10.8.3":
+  "@juspay/neurolink@11.2.3":
     resolution:
       {
-        integrity: sha512-zT9qDyiwMV3ga8nZEN3jDh7HQ1U/VTIHTEK+R8uCxYYPhES2KYa2W0GaSJXC685WRw7ac93ZEyAByK0Pqtg7UQ==,
+        integrity: sha512-kDNRzMtMFN5bGLOK9PD8F8TgNpn73sEDVAOSzT9cMZihtkmu4ZlK0SvHA2L8LHQIf6BTkSYeKalLhxDaym1umg==,
       }
     engines: { node: ">=20.18.1", npm: ">=10.0.0", pnpm: ">=8.0.0" }
     os: [darwin, linux, win32]
@@ -4163,6 +4215,12 @@ packages:
       }
     engines: { node: ">= 20" }
 
+  "@workflow/serde@4.1.0":
+    resolution:
+      {
+        integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==,
+      }
+
   "@xmldom/xmldom@0.8.11":
     resolution:
       {
@@ -5325,6 +5383,7 @@ packages:
         integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==,
       }
     engines: { node: ">=12.0.0" }
+    deprecated: v4 is no longer maintained, upgrade to v5
 
   croner@9.1.0:
     resolution:
@@ -11430,6 +11489,12 @@ snapshots:
       "@ai-sdk/provider-utils": 4.0.21(zod@4.3.6)
       zod: 4.3.6
 
+  "@ai-sdk/anthropic@4.0.39(zod@4.3.6)":
+    dependencies:
+      "@ai-sdk/provider": 4.0.7
+      "@ai-sdk/provider-utils": 5.0.27(zod@4.3.6)
+      zod: 4.3.6
+
   "@ai-sdk/gateway@3.0.83(zod@4.3.6)":
     dependencies:
       "@ai-sdk/provider": 3.0.8
@@ -11437,10 +11502,34 @@ snapshots:
       "@vercel/oidc": 3.1.0
       zod: 4.3.6
 
+  "@ai-sdk/google-vertex@5.0.56(zod@4.3.6)":
+    dependencies:
+      "@ai-sdk/anthropic": 4.0.39(zod@4.3.6)
+      "@ai-sdk/google": 4.0.45(zod@4.3.6)
+      "@ai-sdk/openai-compatible": 3.0.31(zod@4.3.6)
+      "@ai-sdk/provider": 4.0.7
+      "@ai-sdk/provider-utils": 5.0.27(zod@4.3.6)
+      google-auth-library: 10.6.2
+      zod: 4.3.6
+    transitivePeerDependencies:
+      - supports-color
+
+  "@ai-sdk/google@4.0.45(zod@4.3.6)":
+    dependencies:
+      "@ai-sdk/provider": 4.0.7
+      "@ai-sdk/provider-utils": 5.0.27(zod@4.3.6)
+      zod: 4.3.6
+
   "@ai-sdk/mistral@3.0.27(zod@4.3.6)":
     dependencies:
       "@ai-sdk/provider": 3.0.8
       "@ai-sdk/provider-utils": 4.0.21(zod@4.3.6)
+      zod: 4.3.6
+
+  "@ai-sdk/openai-compatible@3.0.31(zod@4.3.6)":
+    dependencies:
+      "@ai-sdk/provider": 4.0.7
+      "@ai-sdk/provider-utils": 5.0.27(zod@4.3.6)
       zod: 4.3.6
 
   "@ai-sdk/openai@3.0.48(zod@4.3.6)":
@@ -11456,7 +11545,20 @@ snapshots:
       eventsource-parser: 3.1.0
       zod: 4.3.6
 
+  "@ai-sdk/provider-utils@5.0.27(zod@4.3.6)":
+    dependencies:
+      "@ai-sdk/provider": 4.0.7
+      "@standard-schema/spec": 1.1.0
+      "@workflow/serde": 4.1.0
+      eventsource-parser: 3.1.0
+      undici: 7.22.0
+      zod: 4.3.6
+
   "@ai-sdk/provider@3.0.8":
+    dependencies:
+      json-schema: 0.4.0
+
+  "@ai-sdk/provider@4.0.7":
     dependencies:
       json-schema: 0.4.0
 
@@ -13277,17 +13379,19 @@ snapshots:
   "@js-sdsl/ordered-map@4.4.2":
     optional: true
 
-  "@juspay/hippocampus@0.1.7(@juspay/neurolink@10.8.3)":
+  "@juspay/hippocampus@0.1.7(@juspay/neurolink@11.2.3)":
     dependencies:
       "@aws-sdk/client-s3": 3.1004.0
-      "@juspay/neurolink": 10.8.3(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)
+      "@juspay/neurolink": 11.2.3(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)
       redis: 4.7.1
     transitivePeerDependencies:
       - aws-crt
 
-  "@juspay/neurolink@10.8.3(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)":
+  "@juspay/neurolink@11.2.3(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-node@2.2.0(@opentelemetry/api@1.9.0))(@types/node@20.19.9)(encoding@0.1.13)(react@19.1.0)(typescript@5.8.3)":
     dependencies:
       "@ai-sdk/anthropic": 3.0.64(zod@4.3.6)
+      "@ai-sdk/google": 4.0.45(zod@4.3.6)
+      "@ai-sdk/google-vertex": 5.0.56(zod@4.3.6)
       "@ai-sdk/mistral": 3.0.27(zod@4.3.6)
       "@ai-sdk/openai": 3.0.48(zod@4.3.6)
       "@ai-sdk/provider": 3.0.8
@@ -13351,7 +13455,7 @@ snapshots:
       "@google-cloud/vertexai": 1.10.0(encoding@0.1.13)
       "@hono/node-server": 1.19.14(hono@4.12.25)
       "@huggingface/inference": 4.13.15
-      "@juspay/hippocampus": 0.1.7(@juspay/neurolink@10.8.3)
+      "@juspay/hippocampus": 0.1.7(@juspay/neurolink@11.2.3)
       "@koa/cors": 5.0.0
       "@koa/router": 15.3.1(koa@3.1.2)
       "@langfuse/otel": 5.0.1(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.0))(@opentelemetry/exporter-trace-otlp-http@0.214.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.0))
@@ -14905,6 +15009,8 @@ snapshots:
       eslint-visitor-keys: 4.2.1
 
   "@vercel/oidc@3.1.0": {}
+
+  "@workflow/serde@4.1.0": {}
 
   "@xmldom/xmldom@0.8.11":
     optional: true
