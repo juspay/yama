@@ -1,53 +1,46 @@
 ## [3.0.4](https://github.com/juspay/yama/compare/v3.0.3...v3.0.4) (2026-08-04)
 
-
 ### Bug Fixes
 
-* bump @juspay/neurolink to 10.8.3 ([a95e2fc](https://github.com/juspay/yama/commit/a95e2fc0adc98caf0ad58f190b53b0f9790e2e6b))
+- bump @juspay/neurolink to 10.8.3 ([a95e2fc](https://github.com/juspay/yama/commit/a95e2fc0adc98caf0ad58f190b53b0f9790e2e6b))
 
 ## [3.0.3](https://github.com/juspay/yama/compare/v3.0.2...v3.0.3) (2026-08-03)
 
-
 ### Bug Fixes
 
-* correct commit example in README to Conventional Commits so releases publish ([2efcdef](https://github.com/juspay/yama/commit/2efcdefe2d182ca381d51a6837fe612f801cfa63))
+- correct commit example in README to Conventional Commits so releases publish ([2efcdef](https://github.com/juspay/yama/commit/2efcdefe2d182ca381d51a6837fe612f801cfa63))
 
 ## [3.0.2](https://github.com/juspay/yama/compare/v3.0.1...v3.0.2) (2026-07-28)
 
-
 ### Bug Fixes
 
-* **review:** gate-anchored verdicts, posting finalization, no default wall clock ([b842f24](https://github.com/juspay/yama/commit/b842f24983bccdf065c87e9c3bb0be74299e39fb))
+- **review:** gate-anchored verdicts, posting finalization, no default wall clock ([b842f24](https://github.com/juspay/yama/commit/b842f24983bccdf065c87e9c3bb0be74299e39fb))
 
 ## [3.0.1](https://github.com/juspay/yama/compare/v3.0.0...v3.0.1) (2026-07-27)
 
-
 ### Bug Fixes
 
-* **config:** make ai temperature optional, omit when unset ([10116a8](https://github.com/juspay/yama/commit/10116a85faa08d1a7d13e18048d7d11c45fc71db))
+- **config:** make ai temperature optional, omit when unset ([10116a8](https://github.com/juspay/yama/commit/10116a85faa08d1a7d13e18048d7d11c45fc71db))
 
 # [3.0.0](https://github.com/juspay/yama/compare/v2.7.2...v3.0.0) (2026-07-27)
 
-
 ### Bug Fixes
 
-* **release:** repair GitHub Packages publish and refresh v3 docs ([705efe9](https://github.com/juspay/yama/commit/705efe9beff7b8c809950458df9d3fe429238bdf))
-
+- **release:** repair GitHub Packages publish and refresh v3 docs ([705efe9](https://github.com/juspay/yama/commit/705efe9beff7b8c809950458df9d3fe429238bdf))
 
 ### BREAKING CHANGES
 
-* **release:** the v3 line rejects the legacy flat mcpServers.<provider>
-config shape at startup - move servers under mcpServers.servers.<id> (see
-MIGRATION.md). Marker carried here because the v3 refactor merged as a
-non-releasing refactor commit.
+- **release:** the v3 line rejects the legacy flat mcpServers.<provider>
+  config shape at startup - move servers under mcpServers.servers.<id> (see
+  MIGRATION.md). Marker carried here because the v3 refactor merged as a
+  non-releasing refactor commit.
 
 ## [2.7.2](https://github.com/juspay/yama/compare/v2.7.1...v2.7.2) (2026-07-23)
 
-
 ### Bug Fixes
 
-* **deps:** bump @juspay/neurolink to 10.1.2 for litellm timeout defaults ([fe1de54](https://github.com/juspay/yama/commit/fe1de54cb2e015b679bc5edbed0cb2f3f35e5944)), closes [juspay/neurolink#1216](https://github.com/juspay/neurolink/issues/1216)
-* **release:** run release.yml on Node 24 so npm@latest OIDC install succeeds ([9fa4e96](https://github.com/juspay/yama/commit/9fa4e962e687b559f613c615246e9a84a452fcdf))
+- **deps:** bump @juspay/neurolink to 10.1.2 for litellm timeout defaults ([fe1de54](https://github.com/juspay/yama/commit/fe1de54cb2e015b679bc5edbed0cb2f3f35e5944)), closes [juspay/neurolink#1216](https://github.com/juspay/neurolink/issues/1216)
+- **release:** run release.yml on Node 24 so npm@latest OIDC install succeeds ([9fa4e96](https://github.com/juspay/yama/commit/9fa4e962e687b559f613c615246e9a84a452fcdf))
 
 ## [2.7.1](https://github.com/juspay/yama/compare/v2.7.0...v2.7.1) (2026-06-15)
 

@@ -1,0 +1,92 @@
+# Connections.
+#
+# Yama's code never names a tool. It asks for a CAPABILITY and this map supplies
+# the tool name, which is what lets the same code drive any VCS. `yama doctor`
+# verifies every mapping against the live server and prints what the server
+# actually advertises when a name is wrong.
+servers:
+  github:
+    transport: http
+    url: https://api.githubcopilot.com/mcp/
+    headers:
+      # A non-reserved env name: ${GITHUB_TOKEN} is not reliably forwarded
+      # inside a composite action.
+      Authorization: "Bearer ${YAMA_GITHUB_TOKEN}"
+    #
+    # GitHub's MCP server consolidated many operations behind a few tools chosen
+    # by a `method` argument. That argument is part of the MAPPING, so it lives
+    # here with the tool name — Yama's code still only ever asks for a
+    # capability. `yama doctor --live` verifies each name against the running
+    # server and prints what it actually advertises when one is wrong.
+    capabilities:
+      readPullRequest: { tool: pull_request_read, args: { method: get } }
+      listComments:
+        { tool: pull_request_read, args: { method: get_review_comments } }
+      listApprovals: { tool: pull_request_read, args: { method: get_reviews } }
+      listChangedFiles: { tool: pull_request_read, args: { method: get_files } }
+      findPullRequest: list_pull_requests
+      listMergedPullRequests: list_pull_requests
+      # Inline comments attach to an open review, so the review is opened before
+      # they are written and submitted after. Comments on a review that is never
+      # submitted are invisible to everyone.
+      beginReview: { tool: pull_request_review_write, args: { method: create } }
+      postInlineComment: add_comment_to_pending_review
+      submitReview:
+        {
+          tool: pull_request_review_write,
+          args: { method: submit_pending, event: COMMENT },
+        }
+      postSummary: add_issue_comment
+      updateDescription: update_pull_request
+    # Posting is exposed only in the stages that post. A review turn reading an
+    # attacker-controlled diff must not be able to write to the pull request.
+    stages: [resolve, orient, post, checks, enhance, verdict]
+    roles: [main]
+    timeout: 30000
+    retryConfig:
+      maxAttempts: 3
+      initialDelay: 1000
+      maxDelay: 10000
+      backoffMultiplier: 2
+    # Fail-closed allowlist: exactly the tools the capability map above names,
+    # and nothing else. The registry enforces it by discovering what the server
+    # advertises and blocking the remainder, so a tool added upstream cannot
+    # appear in the agent's reach without a change here.
+    #
+    # This used to say schema cost was no reason to narrow the set, because the
+    # runtime defers external tool schemas behind a search catalog — measured
+    # once at ~2.4k tokens against 44 tools. Production disproved it. On PR #85
+    # the server registered 47 tools and the first turn was rejected before it
+    # reached the model:
+    #
+    #   ContextBudgetExceededError: Estimated 106431 tokens, budget 83200
+    #   ... no compaction is possible (only prompt + tools)
+    #
+    # The system instruction is ~771 tokens and the opening message is a few
+    # lines, so effectively all of that was tool schemas. The deferral is real
+    # but the pre-dispatch budget check runs BEFORE it, so it never applied.
+    # Until that ordering is fixed upstream, the allowlist is what keeps the
+    # payload small — and it is worth keeping afterwards regardless, because
+    # Yama reads code from the local checkout far faster than through this API.
+    allowedTools:
+      - pull_request_read
+      - list_pull_requests
+      - pull_request_review_write
+      - add_comment_to_pending_review
+      - add_issue_comment
+      - update_pull_request
+    # Kept as defence in depth: if the allowlist is ever widened, these stay
+    # denied. Yama reviews; it does not commit.
+    blockedTools:
+      - push_files
+      - create_or_update_file
+      - update_pull_request_branch
+      - request_copilot_review
+      - run_secret_scanning
+      - sub_issue_write
+      - issue_write
+      - create_branch
+      - delete_file
+      - merge_pull_request
+      - create_repository
+      - fork_repository

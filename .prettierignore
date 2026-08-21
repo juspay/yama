@@ -1,0 +1,14 @@
+# Generated, and not ours to format.
+#
+# CI runs `format:check`, so anything listed here would otherwise fail the build
+# for a file no human wrote. The lockfile in particular reformats to a ~16k-line
+# diff, which buries every real change in the same commit.
+pnpm-lock.yaml
+dist/
+coverage/
+action-dist/
+
+# Written by Yama's own runs.
+.yama/reports/
+.yama/state/
+.yama/artifacts/

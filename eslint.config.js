@@ -6,10 +6,10 @@ import tsparser from "@typescript-eslint/parser";
 export default [
   js.configs.recommended,
   {
-    files: ["**/*.js", "**/*.mjs"],
+    files: ["**/*.js", "**/*.mjs", "**/*.cjs"],
     languageOptions: {
       ecmaVersion: "latest",
-      sourceType: "module",
+      sourceType: "commonjs",
       globals: {
         // Node.js globals
         process: "readonly",
@@ -116,7 +116,7 @@ export default [
   },
   {
     // TypeScript files in test/ directory
-    files: ["tests/**/*.ts", "src/test/**/*.ts"],
+    files: ["tests/**/*.ts"],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -166,6 +166,10 @@ export default [
       "@typescript-eslint/no-unused-vars": "off", // Test files often have unused vars
       "@typescript-eslint/no-explicit-any": "off", // Allow any types in test files
       "@typescript-eslint/prefer-as-const": "warn",
+      // Repo convention, and it is repo-wide: zero `interface`, always
+      // `type X = { ... }`. Tests declare fixture and port shapes constantly, so
+      // leaving them out of this rule is how `interface` creeps back in.
+      "@typescript-eslint/consistent-type-definitions": ["error", "type"],
 
       // Basic rules
       "no-console": "off",
@@ -190,30 +194,21 @@ export default [
       "node_modules/**",
       "dist/**",
       "build/**",
-      ".svelte-kit/**",
-      "package/**",
+      "coverage/**",
       ".git/**",
       ".git_disabled/**",
-      "docs/cli-recordings/**",
-      "docs/visual-content/**",
       "scripts/**",
-      "memory-bank/**",
-      "archive/**",
-      "examples/**",
       "*.config.js",
       "*.config.ts",
       ".changeset/**",
       "*.log",
-      "test-output.json",
       "test-output.txt",
       "debug-output.txt",
-      "demo-results.json",
-      "batch-results.json",
       "package-lock.json",
       "pnpm-lock.yaml",
       "*.tgz",
       "*.d.ts",
-      "src/cli/**/*.d.ts",
+      "src/v4/cli/**/*.d.ts",
     ],
   },
 ];

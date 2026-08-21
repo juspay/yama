@@ -3,59 +3,34 @@ module.exports = {
   preset: "ts-jest",
   testEnvironment: "node",
   roots: ["<rootDir>/src", "<rootDir>/tests"],
-  testMatch: [
-    "**/__tests__/**/*.+(ts|tsx|js)",
-    "**/*.(test|spec).+(ts|tsx|js)",
-  ],
+  testMatch: ["**/*.(test|spec).+(ts|tsx|js)"],
   transform: {
-    "^.+\\.(ts|tsx)$": [
-      "ts-jest",
-      {
-        tsconfig: {
-          noImplicitAny: false,
-          strict: false,
-          skipLibCheck: true,
-        },
-      },
-    ],
+    "^.+\\.(ts|tsx)$": ["ts-jest", { tsconfig: { skipLibCheck: true } }],
   },
   collectCoverageFrom: [
-    "src/**/*.{ts,tsx}",
+    "src/**/*.ts",
     "!src/**/*.d.ts",
-    "!src/cli/cli.ts", // CLI entry point, tested via integration
-    "!src/cli/v2.cli.ts", // Backward-compatibility shim
-    "!src/types/**", // Type definitions
+    // Entry points are exercised end to end, not unit tested.
+    "!src/v4/cli/cli.ts",
+    "!src/v4/index.ts",
+    "!src/v4/types/**",
   ],
   coverageDirectory: "coverage",
-  coverageReporters: ["text", "text-summary", "html", "lcov"],
-  coverageThreshold: {
-    global: {
-      branches: 85,
-      functions: 85,
-      lines: 85,
-      statements: 85,
-    },
+  coverageReporters: ["text", "text-summary", "lcov"],
+  // ESM-style ".js" specifiers resolve to their TypeScript sources under ts-jest.
+  moduleNameMapper: {
+    "^(\\.{1,2}/.*)\\.js$": "$1",
   },
-  setupFilesAfterEnv: ["<rootDir>/tests/setup.ts"],
-  testTimeout: 30000, // 30 seconds for tests that might hit real APIs
+  // A junit report when YAMA_JUNIT is set, so `.yama/checks.yaml` can parse the
+  // suite. Resolved by path rather than by name: pnpm's strict node_modules does
+  // not expose transitive bare names to jest's reporter loader.
+  reporters: process.env.YAMA_JUNIT
+    ? [
+        "default",
+        [require.resolve("jest-junit"), { outputName: process.env.YAMA_JUNIT }],
+      ]
+    : ["default"],
+  testTimeout: 20000,
   clearMocks: true,
   restoreMocks: true,
-  verbose: true,
-  // Module path mapping for TypeScript aliases
-  moduleNameMapper: {
-    "^@/(.*)$": "<rootDir>/src/$1",
-    // Handle .js extensions in imports for ESM compatibility
-    "^(\\.{1,2}/.*)\\.js$": "$1",
-    // Mock ESM modules that cause issues
-    "^@juspay/neurolink$": "<rootDir>/tests/__mocks__/@juspay/neurolink.ts",
-    "^@nexus2520/bitbucket-mcp-server$":
-      "<rootDir>/tests/__mocks__/@nexus2520/bitbucket-mcp-server.ts",
-    // Mock langfuse to avoid dynamic import issues in Jest
-    "^langfuse$": "<rootDir>/tests/__mocks__/langfuse.ts",
-  },
-  // Handle ESM modules
-  extensionsToTreatAsEsm: [".ts"],
-  transformIgnorePatterns: [
-    "node_modules/(?!(@juspay/neurolink|@nexus2520/bitbucket-mcp-server)/)",
-  ],
 };

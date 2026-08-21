@@ -4,93 +4,153 @@ Guidance for Claude Code when working in this repository.
 
 ## Project Overview
 
-Yama (`@juspay/yama`) is an AI-native, autonomous pull-request review guardian. It runs one agentic review loop over [NeuroLink](https://github.com/juspay/neurolink) `generate()` with config-driven MCP tools (Bitbucket, GitHub, Serena, local-git, or any server the user configures), posts inline findings, derives a deterministic verdict, and can enhance PR descriptions. Ships as an SDK, a CLI (`yama review|enhance|learn|init`), and a GitHub composite Action (`action.yml`).
+Yama (`@juspay/yama`) is an AI-native pull-request review guardian. A supervised
+agent session works a stage machine (S0–S6) over config-driven MCP tools, posts
+inline findings with concrete fixes, runs the project's own checks as evidence,
+and derives a verdict in code. Ships as an SDK, a CLI
+(`yama review | learn | doctor | init | migrate | bootstrap`), and a GitHub Action.
 
 ## Critical Rules
 
-These are non-negotiable. They mirror the `@juspay/neurolink` conventions where applicable.
+Non-negotiable. They mirror `@juspay/neurolink` conventions where applicable.
 
-1. **Zero `interface` — always `type`.** Never use `interface`; write `type X = { ... }` and use intersection (`&`) instead of `extends`. Enforced by ESLint (`@typescript-eslint/consistent-type-definitions`).
-2. **Types in the canonical location.** All exported type definitions live in `src/v2/types/`. Never create type files (or `types/` folders) inside feature directories, and never export a type from a feature module. Internal, non-exported helper types local to one file are acceptable.
-3. **No "types" suffix in type filenames.** The folder IS the types folder — `config.ts`, not `config.types.ts`.
-4. **Unique exported type names.** Every exported type name must be globally unique across `src/v2/types/` (the barrel would collide otherwise). Disambiguate with domain prefixes (`McpServerDefinition`, `ExploreRuntimeContext`, `LearnRequest`).
-5. **Barrel uses `export *` only.** `src/v2/types/index.ts` contains only `export * from "./file.js"` lines — no selective exports, no aliases. Collisions are fixed at the source per rule 4.
-6. **Barrel-only type imports.** Code outside `src/v2/types/` imports internal types from `../types/index.js` only — never from specific type files. Files inside `src/v2/types/` import each other directly. External library types (`zod`, `@juspay/neurolink`) import normally. The public package entry `src/index.ts` is the one sanctioned re-exporter of types.
-7. **No tool, server, or provider names in `src/`.** Every MCP server (VCS, code-intelligence, git, custom) is a `mcpServers.servers.*` config entry with `roles`/`modes`/`blockedTools`/`allowedTools`. Prompts describe role and method, never tool vocabularies. If a change needs to know a tool name, the name belongs in config, not code.
-8. **The verdict is code-derived, never model-trusted.** The AI's reported decision is advisory; `deriveDecision` (`src/v2/core/reviewDecision.ts`) enforces: any CRITICAL finding → BLOCKED, MAJORs at/above threshold → BLOCKED. A prompt-injected "approve" must never clear blocking findings. Do not weaken or bypass this layer.
-9. **Structured output comes only from `structuredData`.** NeuroLink owns JSON extraction/repair/validation (`generate({ schema })`). Never `JSON.parse` model prose in Yama code; read `result.structuredData` and treat non-verdict-shaped objects as absent (`isVerdictShaped`). Vertex+Claude supports schema+tools natively; Gemini/LiteLLM paths fall back to coerced JSON — plan for both, and surface `jsonTruncated`/`jsonRepaired` rather than ignoring them.
-10. **Fail closed on tool policy.** `allowedTools` allowlists are enforced by discovering the server's tools and blocking the rest; empty discovery = registration failure, not an unenforced allowlist (`MCPServerManager`). Read-only guarantees (e.g. the git read-only list in `toolPolicy.ts`) treat unknown tools as mutating.
-11. **Dry-run must stay side-effect free.** Any new write path (comments, description updates, approvals, state) must check the run mode before executing.
-12. **Backward compatibility for config.** Existing user configs keep working: new config keys are optional with behavior-preserving defaults; renames get loud validation errors with copy-paste migration hints (`ConfigLoader.validateConfig`) and an entry in `MIGRATION.md`.
+1. **Zero `interface` — always `type`.** Use intersection (`&`), never `extends`.
+   Enforced by ESLint (`@typescript-eslint/consistent-type-definitions`).
+2. **Types in the canonical location.** Every exported type lives in
+   `src/v4/types/`. Never create a `types/` folder inside a feature directory and
+   never export a type from a feature module. Internal helper types local to one
+   file are fine.
+3. **No "types" suffix in type filenames.** The folder IS the types folder —
+   `config.ts`, not `config.types.ts`.
+4. **Unique exported type names** across `src/v4/types/` — the barrel would
+   collide. Disambiguate with domain prefixes (`McpServerConfig`,
+   `CapabilityBinding`, `LearnRunOptions`).
+5. **Barrel uses `export *` only.** `src/v4/types/index.ts` holds only
+   `export * from "./file.js"` lines. Collisions are fixed at the source per rule 4.
+6. **Barrel-only type imports.** Code outside `src/v4/types/` imports internal
+   types from `../types/index.js` only. Files inside `src/v4/types/` import each
+   other directly. External library types (`zod`, `@juspay/neurolink`) import
+   normally. `src/v4/index.ts` is the one sanctioned re-exporter.
+7. **No tool, server, or provider names in `src/`.** Code asks for a CAPABILITY;
+   `.yama/mcp.yaml` maps it to a tool name, optionally with pinned arguments. If a
+   change needs to know a tool name, the name belongs in config. The one set of
+   tool names Yama ships lives in `data/v3-capability-hints.json` — migration
+   guesses for v3 configs, which is data, and it is outside `src/` for this rule.
+8. **The verdict is code-derived, never model-trusted.** `deriveVerdict`
+   (`src/v4/core/verdict.ts`) decides from what actually POSTED. A prompt-injected
+   "approve" must never clear a blocking finding. A partial run never approves.
+9. **A tool call is not a comment.** A finding counts as posted only when a tool
+   RESULT returned a comment id (`FindingLedger`). v3 recorded accepted findings as
+   reported without checking, which turned one posting failure into permanent
+   silence about a real defect.
+10. **Fail closed on tool policy.** `allowedTools` is enforced by discovering the
+    server's tools and blocking the rest; empty discovery is a registration
+    failure, not an unenforced allowlist. The git allowlist treats unknown
+    subcommands as mutating.
+11. **Dry-run must stay side-effect free.** Any new write path checks the run mode
+    before executing.
+12. **Backward compatibility for config.** New keys are optional with
+    behaviour-preserving defaults; renames get loud validation errors with
+    copy-paste migration hints and an entry in `MIGRATION.md`.
+13. **No budgets.** There is no turn count, no step cap and no token budget, and
+    adding one is a design change, not a fix. The agent decides when it is done and
+    the stage predicates verify it. Timeouts exist only as hang detectors and come
+    from config.
+14. **No silent catch.** Optional subsystems degrade, but every failure logs or
+    surfaces a warning. `catch {}` that hides a cause is a defect — it is how a
+    broken run becomes indistinguishable from a clean one.
+15. **Every model call is schema-bound.** Anything asked of a model goes through
+    `generateStructured` (one-shot passes) or carries a `schema` on the turn
+    (the review loop). Never parse JSON out of prose. A response that does not
+    validate is a FAILED member — the chain advances — never an empty result.
+16. **One vocabulary per contract.** Where a zod schema, a prompt and a `switch`
+    describe the same enum, they are tested together. A cast that reconciles a
+    schema with a declared type is how learning silently broke once: the schema
+    asked for `"convention"` while the code matched `"missed-convention"`, and
+    measured precision sat at zero with nothing reporting a fault.
 
 ## Architecture
 
-### Review flow (PR mode)
+### Review flow
 
 ```
-CLI/SDK → YamaOrchestrator.startReview[AndEnhance]
-  1. ConfigLoader (defaults → file → env → SDK overrides) + validation
-  2. NeuroLinkFactory (observability, conversation memory, per-repo memory)
-  3. MCPServerManager: register config servers for (mode, role) — fail-closed allowlists
-  4. Bootstrap standards (explore_context mines recent merged PRs; per-process cache)
-  5. PromptBuilder: base system prompt + project config XML + standards + knowledge base
-  6. ONE agentic generate() — schema = review verdict; model reads PR via MCP tools,
-     posts comments (live mode), may delegate research to explore_context
-  7. ensureStructuredVerdict (same-session, tools-off follow-up if verdict missing)
-  8. ReviewResultParser → deriveDecision (deterministic safety layer)
-  9. Optional phase 2: description enhancement in the SAME session
+CLI/SDK → runReview (core/ReviewRunner.ts)
+  0. resolvePrompts — platform (optional) → shipped text; fixed for the run
+  1. loadConfig — defaults → .yama/*.yaml → env → SDK overrides, then validation
+  2. createRuntime — one NeuroLink instance, MCP servers registered, capabilities
+     resolved against DISCOVERED tools (not against what config claims)
+  3. assertLiveCapabilities — a live run that cannot post fails here, not later
+  4. readLocalChangeSet — git diff from disk; shallow clones refused
+  5. assembleRun — markers + artifact + suppressions decide what is already said
+  6. tool surface: recall · policy_check · check_results · submit_finding ·
+     report_progress · read_file · list_files · search_code · git
+     submit_finding gates deterministically, then scores survivors with the
+     inline judge, then re-gates with the scores
+  7. registerDelegates — specialists as isolated agent tools
+  8. runReviewPipeline — S0–S6 on the StageMachine; S2 holds the supervised loop
+  9. artifact written so run N+1 is incremental
 ```
 
-`explore_context` is a Yama-registered NeuroLink tool backed by `ContextExplorerService` — an isolated research sub-agent with its own NeuroLink instance and `explore`-role MCP servers, returning structured findings/evidence.
+Stage-scoped tool exposure is a **security control**, not bookkeeping: the agent
+reviewing a diff is reading attacker-controlled text, so posting tools do not
+exist for it during a review turn.
 
-`submit_review` is the harness gate (also Yama-registered): the agent MUST submit candidate findings there before posting; deterministic dedup (cross-run state + this run + auto-suppressions) plus a critic pass (`review.verification`: off/basic/strict) decide what may be posted. Cross-run state (`src/v2/state/`) makes run N+1 incremental: previously-reported findings are never re-posted, agent-verified fixes are marked resolved, and findings ignored 3+ consecutive runs are auto-suppressed. Loop guards (`performance.loop`), NeuroLink auto-compaction, and `stopReason` handling make partial reviews explicit — a partial review can never end APPROVED.
+`report_progress` is how a turn tells the harness what it did — plan, completed
+groups, done. It is a tool AND the turn carries `turnOutcomeSchema`, and the two
+are merged by union. Belt and braces: a tool's input schema is validated natively
+by every provider that can call tools at all, while the turn schema catches the
+model that narrates its progress in prose instead of reporting it. Where a
+provider cannot combine tools and a schema, the runtime coerces the turn's final
+text against it — still enforcement, just later.
 
 ### Directory Map
 
 ```
 src/
-├── index.ts                  # Public SDK entry (sanctioned type re-exporter)
-├── cli/cli.ts                # commander CLI (review | enhance | learn | init)
-└── v2/
-    ├── core/                 # YamaOrchestrator, MCPServerManager, McpRegistry,
-    │                         # NeuroLinkFactory, SessionManager, ReviewResultParser,
-    │                         # reviewDecision, reviewSchema, LocalDiffSource,
-    │                         # LearningOrchestrator
-    ├── config/               # ConfigLoader (merge + validation), DefaultConfig
-    ├── prompts/              # PromptBuilder, Review/Enhancement/Learning system
-    │                         # prompts, LangfusePromptManager
-    ├── exploration/          # ContextExplorerService, ExplorerPromptBuilder,
-    │                         # RulesContextLoader (project docs discovery)
-    ├── harness/              # Critic + submit_review gate (verification/dedup
-    │                         # between agent findings and the PR)
-    ├── rules/                # RuleLoader — .yama/rules/** structured team rules
-    ├── state/                # ReviewStateStore — cross-run incremental review
-    ├── learning/             # KnowledgeBaseManager (.yama/knowledge-base.md)
-    ├── memory/               # MemoryManager (per-repo condensed memory / Hippocampus)
+└── v4/
+    ├── index.ts              # Public SDK entry (sanctioned type re-exporter)
+    ├── cli/cli.ts            # commander CLI
+    ├── core/                 # ReviewRunner, ReviewPipeline, StageMachine,
+    │                         # Supervisor, SessionRunner, StructuredCall,
+    │                         # RunAssembly, RunContext, Runtime, ToolExposure,
+    │                         # NeurolinkFactory, Doctor, DoctorProbe,
+    │                         # RunReport, LocalDiff, verdict
+    ├── agents/               # systemInstruction (static), subAgents, turnContract
+    ├── prompts/              # PromptStore (platform + local fallback), local catalog
+    ├── tools/                # registry, recall, posting, progress, workspace,
+    │                         # gitSafe, sandbox, commentFormat
+    ├── connections/          # Registry (MCP), Capabilities, invoke, Comments
+    ├── checks/               # Runner (pure), execute (spawns), extract, parsers, builtin
+    ├── findings/             # Gate, Markers, Ledger
+    ├── policy/               # guards, paths
+    ├── judge/                # inline confidence, scorecard
+    ├── learn/                # LearnRunner, Triage, KnowledgeWriter, GitWriter,
+    │                         # MergeResolver, Window, WatermarkStore, Bootstrap,
+    │                         # BootstrapRunner
+    ├── config/               # Loader, schema, defaults, ModelChain, migrate, v3Compat
+    ├── artifacts/            # PrArtifact — cross-run memory
+    ├── product/              # capability map + impact ledger
     ├── types/                # ALL type definitions — barrel at index.ts
-    └── utils/                # toolPolicy, tokenLimits, ProviderDetector,
-                              # ObservabilityConfig, version
+    └── ...
 ```
 
 ### Key Files
 
-| File                                 | Purpose                                                          |
-| ------------------------------------ | ---------------------------------------------------------------- |
-| `src/v2/core/YamaOrchestrator.ts`    | Main flow — init, review, enhance, explore tool registration     |
-| `src/v2/core/MCPServerManager.ts`    | Config-driven MCP registration; fail-closed `allowedTools`       |
-| `src/v2/core/reviewDecision.ts`      | Deterministic verdict policy (`deriveDecision`) — do not weaken  |
-| `src/v2/core/reviewSchema.ts`        | Zod verdict schemas passed to `generate({ schema })`             |
-| `src/v2/core/ReviewResultParser.ts`  | Normalizes `structuredData` → `ReviewResult`; severity overrides |
-| `src/v2/prompts/PromptBuilder.ts`    | Layered prompt assembly (config XML, standards, knowledge base)  |
-| `src/v2/config/ConfigLoader.ts`      | Config merge chain + loud migration validation                   |
-| `src/v2/utils/toolPolicy.ts`         | Shared tool-name normalization + git read-only allow-list        |
-| `src/v2/harness/submitReviewGate.ts` | Pure gate: dedup precedence + critic verdict application         |
-| `src/v2/state/ReviewStateStore.ts`   | State backends + reconcileFindings + auto-suppression            |
-| `src/v2/rules/RuleLoader.ts`         | .yama/rules loading, prompt compilation, compliance/blocking     |
-| `src/v2/types/index.ts`              | Types barrel — start here for any type lookup                    |
-| `.yama/config.yaml`                  | This repo's own self-review config (also the reference example)  |
-| `action.yml`                         | GitHub composite Action wrapper                                  |
-| `REFACTOR_PLAN.md`                   | Phased roadmap (v3 direction: staged agentic flow, rules, state) |
+| File                                 | Purpose                                                      |
+| ------------------------------------ | ------------------------------------------------------------ |
+| `src/v4/core/ReviewRunner.ts`        | Assembly — builds every port and runs the pipeline           |
+| `src/v4/core/ReviewPipeline.ts`      | S0–S6 definitions; S2 holds the supervised turn loop         |
+| `src/v4/core/StageMachine.ts`        | Exit predicates + bounded remediation (NOT a sequencer)      |
+| `src/v4/core/Runtime.ts`             | The ONLY file importing the provider SDK                     |
+| `src/v4/core/SessionRunner.ts`       | One session, many turns; walks the model chain itself        |
+| `src/v4/core/verdict.ts`             | Deterministic verdict policy — do not weaken                 |
+| `src/v4/findings/Gate.ts`            | Dedup, invariants, fix-required enforcement                  |
+| `src/v4/findings/Ledger.ts`          | Accepted vs actually POSTED, from tool results               |
+| `src/v4/connections/Capabilities.ts` | capability → tool name (+ pinned args), probed at startup    |
+| `src/v4/checks/execute.ts`           | The only place a check process is spawned; security enforced |
+| `src/v4/types/index.ts`              | Types barrel — start here for any type lookup                |
+| `.yama/`                             | This repo's own config (also the reference example)          |
+| `docs/v4/01-architecture.md`         | The authoritative design                                     |
 
 ## Development Commands
 
@@ -99,18 +159,35 @@ pnpm run build         # rimraf dist && tsc && tsc-alias
 pnpm run type-check    # tsc --noEmit --skipLibCheck
 pnpm run lint          # eslint .   (lint:fix to autofix)
 pnpm run format        # prettier --write .
-pnpm test              # jest (unit tests in tests/)
-pnpm run dev:run       # tsx src/cli/cli.ts — run the CLI from source
-node dist/cli/cli.js doctor --config .yama/config.yaml   # config + capability check
+pnpm test              # jest (unit tests in tests/v4/)
+pnpm run dev:run       # tsx src/cli/cli.ts
+
+node dist/v4/cli/cli.js doctor --live --pr <n>   # connects for real
 ```
 
 **Workflow:** edit → `pnpm run type-check` → `pnpm run lint` → `pnpm test` → `pnpm run build`.
 
-Node: CI tests on 20/22/26; the Action runs on Node 26. `engines` floor stays `>=20.18.1` — raising it is a breaking change reserved for a major release.
+Node: CI tests on 20/22/26. `engines` floor stays `>=20.18.1`.
 
 ## Common Patterns
 
-- **Generate calls:** always pass `context: { sessionId, userId, operation }`, `skipToolPromptInjection: true`, and clamp output tokens via `clampMaxTokens`. Memory flags are per-call (`memory: { read, write }`) — operational calls must not write memory.
-- **Retries:** wrap `generate()` in `generateWithRetry` semantics — bounded attempts, transient-only (`isTransientError`), exponential backoff.
-- **Silent-catch ban:** failures in optional subsystems (memory, knowledge base, bootstrap) degrade gracefully but must log a warning — never a bare `catch {}` that hides the cause.
-- **Tests:** unit tests live under `tests/` mirroring `src/v2/`; pure logic (parser, decision, prompts, config) is tested without network. New modules ship with tests.
+- **Ports and adapters.** Modules are written against structural types
+  (`GenerateHost`, `McpHost`, `ToolInvoker`, `CommandRunner`), which is what makes
+  the pipeline, supervisor and gate testable without a network. `core/Runtime.ts`
+  is the single place that constructs the real client — keep it thin, and put any
+  decision in a pure module with a test.
+- **Generate calls** always pass `context: { sessionId, userId, operation }`,
+  `skipToolPromptInjection: true`, a `schema`, and `memory: { read: true, write:
+false }` — operational calls must never write memory. Learning happens on merge.
+  One-shot passes (judge, extraction, triage, bootstrap) go through
+  `generateStructured`, which walks the chain, validates against the schema, and
+  surfaces the runtime's `jsonTruncated` / `jsonRepaired` flags rather than
+  swallowing them.
+- **Prompts** come from `prompts/PromptStore.ts`. Never import a prompt constant
+  at a call site: ask the catalog, so a platform override applies. The shipped
+  text in `prompts/local.ts` is the fallback and the only thing tests assert on.
+- **Empty is not success.** A response with no content and no tool calls means the
+  model produced nothing; treat it as a failed chain member, never a finished turn.
+- **Tests** live under `tests/v4/` mirroring `src/v4/`. Pure logic (parser,
+  verdict, gate, config, chain) is tested without network. New modules ship with
+  tests, table-driven where the logic is a matrix.

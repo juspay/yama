@@ -3,6 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+    # Yama's learn commits touch only its own knowledge files and carry
+    # [skip ci]. This is the second guard: [skip ci] is honoured inconsistently
+    # across CI systems, and a knowledge update has nothing to build or test.
+    paths-ignore:
+      - ".yama/knowledge/**"
+      - ".yama/product/**"
+      - ".yama/state/**"
+      - ".yama/reports/**"
   pull_request:
     branches: [main]
 
@@ -31,8 +39,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Auto-format code
-        run: pnpm run format
+      - name: Check formatting
+        # Check, never write: `pnpm run format` reformatted the checkout in place
+        # and then passed, so CI could never tell a formatted branch from an
+        # unformatted one.
+        run: pnpm run format:check
 
       - name: Run linting
         run: |

@@ -1,0 +1,46 @@
+# Guards: path-scoped policy evaluated in code, with no model involved.
+#
+# All advisory for now. `severityFloor` raises how a finding is reported;
+# `forbid` and `requireChecks` produce findings but block only when the verdict
+# config lists their reason — which it does, so promote these deliberately.
+guards:
+  # The verdict path decides what merges. A regression here degrades every
+  # review silently, which is the worst failure mode a reviewer can have.
+  - id: verdict-path
+    paths:
+      - "src/v4/core/verdict.ts"
+      - "src/v4/findings/**"
+      - "src/v4/core/ReviewPipeline.ts"
+    severityFloor: MAJOR
+    reason: "Decides what merges — a quiet regression here weakens every review"
+
+  # Running repository commands with CI credentials. The highest blast radius
+  # in the product.
+  - id: check-execution
+    paths:
+      - "src/v4/checks/Runner.ts"
+    severityFloor: MAJOR
+    reason: "Executes project-authored commands; a hole here is arbitrary code execution"
+
+  # The only code that holds write credentials.
+  - id: write-credentials
+    paths:
+      - "src/v4/learn/GitWriter.ts"
+    severityFloor: MAJOR
+    reason: "Holds push credentials; leaks here reach the repository"
+
+  # Tool policy and sandboxing keep an agent reading attacker-controlled input
+  # from reaching the machine.
+  - id: sandbox
+    paths:
+      - "src/v4/tools/gitSafe.ts"
+      - "src/v4/tools/sandbox.ts"
+      - "src/v4/connections/Capabilities.ts"
+    severityFloor: MAJOR
+    reason: "Confines an agent reading untrusted diffs"
+
+  # Anything touching the review core should carry tests.
+  - id: core-needs-tests
+    paths: ["src/v4/core/**", "src/v4/findings/**"]
+    requireChecks: ["test", "typecheck"]
+    reason: "Core logic changes must keep the suite green"

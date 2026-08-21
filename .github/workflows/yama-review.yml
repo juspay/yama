@@ -1,0 +1,130 @@
+name: Yama review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# One review per pull request at a time. A second push while a review is running
+# would race the first on comment markers and could duplicate comments.
+concurrency:
+  group: yama-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  # Reading this pull request's memory means listing artifacts from EARLIER
+  # runs through the API, which the default token cannot do without this.
+  actions: read
+
+jobs:
+  review:
+    # Drafts are not ready to be reviewed, and Yama must never review its own
+    # learning commits.
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    # Comfortably above `ai.timeout` in .yama/yama.yaml, so a slow model is cut
+    # off by Yama — which reports the stall honestly and still posts a summary —
+    # rather than by the runner, which kills the job and reports nothing.
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Yama reads the diff and the code from disk rather than through the
+          # API. Full history is what makes `git diff base...head` correct.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Restore this pull request's memory
+        # Carries what earlier runs on this pull request established: what was
+        # explored, what was rejected and why. Absent is fine — comment markers
+        # are the authority on what was already said, and they live on the pull
+        # request itself.
+        #
+        # actions/download-artifact cannot fetch by name from a PREVIOUS run, so
+        # the artifact is located through the API first. Pointing it at
+        # github.run_id would silently download nothing, every time.
+        id: memory
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          name="yama-pr-${{ github.event.pull_request.number }}"
+          id=$(gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+                 --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)]
+                       | sort_by(.created_at) | reverse | .[0].id // empty")
+          if [ -z "$id" ]; then
+            echo "No previous memory for this pull request — reviewing from comment markers."
+            exit 0
+          fi
+          mkdir -p .yama/state
+          gh api "repos/${{ github.repository }}/actions/artifacts/$id/zip" > /tmp/yama-memory.zip
+          unzip -o -q /tmp/yama-memory.zip -d .yama/state
+          echo "Restored memory from artifact $id."
+
+      - name: Verify the setup
+        # Everything that could fail late — connections, credentials, every
+        # capability the run needs — is checked here instead.
+        env:
+          YAMA_GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          LANGFUSE_ENABLED: "true"
+        run: node dist/v4/cli/cli.js doctor --live
+
+      - name: Review
+        id: review
+        env:
+          YAMA_GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          LANGFUSE_ENABLED: "true"
+          YAMA_CONCURRENCY: high
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node dist/v4/cli/cli.js review \
+            --pr ${{ github.event.pull_request.number }}
+
+      - name: Save this pull request's memory
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: yama-pr-${{ github.event.pull_request.number }}
+          path: .yama/state
+          retention-days: 30
+          overwrite: true
+
+      - name: Archive the run report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: yama-report-${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: .yama/reports
+          retention-days: 14

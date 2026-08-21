@@ -1,0 +1,126 @@
+# Yama reviews its own pull requests with this configuration.
+#
+# Every model slot is a FALLBACK CHAIN: when the first entry fails, the next is
+# tried, in order. Qwen is primary; DeepSeek is the fallback.
+version: 4
+
+ai:
+  provider: [litellm, litellm]
+  # The production gateway (grid.ai.juspay.net, via LITELLM_BASE_URL). Both
+  # members advertise real limits on /model/info (262144/31000 and
+  # 256000/32000) and passed live tool-calling tests. Verified 2026-08-24:
+  # a 43K-token prompt prefills in 2.6-9.1s here — the previous self-hosted
+  # path took 120s+ under load, behind an edge that cut every request at
+  # ~120s. This endpoint sits behind a GCP load balancer, not that edge.
+  model: [private-large, deepseek]
+  temperature: 0.1
+  # This is the OUTPUT reserve, and the runtime subtracts it from the context
+  # window verbatim to get the input budget (getOutputReserve returns maxTokens
+  # when it is set). At 32000 against this model's ~115k window the input budget
+  # was 83200, and a review of a large pull request has nothing like that to
+  # spare. A turn's output is a few tool calls and a short structured summary,
+  # so 8000 is generous for the job and returns 24k of input budget.
+  maxTokens: 8000
+  # Per model call. A HANG detector, not a budget — the review is bounded by
+  # work, and a model that is merely slow must be allowed to finish rather than
+  # be cut off mid-answer and reported as a stall. Self-hosted models answer far
+  # slower than a hosted API without being broken, so this sits well above the
+  # runtime's own default.
+  timeout: 600000 # 10 minutes
+  pool:
+    strategy: priority
+    cooldownMs: 60000
+
+  # Cheap slots: none of this work benefits from deliberation. `open-fast`
+  # answered a JSON-mode scoring probe in 0.4s with valid JSON; the review
+  # model `private-large` returns empty content in JSON mode, so it must NOT
+  # serve these schema-bound slots.
+  subAgent:
+    provider: [litellm, litellm]
+    model: [open-fast, deepseek]
+  judge:
+    provider: [litellm, litellm]
+    model: [open-fast, deepseek]
+    temperature: 0
+  scorecard:
+    provider: [litellm, litellm]
+    model: [open-fast, deepseek]
+  extraction:
+    provider: [litellm, litellm]
+    model: [open-fast, deepseek]
+    temperature: 0
+  # Compaction and memory take a single provider+model upstream, so their chain
+  # is resolved by a startup health probe rather than pooled. `yama doctor`
+  # labels them "resolved at startup" so this is visible, not implied.
+  compaction:
+    provider: [litellm, litellm]
+    model: [open-fast, deepseek]
+  memory:
+    provider: [litellm, litellm]
+    model: [open-fast, deepseek]
+
+  # The runtime registers its own file-reading tools. They are NOT sandboxed to
+  # the repository and they duplicate Yama's read_file / list_files /
+  # search_code, so the agent would see two tools for one job and one of them
+  # could read outside the repo. Dropped before it ever sees them.
+  #
+  # The runtime's own `disableBuiltinTools` flag does not do this — measured
+  # inert both as config and as NEUROLINK_DISABLE_BUILTIN_TOOLS. Excluding by
+  # name is what actually works. If the runtime renames these, `yama doctor`
+  # will still pass and this list needs updating.
+  excludeRuntimeTools:
+    - extract_file_content
+    - get_file_preview
+    - list_attached_files
+    - read_file_section
+    - search_in_file
+    # The runtime's SECOND built-in family (direct agent tools). Observed in
+    # production request payloads on every review turn: writeFile is a real
+    # filesystem write — sandboxed to the working directory by the runtime, but
+    # a write tool has no business on a review instance at all — and readFile /
+    # listDirectory duplicate Yama's sandboxed read_file / list_files.
+    - analyzeCSV
+    - calculateMath
+    - getCurrentTime
+    - listDirectory
+    - readFile
+    - writeFile
+    - retrieve_context
+    - websearchGrounding
+
+learn:
+  # This repository's history carries no pull request numbers in commit
+  # subjects, so a number can only come from the merge event itself. Learning on
+  # push would attribute feedback to the wrong pull request.
+  trigger: merge-event
+  mergeStrategy: rebase
+  mode: commit
+  botIdentity: github-actions[bot]
+  git:
+    auth: https
+    userEnv: YAMA_GIT_USER
+    tokenEnv: YAMA_GITHUB_TOKEN
+    remote: "https://github.com/juspay/yama.git"
+    branch: main
+
+# Prompt management. OFF here: this repository is the reference configuration,
+# and a reference that depends on a vendor account is not a reference. Turn it
+# on to iterate on wording without cutting a release — every failure path
+# (no credentials, no network, no such prompt, a timeout) falls back to the
+# text Yama ships, so a platform outage slows nothing and changes nothing.
+#
+# prompts:
+#   enabled: true
+#   provider: langfuse
+#   label: production
+#   # Credentials come from the environment, never from this file:
+#   # LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL.
+#   only: [yama-review]
+
+state:
+  enabled: true
+  path: .yama/state
+
+observability:
+  enabled: true
+  reportPath: .yama/reports
