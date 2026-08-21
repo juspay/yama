@@ -1,0 +1,114 @@
+name: Yama learn
+
+# The merge event is the ONLY trigger that reliably identifies which pull
+# request merged. This repository rebases, so commits carry no pull request
+# number and a `push` trigger would attribute feedback to the wrong pull
+# request — or to none.
+on:
+  pull_request:
+    types: [closed]
+
+# Serialised: two learn runs would race each other pushing to main, and the
+# loser would be rebased onto a knowledge base it never read.
+concurrency:
+  group: yama-learn
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+  # The review run's artifact is located through the artifacts API.
+  actions: read
+
+jobs:
+  learn:
+    # Only a MERGED pull request teaches anything. A closed-unmerged one was
+    # rejected, and learning from it would record conventions nobody adopted.
+    if: >
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.user.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          # Correction linking walks history to connect a fix back to what it
+          # fixed, which is the signal that makes the impact ledger useful.
+          fetch-depth: 0
+          token: ${{ secrets.YAMA_GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Restore the pull request's memory
+        # What the reviews on this pull request established. Learning promotes
+        # from it into the repository knowledge base — the impact ledger entry
+        # comes from here — and then discards the rest.
+        #
+        # Located through the API, not `actions/download-artifact` by name: that
+        # action only sees artifacts from the CURRENT workflow run, and the
+        # artifact this needs was written by the REVIEW run on the pull request.
+        # Using it here downloaded nothing, silently, on every merge — so the
+        # impact log was never written and nobody could tell.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          name="yama-pr-${{ github.event.pull_request.number }}"
+          id=$(gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+                 --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)]
+                       | sort_by(.created_at) | reverse | .[0].id // empty")
+          if [ -z "$id" ]; then
+            echo "No review memory for this pull request — learning from its comments alone."
+            exit 0
+          fi
+          mkdir -p .yama/state
+          gh api "repos/${{ github.repository }}/actions/artifacts/$id/zip" > /tmp/yama-memory.zip
+          unzip -o -q /tmp/yama-memory.zip -d .yama/state
+          echo "Restored review memory from artifact $id."
+
+      - name: Verify the write path
+        # Proves the credential, remote and branch BEFORE computing anything.
+        # Discovering at push time that the bot cannot write loses the feedback
+        # from this pull request permanently.
+        env:
+          YAMA_GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          YAMA_GIT_USER: github-actions[bot]
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          LANGFUSE_ENABLED: "true"
+        run: node dist/v4/cli/cli.js doctor --learn
+
+      - name: Learn
+        env:
+          YAMA_GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          YAMA_GIT_USER: github-actions[bot]
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          LANGFUSE_ENABLED: "true"
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node dist/v4/cli/cli.js learn \
+            --pr ${{ github.event.pull_request.number }}

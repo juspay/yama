@@ -131,3 +131,6 @@ simple-test.js
 *.backup.js
 .claude/
 .yama/state/
+# Per-run reports. Carried between runs by CI artifacts, never committed.
+.yama/reports/
+yama-junit.xml

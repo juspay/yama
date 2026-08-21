@@ -24,16 +24,16 @@
   "license": "MIT",
   "author": "Juspay Technologies <support@juspay.in> (https://juspay.io)",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/v4/index.js",
+  "types": "dist/v4/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/v4/index.d.ts",
+      "import": "./dist/v4/index.js"
     }
   },
   "bin": {
-    "yama": "dist/cli/cli.js"
+    "yama": "dist/v4/cli/cli.js"
   },
   "directories": {
     "test": "tests"
@@ -41,23 +41,21 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "!dist/**/*.spec.*",
     "!dist/**/*.map",
-    "!dist/**/tests",
-    "!dist/**/test-*",
+    "data",
+    "skills",
     "README.md",
     "CHANGELOG.md",
     "MIGRATION.md",
     "LICENSE",
-    "yama.config.example.yaml",
-    ".yama/mcp.example.json",
-    ".yama/README.md"
+    "action.yml",
+    "docs/v4"
   ],
   "scripts": {
     "build": "rimraf dist && tsc && tsc-alias",
     "build:action": "npm run build",
-    "dev": "tsx watch src/cli/cli.ts",
-    "dev:run": "tsx src/cli/cli.ts",
+    "dev": "tsx watch src/v4/cli/cli.ts",
+    "dev:run": "tsx src/v4/cli/cli.ts",
     "mcp:git:server": "uvx mcp-server-git || npx -y @modelcontextprotocol/server-git",
     "test": "jest",
     "lint": "eslint .",
@@ -80,30 +78,19 @@
     "validate:all": "npm run lint && npm run type-check && npm run validate",
     "validate:env": "node scripts/validate-env.cjs",
     "validate:security": "node scripts/validate-security.cjs",
-    "validate:commit": "node scripts/commit-validation.cjs \"$(git log -1 --pretty=format:'%s')\"",
     "validate:build": "node scripts/build-validations.cjs",
-    "commit:validate": "node scripts/commit-validation.cjs",
+    "validate:commit": "node scripts/commit-validation.cjs",
     "pre-commit": "lint-staged",
     "pre-push": "npm run validate && npm run test",
     "quality:all": "npm run lint && npm run format && npm run test",
     "quality:metrics": "node scripts/quality-metrics.cjs",
     "quality:report": "npm run quality:metrics && echo 'Quality metrics saved to quality-metrics.json'",
-    "check:all": "npm run lint && npm run format --check && npm run validate && npm run validate:commit"
+    "check:all": "npm run lint && npm run format:check && npm run validate && npm run validate:commit"
   },
   "dependencies": {
-    "@juspay/hippocampus": "^0.1.7",
-    "@juspay/neurolink": "^10.8.3",
-    "@nexus2520/bitbucket-mcp-server": "2.0.4",
-    "chalk": "^4.1.2",
+    "@juspay/neurolink": "^11.23.0",
     "commander": "^11.0.0",
-    "debug": "^4.3.4",
-    "dotenv": "^16.3.0",
-    "fast-glob": "^3.3.1",
-    "inquirer": "^8.2.6",
-    "langfuse": "^3.35.0",
-    "lodash": "^4.17.21",
-    "node-cache": "^5.1.2",
-    "ora": "^5.4.1",
+    "langfuse": "^3.38.20",
     "yaml": "^2.3.0",
     "zod": "^4.3.6"
   },
@@ -119,13 +106,13 @@
     "@semantic-release/release-notes-generator": "^14.0.1",
     "@types/inquirer": "^9.0.8",
     "@types/jest": "^29.0.0",
-    "@types/lodash": "^4.14.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "husky": "^9.0.0",
     "jest": "^29.0.0",
+    "jest-junit": "^17.0.0",
     "lint-staged": "^15.0.0",
     "prettier": "^3.0.0",
     "publint": "^0.3.0",

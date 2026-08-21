@@ -1,0 +1,43 @@
+{
+  "_comment": [
+    "Migration hints for `yama migrate`, and the ONLY place tool names appear",
+    "outside a repository's own .yama/mcp.yaml.",
+    "",
+    "Yama's code never names a tool (repo rule 7): it asks for a capability and",
+    "the capability map supplies the name. A v3 config has no capability map, so",
+    "migrating one means guessing the map from the server id it used. That guess",
+    "is data, not logic, which is why it lives in this file rather than in src/.",
+    "",
+    "Every entry is a STARTING POINT. `yama doctor --live` resolves each name",
+    "against what the server actually advertises and prints the real tool list",
+    "when one is wrong. Anything not inferred is left absent on purpose: an",
+    "absent capability is reported precisely at startup, while a wrong guess",
+    "fails at posting time, which is far later and far more confusing.",
+    "",
+    "Match is by substring on the server id, longest key first."
+  ],
+  "servers": {
+    "github": {
+      "readPullRequest": "get_pull_request",
+      "findPullRequest": "list_pull_requests",
+      "listComments": "get_pull_request_comments",
+      "listApprovals": "get_pull_request_reviews",
+      "listChangedFiles": "get_pull_request_files",
+      "postInlineComment": "create_pull_request_review_comment",
+      "postSummary": "add_issue_comment",
+      "updateDescription": "update_pull_request"
+    },
+    "bitbucket": {
+      "readPullRequest": "get_pull_request",
+      "findPullRequest": "list_pull_requests",
+      "listComments": "get_pull_request",
+      "postInlineComment": "add_comment",
+      "postSummary": "add_comment",
+      "setStatus": "set_review_status",
+      "updateDescription": "update_pull_request"
+    },
+    "serena": {
+      "codeIntel": "find_referencing_symbols"
+    }
+  }
+}

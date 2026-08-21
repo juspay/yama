@@ -1,0 +1,69 @@
+# Review behaviour.
+concurrency:
+  # High: the agent may run up to 8 sub-agents at once and launch 6 per turn.
+  # It still decides whether to fan out at all — this only sets the ceiling.
+  power: high
+
+verdict:
+  # On, so the run reports a decision. Nothing here blocks yet: every blocking
+  # reason requires its own opt-in upstream (a rule, a check, or an ownership
+  # rule declaring `blocking: true`), and none of them do.
+  enabled: true
+  majorThreshold: 3
+  blockOn:
+    - CRITICAL
+    - MAJOR_THRESHOLD
+    - blocking-rule
+    - blocking-check
+    - unapproved-ownership
+
+stages:
+  checks: true
+  enhance: true
+
+remediation:
+  # Two re-prompts per stage before it is recorded degraded and said so in the
+  # summary. A silent partial reported as success is the failure this prevents.
+  maxAttemptsPerStage: 2
+
+# Enforced in code, before the agent sees a file list — not requested in a prompt.
+excludePatterns:
+  - "dist/**"
+  - "coverage/**"
+  - "node_modules/**"
+  - "**/*.snap"
+  - "pnpm-lock.yaml"
+  - "promo/**"
+  - "memory-bank/**"
+  - ".serena/**"
+
+maxFiles: 200
+
+# The inline judge's acceptance bar, 0-100.
+confidenceThreshold: 80
+
+# Comment only on lines this pull request changed.
+changedLinesOnly: true
+
+# Deleted files are not review material here: this repository's pull requests
+# delete whole modules during refactors (93 of 280 files on PR #85, pushing 81
+# live files out of a 200-file scope). They still reach ownership and guards —
+# a deletion is exactly when an owner should look — they just stop consuming
+# maxFiles budget and reviewer attention. Set to "content" to review them.
+deletions: ignore
+
+# End the turn and let the supervisor look every 30 tool steps. NOT a work
+# budget — the next turn resumes in the same session where this one stopped.
+# Uncapped turns ran the runtime's default 200-step loop: one turn grew to
+# 488K tokens (past any compactable size), requests grew past the network edge
+# ceiling, and the supervisor intervened twice in 45 minutes.
+maxStepsPerTurn: 30
+
+# What an enhanced description has to contain. Verified by re-reading the pull
+# request after S5, not by believing the agent said it wrote them — the same
+# rule that governs findings applies to the description.
+description:
+  sections:
+    - { title: "What changed", required: true }
+    - { title: "Testing", required: true }
+    - { title: "Impact" }

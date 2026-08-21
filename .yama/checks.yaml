@@ -1,0 +1,102 @@
+# Checks Yama runs during a review, reporting their output as inline findings.
+#
+# SECURITY — not tunable downward: this file and every script it names are read
+# from the BASE branch, never from the pull request. A pull request that could
+# edit them could run anything with this job's credentials. Yama also refuses to
+# run checks at all if the head modified a declared script.
+enabled: true
+allowForks: false
+
+checks:
+  # Ownership. Deterministic, no model involved: match changed paths against
+  # .yama/policy/ownership.yaml and post one grouped comment tagging owners.
+  - id: owners
+    type: builtin.owners
+    source: .yama/policy/ownership.yaml
+    blocking: false
+
+  - id: typecheck
+    run: "pnpm run type-check"
+    parse: tsc
+    when:
+      paths: ["**/*.ts"]
+    severity:
+      error: MAJOR
+    scope: changed-lines
+    blocking: false
+    timeoutMs: 300000
+
+  - id: lint
+    run: "npx eslint src tests --format json"
+    parse: eslint
+    when:
+      paths: ["**/*.{ts,tsx,js,cjs,mjs}"]
+    severity:
+      error: MAJOR
+      warning: MINOR
+    scope: changed-lines
+    maxFindings: 25
+    blocking: false
+    timeoutMs: 300000
+
+  - id: test
+    # YAMA_JUNIT turns on the junit reporter (see jest.config.cjs) and names its
+    # file; the report is printed so the parser reads stdout rather than
+    # depending on where the reporter wrote it.
+    run: "YAMA_JUNIT=yama-junit.xml npx jest --ci; cat yama-junit.xml"
+    parse: junit
+    severity:
+      failure: MAJOR
+      error: MAJOR
+    # Repo scope: a test that breaks is a problem wherever it lives, not only
+    # when its own file changed.
+    scope: repo
+    maxFindings: 20
+    blocking: false
+    timeoutMs: 600000
+
+  - id: format
+    run: "npx prettier --check ."
+    parse: regex
+    when:
+      paths: ["**/*.{ts,js,json,md,yml,yaml}"]
+    severity:
+      error: MINOR
+    scope: changed-files
+    maxFindings: 10
+    blocking: false
+    timeoutMs: 180000
+
+  - id: build
+    # Compiles the whole repository, which is what `typecheck` above does NOT do:
+    # that one is scoped to changed lines, so a change that breaks a file it did
+    # not touch shows up only here.
+    #
+    # Deliberately NOT `pnpm run build`: that script begins with `rimraf dist`,
+    # and CI runs the reviewer itself from `dist/v4/cli/cli.js` — the check would
+    # delete the program executing it, mid-review. Type-checking compiles the
+    # same sources and emits nothing.
+    run: "pnpm run type-check"
+    # No structured output: a non-zero exit is the finding.
+    parse: regex
+    severity:
+      error: MAJOR
+    scope: repo
+    blocking: false
+    timeoutMs: 600000
+
+  # Production dependency audit. Advisory: a transitive advisory is rarely
+  # actionable inside the pull request that happens to be open.
+  - id: audit
+    run: "pnpm audit --prod --audit-level high --json"
+    parse: agent
+    hint: >
+      pnpm audit JSON. Each advisory has a module name, severity, and a
+      vulnerable version range. Report one finding per HIGH or CRITICAL
+      advisory against package.json; ignore anything lower.
+    when:
+      paths: ["package.json", "pnpm-lock.yaml"]
+    scope: repo
+    maxFindings: 10
+    blocking: false
+    timeoutMs: 300000
