@@ -70,6 +70,39 @@ function validatePackageJson() {
   return true;
 }
 
+function validateActionManifest() {
+  console.log("🎬 Validating action.yml manifest...");
+
+  const actionPath = path.join(process.cwd(), "action.yml");
+  if (!fs.existsSync(actionPath)) {
+    console.log("  (no action.yml — skipping)");
+    return true;
+  }
+
+  // The `secrets` (and `vars`) context does not exist in a composite action —
+  // GitHub evaluates every ${{ }} expression in the manifest at load time, so
+  // a single `${{ secrets.X }}` anywhere, even inside a description string,
+  // fails the whole action with "Unrecognized named-value: secrets" before any
+  // step runs. This shipped in v4.0.0 (in the vcs-token input's docs) and broke
+  // every consumer. Tokens must arrive through inputs; the context is banned.
+  const source = fs.readFileSync(actionPath, "utf8");
+  const banned = [
+    ...source.matchAll(/\$\{\{[^}]*\b(secrets|vars)\b[^}]*\}\}/g),
+  ];
+  if (banned.length > 0) {
+    throw new Error(
+      "action.yml references a context unavailable in a composite action " +
+        "(secrets/vars) inside a ${{ }} expression — the runner evaluates it " +
+        "at manifest load and the action fails to load:\n" +
+        banned.map((m) => `  ${m[0]}`).join("\n") +
+        "\nPass tokens through `inputs`, and never write secrets.* with " +
+        "expression braces anywhere in this manifest, including prose.",
+    );
+  }
+  console.log("  ✅ no unavailable-context references");
+  return true;
+}
+
 function validateBuildOutput() {
   console.log("🏗️ Validating build output...");
 
@@ -106,6 +139,53 @@ function validateBuildOutput() {
   console.log(
     `✅ Build output validation - PASSED (${entryPoints.length} entry point(s) verified)`,
   );
+  return true;
+}
+
+function validateCliThroughBinShim() {
+  console.log("🔗 Validating the CLI through a bin-shim symlink...");
+
+  // npm installs the CLI as a symlink (node_modules/.bin/yama → cli.js), so
+  // process.argv[1] is the SHIM's path, not cli.js. v4.0.0 guarded its entry
+  // with a filename-suffix check, and through the shim — exactly how the
+  // GitHub Action invokes it — every command loaded, did nothing, and exited
+  // 0. This executes the built CLI the way npx does and demands real output.
+  const os = require("os");
+  const { execFileSync } = require("child_process");
+
+  const cliPath = path.join(process.cwd(), "dist", "v4", "cli", "cli.js");
+  if (!fs.existsSync(cliPath)) {
+    throw new Error("dist/v4/cli/cli.js not found. Run npm run build first.");
+  }
+
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "yama-shim-"));
+  const shimPath = path.join(shimDir, "yama");
+  try {
+    fs.symlinkSync(cliPath, shimPath);
+    const stdout = execFileSync(process.execPath, [shimPath, "--help"], {
+      encoding: "utf8",
+      timeout: 30000,
+    });
+    if (!stdout.includes("yama")) {
+      throw new Error(
+        "CLI invoked through a bin-shim symlink produced no usage output — " +
+          "the entry guard is not recognising the shim and every npx " +
+          "invocation is a silent no-op.",
+      );
+    }
+  } catch (error) {
+    if (error.status !== undefined || error.stdout !== undefined) {
+      throw new Error(
+        `CLI invoked through a bin-shim symlink failed (exit ${error.status}): ` +
+          `${String(error.stdout || "")}${String(error.stderr || "")}`.trim(),
+      );
+    }
+    throw error;
+  } finally {
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+
+  console.log("  ✅ bin-shim invocation produces real output");
   return true;
 }
 
@@ -153,8 +233,14 @@ function main() {
     // Build validation
     () => runCommand("npm run build", "Production build"),
 
+    // Action manifest validation
+    () => validateActionManifest(),
+
     // Build output validation
     () => validateBuildOutput(),
+
+    // CLI must work through the npm bin shim (how npx invokes it)
+    () => validateCliThroughBinShim(),
 
     // Test execution
     () => runCommand("npm run test", "Test execution"),

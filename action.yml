@@ -47,7 +47,12 @@ inputs:
   vcs-token:
     description: >
       Token for the VCS MCP server. Pass it through a NON-reserved env name —
-      ${{ secrets.GITHUB_TOKEN }} is unreliable inside a composite action.
+      the reserved secrets.GITHUB_TOKEN is unreliable inside a composite
+      action. Never write that value with GitHub-Actions expression braces
+      anywhere in this manifest: the runner evaluates such expressions even
+      inside description strings, the secrets context does not exist at manifest
+      load, and the whole action then fails to load with "Unrecognized
+      named-value: secrets".
     required: false
   fail-on-blocked:
     description: "Exit non-zero when the verdict is BLOCKED."
@@ -191,6 +196,13 @@ runs:
         ARGS=(review)
         if [ -n "$YAMA_INPUT_PR" ]; then ARGS+=(--pr "$YAMA_INPUT_PR"); fi
         if [ -n "$YAMA_INPUT_BRANCH" ]; then ARGS+=(--branch "$YAMA_INPUT_BRANCH"); fi
+        # The CLI's diff base defaults to origin/main. On every pull_request
+        # event the runner names the ACTUAL base branch in GITHUB_BASE_REF —
+        # without this, any repository whose pull requests target another
+        # branch (release, develop) fails at merge-base before reviewing
+        # anything. GITHUB_BASE_REF is runner-provided, not attacker-chosen,
+        # and reaches the command as a single argv entry either way.
+        if [ -n "${GITHUB_BASE_REF:-}" ]; then ARGS+=(--base "origin/${GITHUB_BASE_REF}"); fi
         if [ "$YAMA_INPUT_DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
         ARGS+=(--config "$YAMA_INPUT_CONFIG")
         npx --yes "@juspay/yama@$YAMA_INPUT_VERSION" "${ARGS[@]}"
@@ -201,13 +213,22 @@ runs:
       # step is what turns a finished review into the action's outputs.
       #
       # `always()`: a review that failed part-way still wrote a report saying so,
-      # and a caller that gates on `partial` needs to see it. A missing or
-      # unreadable report yields empty outputs and a warning annotation, never a
-      # failed step — the review already happened either way.
+      # and a caller that gates on `partial` needs to see it.
+      #
+      # Fail-closed: when the review step SUCCEEDED but wrote no report, this
+      # step fails the job. The CLI writes a report on every completed review,
+      # dry-run included — success with nothing written means the review never
+      # actually ran (v4.0.0's bin shim made the CLI a silent no-op, and this
+      # step's warning-only handling turned an empty review into a green
+      # check). Only when the review step itself already failed does a missing
+      # report stay a warning — the job is red either way, and the annotation
+      # should point at the review's own error, not at this step.
       id: report
       if: always()
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        YAMA_REVIEW_OUTCOME: ${{ steps.review.outcome }}
       run: |
         set -euo pipefail
         node -e '
@@ -224,11 +245,20 @@ runs:
             if (newest) {
               report = JSON.parse(fs.readFileSync(newest, "utf8"));
               console.log("Run report: " + newest);
-            } else {
-              console.log("::warning::No run report under .yama/reports; outputs stay empty.");
             }
           } catch (error) {
             console.log("::warning::Could not read the run report: " + error.message);
+          }
+          if (!report) {
+            if (process.env.YAMA_REVIEW_OUTCOME === "success") {
+              console.log(
+                "::error::The review step succeeded but wrote no run report — " +
+                "the review did not actually run. A suppressed review must " +
+                "never pass as a clean one.",
+              );
+              process.exit(1);
+            }
+            console.log("::warning::No run report under .yama/reports; outputs stay empty.");
           }
           if (report) {
             const bySeverity = report.bySeverity || {};

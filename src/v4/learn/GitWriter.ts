@@ -232,6 +232,10 @@ export async function commitAndPush(
  * writes an actor guard and a paths-ignore filter into the workflow, so the loop
  * is broken in two independent ways.
  */
-export function learnCommitMessage(pullRequestId: number): string {
-  return `chore(yama): learn from #${pullRequestId} [skip ci]`;
+export function learnCommitMessage(
+  pullRequestId: number,
+  skipCi = true,
+): string {
+  const subject = `chore(yama): learn from #${pullRequestId}`;
+  return skipCi ? `${subject} [skip ci]` : subject;
 }

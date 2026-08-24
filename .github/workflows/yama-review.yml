@@ -53,6 +53,21 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # The code-review-graph MCP server (declared in .yama/mcp.yaml) launches
+      # via `uvx`, so `uv` must be on PATH before the review runs.
+      - name: Set up uv (for the code-review-graph MCP server)
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      # Pre-build the tree-sitter code graph so the reviewer has out-of-diff
+      # context (blast radius, callers/dependents, flows) ready at the first
+      # graph tool call instead of paying the build mid-review. Non-fatal: on
+      # any failure Yama reviews without graph tools — their registration is
+      # non-fatal too. Same version pin as .yama/mcp.yaml.
+      - name: Pre-build code-review-graph
+        run: |
+          uvx --from code-review-graph==2.3.7 code-review-graph build \
+            || echo "::warning::code-review-graph build failed (non-fatal, review runs without graph context)"
+
       - name: Restore this pull request's memory
         # Carries what earlier runs on this pull request established: what was
         # explored, what was rejected and why. Absent is fine — comment markers

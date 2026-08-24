@@ -90,6 +90,7 @@ export const yamaFileSchema = z.object({
           tokenEnv: z.string().optional(),
           remote: z.string().optional(),
           branch: z.string().optional(),
+          skipCi: z.boolean().optional(),
         })
         .optional(),
     })

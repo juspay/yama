@@ -665,3 +665,29 @@ maxStepsPerTurn: 30
     );
   });
 });
+
+describe("learn skip-ci marker config", () => {
+  it("defaults to enabled (undefined, treated as true at the call site)", async () => {
+    write(".yama/yama.yaml", MINIMAL_YAMA);
+    write(".yama/mcp.yaml", MINIMAL_MCP);
+    const config = await loadConfig({ projectRoot: root });
+    expect(config.learn.git?.skipCi).toBeUndefined();
+  });
+
+  it("reads skipCi: false for a repo that bans skip directives", async () => {
+    write(
+      ".yama/yama.yaml",
+      `${MINIMAL_YAMA}
+learn:
+  trigger: merge-event
+  git:
+    remote: "https://github.com/acme/repo.git"
+    branch: main
+    skipCi: false
+`,
+    );
+    write(".yama/mcp.yaml", MINIMAL_MCP);
+    const config = await loadConfig({ projectRoot: root });
+    expect(config.learn.git?.skipCi).toBe(false);
+  });
+});

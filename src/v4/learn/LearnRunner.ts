@@ -463,7 +463,10 @@ export async function runLearn(
       config: config.learn.git,
       env: options.env ?? process.env,
       botIdentity: config.learn.botIdentity ?? "yama-bot",
-      message: `${learnCommitMessage(learnedFrom[learnedFrom.length - 1] ?? 0)}\n\n${summary}`,
+      message: `${learnCommitMessage(
+        learnedFrom[learnedFrom.length - 1] ?? 0,
+        config.learn.git?.skipCi ?? true,
+      )}\n\n${summary}`,
       paths: written,
     });
 

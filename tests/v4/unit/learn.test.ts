@@ -568,3 +568,21 @@ describe("precision", () => {
     );
   });
 });
+
+describe("learn commit skip-ci marker", () => {
+  it("carries [skip ci] by default", () => {
+    expect(learnCommitMessage(42)).toBe(
+      "chore(yama): learn from #42 [skip ci]",
+    );
+    expect(learnCommitMessage(42, true)).toBe(
+      "chore(yama): learn from #42 [skip ci]",
+    );
+  });
+
+  it("omits [skip ci] when a repository bans skip directives", () => {
+    // For repos whose CI fails any commit containing a skip-ci directive: the
+    // marker is dropped and loop-prevention rests on the actor guard,
+    // paths-ignore, and the built-in token not triggering workflows.
+    expect(learnCommitMessage(42, false)).toBe("chore(yama): learn from #42");
+  });
+});
