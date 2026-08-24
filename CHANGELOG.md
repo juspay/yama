@@ -1,3 +1,17 @@
+# [4.0.0](https://github.com/juspay/yama/compare/v3.0.4...v4.0.0) (2026-08-24)
+
+
+* feat(v4)!: supervised review pipeline with code-verified posting ([0fbddbe](https://github.com/juspay/yama/commit/0fbddbe1a4c17a2bf36a9fa2a343508b20ac1b03))
+
+
+### BREAKING CHANGES
+
+* configuration is now a file tree under .yama/ rather
+than a single file, model slots take fallback chains, and servers need a
+capability map. The v3 single-file config still loads, and `yama migrate`
+splits it. Requires a full checkout (fetch-depth: 0) because the diff is
+read from disk. See MIGRATION.md.
+
 ## [3.0.4](https://github.com/juspay/yama/compare/v3.0.3...v3.0.4) (2026-08-04)
 
 ### Bug Fixes
