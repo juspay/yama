@@ -78,6 +78,18 @@ export type LearnGitConfig = {
   tokenEnv?: string;
   remote?: string;
   branch?: string;
+  /**
+   * Put `[skip ci]` in the learn commit subject. Default true — the same
+   * marker semantic-release uses, so the learn commit does not re-trigger CI.
+   *
+   * Set false for a repository that REJECTS skip-ci directives in commits
+   * (some org policies fail any PR whose commit carries one). Loop prevention
+   * does not depend on the marker alone: the learn workflow also guards on the
+   * actor and ignores `.yama/knowledge/**` paths, and a push by the built-in
+   * GITHUB_TOKEN does not trigger workflows at all — belt, braces, and a third
+   * belt.
+   */
+  skipCi?: boolean;
 };
 
 export type StateConfig = {

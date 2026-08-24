@@ -12,7 +12,9 @@ import { Command } from "commander";
 import { execFile } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { isMainEntry } from "./entry.js";
 import { loadConfig, ConfigError } from "../config/Loader.js";
 import { findV3ConfigPath } from "../config/v3Compat.js";
 import { buildMigrationPlan, renderMigrationPlan } from "../config/migrate.js";
@@ -752,11 +754,7 @@ function stripInternals(
 }
 
 /* c8 ignore start — entry point */
-const isMain =
-  process.argv[1] !== undefined &&
-  (process.argv[1].endsWith("cli.js") || process.argv[1].endsWith("cli.ts"));
-
-if (isMain) {
+if (isMainEntry(process.argv[1], fileURLToPath(import.meta.url))) {
   buildProgram()
     .parseAsync(process.argv)
     .then(async () => {

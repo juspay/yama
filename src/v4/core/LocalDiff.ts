@@ -40,7 +40,10 @@ export async function resolveMergeBase(
   if (result.exitCode !== 0 || !result.stdout.trim()) {
     throw new DiffError(
       `Could not find where ${head} diverged from ${base}. ` +
-        `A shallow clone is the usual cause — check out with fetch-depth: 0.`,
+        `Either the base ref is wrong — the default is origin/main, so a ` +
+        `repository whose pull requests target another branch must pass ` +
+        `--base (the GitHub Action wires GITHUB_BASE_REF automatically) — ` +
+        `or the clone is shallow: check out with fetch-depth: 0.`,
     );
   }
   return result.stdout.trim();

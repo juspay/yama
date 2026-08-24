@@ -12,3 +12,7 @@ action-dist/
 .yama/reports/
 .yama/state/
 .yama/artifacts/
+
+# Written by semantic-release on every release, unformatted. Formatting it in a
+# PR would just be reverted by the next release commit.
+CHANGELOG.md
