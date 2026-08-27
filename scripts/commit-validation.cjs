@@ -34,21 +34,28 @@ const VALID_TYPES = [
   "revert", // Revert previous commit
 ];
 
-// Valid scopes (optional but recommended)
+// Valid scopes (optional but recommended). One entry per top-level directory under
+// src/, plus the few things that live outside it. A scope outside this list is a
+// WARNING, never an error — the list is a nudge towards the layout, not a gate.
 const VALID_SCOPES = [
   "cli",
-  "core",
-  "api",
-  "ai",
-  "security",
   "config",
-  "docs",
-  "tests",
-  "github",
-  "bitbucket",
-  "gitlab",
+  "core",
+  "engine",
+  "gates",
+  "platform",
+  "stages",
+  "store",
+  "tools",
+  "types",
+  "util",
+  "templates",
+  "action",
+  "ci",
   "deps",
-  "v4",
+  "docs",
+  "security",
+  "test",
 ];
 
 // Semantic commit regex pattern (supports breaking change with !)
@@ -247,12 +254,12 @@ function main() {
     }
 
     console.log("\n📖 Examples of valid commit messages:");
-    console.log("   • feat(cli): add new command for PR analysis");
-    console.log("   • feat(v4)!: complete revamp with breaking changes");
-    console.log("   • fix(api): resolve authentication issue with GitHub");
+    console.log("   • feat(cli): add --base to the review command");
+    console.log("   • feat(engine)!: complete revamp with breaking changes");
+    console.log("   • fix(platform): confirm a posted comment by its id");
     console.log("   • docs: update installation instructions");
-    console.log("   • refactor(core): simplify PR processing logic");
-    console.log("   • test(api): add unit tests for GitHub integration");
+    console.log("   • refactor(gates): simplify the completeness check");
+    console.log("   • test(store): cover an absent run store");
 
     console.log("\n🔗 Learn more: https://www.conventionalcommits.org/");
     process.exit(1);

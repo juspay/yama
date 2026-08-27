@@ -1,10 +1,11 @@
 echo "🚀 Running pre-push validation..."
 
-# Run comprehensive validation
-npm run validate
-
-# Run tests to ensure everything works
-echo "🧪 Running tests..."
-npm run test
+# One gate list, defined once in package.json's `pre-push` script:
+#   validate (env + security) → check (both tsconfigs) → lint → build → test
+#
+# `build` is not optional here and it is not there for speed: the e2e suites drive
+# dist/cli/index.js and dist/index.js, never src/. Without a fresh build the suites
+# either test the previous commit or report "nothing executed".
+pnpm run pre-push
 
 echo "✅ Pre-push validation completed successfully!"

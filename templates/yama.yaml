@@ -1,0 +1,70 @@
+# .yama/yama.yaml — the one required piece of Yama configuration.
+#
+# Model fallback chains per role, the delegation pool tier, and the two policy blocks
+# that decide what a review delivers and what it decides.
+
+version: 1
+
+# Each field is either a scalar (broadcast to every link of the chain) or one value per
+# link. The chain is tried in order until a provider answers.
+#   main       drives the review itself
+#   worker     runs delegated investigations; falls back to main
+#   summarizer falls back to worker
+models:
+  main:
+    provider: google-ai
+    model: gemini-2.5-pro
+  worker:
+    provider: google-ai
+    model: gemini-2.5-flash
+
+# How many delegated workers may run at once: low = 1, medium = 3, high = 6.
+pool:
+  tier: medium
+
+# Post-merge knowledge update (`yama learn --pr N`). Off by default: this is the only
+# command in Yama that ever changes your repository.
+#
+# It reads the merged pull request's discussion, works out what the reviewers actually
+# decided, and writes one Markdown file per fact under .yama/memory/ — which every later
+# review reads during WarmUp. Only .yama/ is ever staged, the subject carries [skip ci] so
+# the commit cannot re-trigger CI, and Yama never force-pushes. Credentials reach git from
+# the environment: a remote URL with a token in it is refused rather than used.
+learn:
+  enabled: false
+  # Where the knowledge lives, relative to .yama/. Committed, unlike artifacts/.
+  memoryDir: memory
+  # Branch to commit to. Default: whatever branch HEAD is on. CI usually checks a pull
+  # request out DETACHED, so name the branch the merge landed on when you run it there.
+  # branch: main
+  commitPrefix: "chore(yama): "
+  skipCiToken: "[skip ci]"
+  remote: origin
+  # Publishing is not as easy to undo as committing. Opt in deliberately.
+  push: false
+
+# What Delivery is allowed to put on the pull request. Each action also needs its
+# capability mapped in mcp.yaml; an action whose capability is missing is switched off and
+# named in the run report, never silently skipped.
+delivery:
+  inlineComments: true
+  summaryComment: true
+  # Setting the platform's own review state is a merge gate. Opt in deliberately.
+  verdict: false
+  # Description enhancement. Yama writes only inside its own fenced block and never
+  # touches a word the author wrote — but it does edit the description, so opt in.
+  describe: false
+  # Which sections that block carries: summary | risk | findings | coverage.
+  describeSections: [summary, risk]
+  maxInlineComments: 25
+  minSeverity: MINOR
+
+# The verdict policy: a pure function of the findings and this block, so what a run decided
+# is auditable from configuration alone.
+verdict:
+  blockOn: [CRITICAL]
+  commentOn: [MAJOR]
+  # Findings below this confidence are noise and never move the verdict.
+  minConfidence: 0
+  # Block once this many commentOn findings pile up. 0 disables the threshold.
+  blockAfter: 0

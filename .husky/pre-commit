@@ -1,10 +1,11 @@
 echo "🔍 Running pre-commit checks..."
 
-# Run lint-staged for staged files
-npm run pre-commit
+# Format and lint only what is staged.
+pnpm run pre-commit
 
-# Run the same validation as CI
+# The same gates CI runs, so a red pipeline is never the first time you hear it:
+# lint, both TypeScript projects, then the env and security validators.
 echo "🔍 Running build rule enforcement validations..."
-npm run validate:all
+pnpm run validate:all
 
 echo "✅ Pre-commit checks completed successfully!"

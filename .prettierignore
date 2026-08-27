@@ -1,14 +1,14 @@
-# Generated, and not ours to format.
-#
-# CI runs `format:check`, so anything listed here would otherwise fail the build
-# for a file no human wrote. The lockfile in particular reformats to a ~16k-line
-# diff, which buries every real change in the same commit.
-pnpm-lock.yaml
+node_modules/
 dist/
-coverage/
-action-dist/
-
-# Written by Yama's own runs.
-.yama/reports/
-.yama/state/
 .yama/artifacts/
+
+# Fixture repos are review INPUT for Yama's own suites: deliberately bad config, and in one
+# case deliberately unparseable. Formatting them would repair the very thing under test.
+test/fixtures/
+
+# Generated: by pnpm, and by semantic-release out of the commit history.
+pnpm-lock.yaml
+CHANGELOG.md
+
+# A Groovy pipeline prettier has no parser for.
+templates/ci/Jenkinsfile

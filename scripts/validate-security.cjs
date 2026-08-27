@@ -31,6 +31,10 @@ const SECURITY_PATTERNS = [
       /allowSyntheticDefaultImports/,
       /experimentalDecorators/,
       /emitDecoratorMetadata/,
+      // git's empty tree object id. It is the same 40 hex characters in every
+      // repository on earth — a published constant, not a secret. Diffing
+      // against it is how a repo with no commits still has a diff.
+      /4b825dc642cb6eb9a060e54bf8d69288fbee4904/,
     ],
   },
   {
@@ -72,12 +76,16 @@ const SECURITY_PATTERNS = [
     severity: "low",
     description: "Console statement (should use logger in production)",
     excludeFiles: [
-      /src\/v4\/cli\//,
+      /src\/cli\//,
       /test-.*\.js$/,
       /\.test\./,
       /\.spec\./,
       /README\.md$/,
       /\.claude\//,
+      // A composite action's only channel for a workflow command
+      // (`::error::`, `::warning::`) is the step's stdout. There is no logger
+      // to reach for, so every one of these is a false positive.
+      /action\.yml$/,
     ],
   },
 ];
@@ -94,7 +102,12 @@ const EXCLUDED_PATHS = [
   "scripts/validate-security.cjs", // Exclude this file itself
   // Test fixtures deliberately contain unsafe-looking code — a diff with an
   // eval() in it is the input a gate test needs. Tests are not published.
-  "tests",
+  "test/",
+  // Yama's own run store: banked stage output, worker reports, and diffs of
+  // whatever was under review. It is generated and gitignored, and its contents
+  // belong to the reviewed repository, not this one — scanning it reports
+  // findings about someone else's code and fails `pnpm run validate` for it.
+  ".yama/artifacts",
 ];
 
 function shouldExcludeFile(filePath) {
@@ -178,7 +191,12 @@ function scanDirectory(dirPath) {
 
       entries.forEach((entry) => {
         const fullPath = path.join(currentPath, entry);
-        const relativePath = path.relative(process.cwd(), fullPath);
+        // Compared against EXCLUDED_PATHS, which are written with forward
+        // slashes, so the separator is normalised rather than left to the OS.
+        const relativePath = path
+          .relative(process.cwd(), fullPath)
+          .split(path.sep)
+          .join("/");
 
         if (shouldExcludeFile(relativePath)) {
           return;

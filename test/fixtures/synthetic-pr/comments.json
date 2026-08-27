@@ -1,0 +1,26 @@
+{
+  "values": [
+    {
+      "id": 8801,
+      "body": "**CRITICAL · security** — the refresh token is written to the request log\n\nAnyone with log access can replay a session.\n\n**Fix:** redact `token` before logging.\n\nEvidence: src/auth.ts:42\n\n<!-- yama:finding:auth-token-logged -->"
+    },
+    {
+      "id": 8802,
+      "content": {
+        "raw": "**MAJOR · crypto** — password hashing uses a single unsalted round\n\nA leaked table is trivially reversible.\n\nEvidence: src/tokens.ts:17\n\n<!-- yama:finding:weak-hash -->"
+      }
+    },
+    {
+      "id": 8803,
+      "body": "**MINOR · style** — this helper duplicates `formatUser`\n\n<!-- yama:finding:duplicate-helper -->"
+    },
+    {
+      "id": 8804,
+      "body": "Disagree on the last one — `formatUser` is in the legacy module we are deleting next sprint, so duplicating it here is deliberate. Please stop raising duplication against `src/legacy/**`."
+    },
+    {
+      "id": 8805,
+      "body": "Good catch on the token logging, fixed in 3f1a2b."
+    }
+  ]
+}

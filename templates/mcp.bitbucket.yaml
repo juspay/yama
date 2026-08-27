@@ -1,0 +1,67 @@
+# .yama/mcp.yaml — MCP servers, and the capability map (Bitbucket).
+#
+# The same capability ids as every other forge; only the right-hand side changes. That is
+# the contract: Yama's code knows capabilities, this file knows tool names.
+#
+# Two forms are accepted:
+#
+#   <capability>: <server>.<tool>
+#
+#   <capability>:
+#     tool: <server>.<tool>
+#     args: { workspace: "${BITBUCKET_WORKSPACE}", pull_request_id: "${pr}" }
+#
+# `${pr}` / `${branch}` / `${base}` / `${mode}` come from the run target; everything else
+# is an environment variable, expanded at load time and loud when unset.
+#
+# TOOL NAMES DIFFER BETWEEN MCP SERVER VERSIONS. Run `yama doctor` after `yama init`: it
+# connects each server, prints exactly which tools it exposes, and marks any capability
+# pointing at a name that is not there as BROKEN. Fix those rows here and re-run it.
+#
+# Note what is NOT here: nothing maps the diff. Yama takes it from git
+# (merge-base(base, head)..head), which is deterministic, costs no API call, and reads the
+# same on every forge — the platform is only ever asked for comments and the verdict.
+
+version: 1
+
+servers:
+  bitbucket:
+    transport: stdio
+    command: npx
+    args: ["-y", "@nexus2520/bitbucket-mcp-server"]
+    env:
+      BITBUCKET_USERNAME: "${BITBUCKET_USERNAME}"
+      BITBUCKET_APP_PASSWORD: "${BITBUCKET_APP_PASSWORD}"
+
+capabilities:
+  # --- review phase
+  pr.read:
+    tool: bitbucket.get_pull_request
+    args:
+      workspace: "${BITBUCKET_WORKSPACE}"
+      repository: "${BITBUCKET_REPO}"
+      pull_request_id: "${pr}"
+  # pr.diff is deliberately unmapped — see the note above.
+  comment.list:
+    tool: bitbucket.get_pull_request_comments
+    args:
+      workspace: "${BITBUCKET_WORKSPACE}"
+      repository: "${BITBUCKET_REPO}"
+      pull_request_id: "${pr}"
+
+  # --- delivery phase
+  comment.inline.create:
+    tool: bitbucket.add_comment
+    args:
+      workspace: "${BITBUCKET_WORKSPACE}"
+      repository: "${BITBUCKET_REPO}"
+      pull_request_id: "${pr}"
+  comment.summary.create:
+    tool: bitbucket.add_comment
+    args:
+      workspace: "${BITBUCKET_WORKSPACE}"
+      repository: "${BITBUCKET_REPO}"
+      pull_request_id: "${pr}"
+  # verdict.set:
+  #   tool: bitbucket.approve_pull_request
+  #   args: { workspace: "${BITBUCKET_WORKSPACE}", repository: "${BITBUCKET_REPO}", pull_request_id: "${pr}" }

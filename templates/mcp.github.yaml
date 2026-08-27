@@ -1,0 +1,111 @@
+# .yama/mcp.yaml — MCP servers, and the capability map (GitHub).
+#
+# THE CAPABILITY MAP IS THE WHOLE POINT. Yama's code never spells a platform tool name:
+# it asks for a CAPABILITY, and this file says which tool provides it. Moving to another
+# forge is an edit here, not a code change.
+#
+# Two forms are accepted:
+#
+#   <capability>: <server>.<tool>                       # the tool, nothing else
+#
+#   <capability>:                                       # the tool plus the arguments
+#     tool: <server>.<tool>                             # every call of it needs
+#     args: { owner: "${GITHUB_OWNER}", pull_number: "${pr}" }
+#
+# In `args`, `${pr}` / `${branch}` / `${base}` / `${mode}` come from the run target and
+# everything else is an environment variable, expanded at load time and loud when unset.
+#
+# An unmapped capability is switched OFF, never broken.
+#
+# TOOL NAMES AND ARGUMENT NAMES DIFFER BETWEEN MCP SERVER VERSIONS. Run `yama doctor` after
+# `yama init`: it connects each server, prints exactly which tools it exposes, and marks any
+# capability pointing at a name that is not there as BROKEN. Fix those rows here and re-run
+# it. Argument names it cannot check for you — the server reports those only when a call is
+# made — so if a capability fails at run time with "missing required parameter", the name it
+# asks for goes here. The names below are `@modelcontextprotocol/server-github`'s: snake_case
+# (`pull_number`, `issue_number`), not camelCase.
+#
+# Note what is NOT here: nothing maps the diff. Yama takes it from git
+# (merge-base(base, head)..head), which is deterministic, costs no API call, and reads the
+# same on every forge — the platform is only ever asked for comments and the verdict.
+
+version: 1
+
+servers:
+  github:
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
+    # Fail fast: heavyweight platform reads can exceed the default request window on a
+    # large pull request, and each hung call costs a minute of review wall-clock. Code
+    # is read locally from the checkout; platform calls are metadata-sized.
+    timeoutMs: 30000
+
+capabilities:
+  # --- review phase: readable by the main agent at any stage, never by a worker
+  pr.read:
+    tool: github.get_pull_request
+    args:
+      owner: "${GITHUB_OWNER}"
+      repo: "${GITHUB_REPO}"
+      pull_number: "${pr}"
+  # pr.diff is deliberately unmapped — see the note above. Map it only if you want the
+  # agent to be able to ask the platform for the diff as well as reading it from git.
+  comment.list:
+    tool: github.get_pull_request_comments
+    args:
+      owner: "${GITHUB_OWNER}"
+      repo: "${GITHUB_REPO}"
+      pull_number: "${pr}"
+      # Ask for the biggest page the server allows: comment listings page at ~30 by
+      # default, oldest first, and marker dedup is blind to anything past page one.
+      perPage: 100
+
+  # --- delivery phase: exposed to the main agent during Delivery and nowhere else
+  comment.inline.create:
+    tool: github.create_pull_request_review_comment
+    args:
+      owner: "${GITHUB_OWNER}"
+      repo: "${GITHUB_REPO}"
+      pull_number: "${pr}"
+  comment.summary.create:
+    tool: github.add_issue_comment
+    args:
+      owner: "${GITHUB_OWNER}"
+      repo: "${GITHUB_REPO}"
+      issue_number: "${pr}"
+  # comment.update:
+  #   tool: github.update_pull_request_review_comment
+  #   args: { owner: "${GITHUB_OWNER}", repo: "${GITHUB_REPO}" }
+  # verdict.set:
+  #   tool: github.create_pull_request_review
+  #   args: { owner: "${GITHUB_OWNER}", repo: "${GITHUB_REPO}", pull_number: "${pr}" }
+  # pr.describe:
+  #   tool: github.update_pull_request
+  #   args: { owner: "${GITHUB_OWNER}", repo: "${GITHUB_REPO}", pull_number: "${pr}" }
+
+  # On forges where an inline comment is written into a PENDING review (GitHub's
+  # consolidated hosted server), map the lifecycle pair — BOTH or NEITHER, the probe
+  # refuses half of it. Servers where an inline comment is one call need neither.
+  #
+  # review.begin:
+  #   tool: github.pull_request_review_write
+  #   args: { method: create, owner: "${GITHUB_OWNER}", repo: "${GITHUB_REPO}", pullNumber: "${pr}" }
+  # review.submit:
+  #   tool: github.pull_request_review_write
+  #   args: { method: submit_pending, event: COMMENT, owner: "${GITHUB_OWNER}", repo: "${GITHUB_REPO}", pullNumber: "${pr}" }
+
+# --- OPTIONAL: an extra analysis server, exposed to the review stages ------------------
+# Any server may carry `expose:` — bare tool names offered to the REVIEW stages of the
+# main session (never delivery, never posting). Each name is proved against what the
+# server advertises at connect time; a missing tool or a failed spawn is a named
+# degradation, never a failed review. Example — a tree-sitter code graph:
+#
+# code-review-graph:
+#   transport: stdio
+#   command: uvx
+#   args: ["--from", "code-review-graph==2.3.7", "code-review-graph", "serve"]
+#   timeoutMs: 60000
+#   expose: [get_impact_radius_tool, query_graph_tool, get_architecture_overview_tool]

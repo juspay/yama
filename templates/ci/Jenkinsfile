@@ -1,0 +1,77 @@
+// Jenkinsfile — Yama review on a pull request (TASKS:Y6.3).
+//
+// Mirrors the GitHub Actions recipe: a full clone so the base ref is present, the previous
+// run store copied in so a re-review is incremental, and the store archived whatever the
+// outcome, because a failed run still banked what it did.
+
+pipeline {
+  agent any
+
+  environment {
+    // Exit codes are the contract: 0 ok, 1 BLOCK, 2 bad config, 3 the run failed.
+    YAMA_RESULT = 'yama-result.json'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        // Yama diffs merge-base(base, head)..head with plain git: no shallow clones.
+        checkout scm
+        sh 'git fetch --no-tags --prune origin +refs/heads/*:refs/remotes/origin/*'
+      }
+    }
+
+    stage('Restore run store') {
+      steps {
+        // Absent on the first review of a pull request — that is a fresh run, not an error.
+        catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+          copyArtifacts(
+            projectName: env.JOB_NAME,
+            selector: lastSuccessful(),
+            filter: '.yama/artifacts/**',
+            optional: true
+          )
+        }
+      }
+    }
+
+    stage('Review') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'google-ai-api-key', variable: 'GOOGLE_AI_API_KEY'),
+          string(credentialsId: 'bitbucket-app-password', variable: 'BITBUCKET_APP_PASSWORD')
+        ]) {
+          script {
+            def code = sh(
+              returnStatus: true,
+              script: """
+                npx yama review \
+                  --pr ${env.CHANGE_ID} \
+                  --base origin/${env.CHANGE_TARGET} \
+                  --json ${env.YAMA_RESULT}
+              """
+            )
+            if (code == 1) {
+              // A blocking verdict is a failed review, not a broken build.
+              currentBuild.result = 'FAILURE'
+              error("yama: the review blocked this change — see ${env.YAMA_RESULT}")
+            }
+            if (code != 0) {
+              error("yama exited ${code} — 2 is configuration, 3 is the run itself. The run store has the evidence.")
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts(
+        artifacts: ".yama/artifacts/**, ${env.YAMA_RESULT}",
+        allowEmptyArchive: true,
+        fingerprint: false
+      )
+    }
+  }
+}

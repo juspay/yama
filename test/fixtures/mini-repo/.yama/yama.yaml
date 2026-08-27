@@ -1,0 +1,51 @@
+# Minimal valid yama.yaml — PLAN.md section 4.
+#
+# TASKS:Y1.1 — this file is validated by `src/config/schema.ts`. Change one and
+# change the other in the same commit: a fixture that drifts from the schema
+# turns a real loader bug into a green run.
+
+# Model fallback chains per role. Each field is a scalar (broadcast to every
+# link) or one value per link (TASKS:Y1.4). The three roles below deliberately
+# cover all three shapes: per-link arrays, scalar broadcast, and all-scalar.
+models:
+  main:
+    provider: [google-ai, anthropic]
+    model: [gemini-2.5-pro, claude-sonnet-4-5]
+  worker:
+    provider: google-ai
+    model: [gemini-2.5-flash, gemini-2.0-flash]
+  summarizer:
+    provider: google-ai
+    model: gemini-2.5-flash
+
+# Delegation pool size tier — low | medium | high (TASKS:N2.4).
+pool:
+  tier: low
+
+# Post-merge knowledge update (TASKS:Y7.2). Off by default: `yama learn` is the
+# only path holding write credentials.
+learn:
+  enabled: false
+
+# What Delivery is allowed to do (TASKS:Y3.5, Y1.1). Delivery sits OUTSIDE the
+# task checklist: the agent executes it, this block decides what it executes.
+# Each action needs its capability mapped in mcp.yaml — none are here, so a PR
+# run against this fixture degrades every action by name instead of failing, and
+# a local run has nothing to deliver to at all.
+delivery:
+  inlineComments: true
+  summaryComment: true
+  verdict: false
+  describe: false
+  maxInlineComments: 10
+  minSeverity: MINOR
+
+# The verdict policy (TASKS:Y5.5) — a pure function of these fields and the
+# findings. Spelled out here rather than left to the defaults so the fixture
+# pins the shape: any CRITICAL blocks, MAJOR reports without gating, and five
+# MAJORs in one change is itself a block.
+verdict:
+  blockOn: [CRITICAL]
+  commentOn: [MAJOR]
+  minConfidence: 0.4
+  blockAfter: 5

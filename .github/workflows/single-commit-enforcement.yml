@@ -131,9 +131,8 @@ jobs:
           #
           # The `!` is the Conventional Commits breaking-change marker. It was
           # missing here while scripts/commit-validation.cjs (the local hook)
-          # accepted it and MIGRATION.md instructs using it so semantic-release
-          # cuts a major — so a correctly-formatted breaking commit passed the
-          # hook and failed CI.
+          # accepted it and semantic-release reads it to cut a major — so a
+          # correctly-formatted breaking commit passed the hook and failed CI.
           if ! echo "$COMMIT_MSG" | grep -qE "^[a-z]+(\([^)]+\))?!?: .+"; then
             echo "❌ Commit message doesn't follow semantic format"
             echo "Expected: type(scope): description"

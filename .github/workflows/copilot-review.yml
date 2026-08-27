@@ -27,8 +27,9 @@ jobs:
 
       - name: Setup PNPM
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.14.0
+        # Version comes from `packageManager` in package.json; a `version:` input
+        # here only creates a second place for it to disagree, and action-setup
+        # hard-errors on that disagreement.
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -42,8 +43,8 @@ jobs:
       # NOTE: The AI code-review step previously used `coderabbitai/openai-pr-reviewer`,
       # which was removed upstream and no longer resolves on GitHub Actions
       # (causing this job to fail on every PR). AI review is now handled by the
-      # dedicated `Yama Self Review` workflow (yama-self-review.yml). The remaining
-      # steps here keep build-rule validation + the status comment.
+      # dedicated `Yama review` workflow (yama-review.yml). The remaining steps
+      # here keep build-rule validation + the status comment.
 
       - name: 🔍 Validate PR Against Build Rules
         run: |

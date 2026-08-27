@@ -1,0 +1,95 @@
+# .github/workflows/yama.yml — Yama review on every pull request (TASKS:Y6.3).
+#
+# Two things make this work across runs:
+#   fetch-depth: 0     the diff is taken from git, so the base ref has to be there
+#   the artifact steps the run store is what makes a re-review incremental; it is a CI
+#                      artifact, never a commit
+name: yama review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Yama diffs merge-base(base, head)..head with plain git. A shallow clone has no
+          # base commit to diff against.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Carry the previous run's store in, so this review knows what the last one found.
+      # First run on a pull request has none; that is a fresh review, not a failure.
+      - name: Restore the run store
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: yama-store-${{ github.event.pull_request.number }}
+          path: .yama/artifacts
+
+      - name: Review
+        env:
+          GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+        run: >-
+          npx yama review
+          --pr ${{ github.event.pull_request.number }}
+          --base origin/${{ github.event.pull_request.base.ref }}
+          --json yama-result.json
+
+      # Always: a run that failed still banked what it did, and that is what you read.
+      - name: Keep the run store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yama-store-${{ github.event.pull_request.number }}
+          path: |
+            .yama/artifacts
+            yama-result.json
+          retention-days: 30
+
+  # Post-merge knowledge update (TASKS:Y7.2). Uncomment once `learn.enabled: true` is set
+  # in .yama/yama.yaml. It is a SEPARATE job on a different trigger on purpose: the review
+  # path never pays for learning, and this is the only step that needs write access.
+  #
+  # learn:
+  #   if: github.event.pull_request.merged == true
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: write        # the ONLY job that needs this
+  #     pull-requests: read
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         # A pull_request checkout is DETACHED. Check the base branch out by name, or
+  #         # set learn.branch in .yama/yama.yaml — learn refuses a detached HEAD.
+  #         ref: ${{ github.event.pull_request.base.ref }}
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: "22"
+  #     - name: Learn
+  #       env:
+  #         GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #         GITHUB_OWNER: ${{ github.repository_owner }}
+  #         GITHUB_REPO: ${{ github.event.repository.name }}
+  #       # Run it with --dry-run first and read the plan it prints.
+  #       run: npx yama learn --pr ${{ github.event.pull_request.number }}
+
+# Exit codes (a CI contract — codes are added, never renumbered):
+#   0  the review finished; verdict approve or comment
+#   1  the review finished; verdict BLOCK — this step fails the job
+#   2  configuration is missing or invalid
+#   3  the run itself failed (engine, MCP, platform, or a check)

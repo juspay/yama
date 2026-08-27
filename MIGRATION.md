@@ -1,296 +1,111 @@
-# Migration guide
+# Migrating to Yama v5
 
-How to move an existing Yama installation to the current version. If you are
-setting Yama up for the first time, start at
-[docs/v4/04-onboarding.md](docs/v4/04-onboarding.md) instead.
+v5 is a rewrite: one autonomous agent working a checklist, deterministic gates around it,
+and a capability map instead of platform code. Your v4 configuration does not load in v5 —
+but the mapping is mechanical, your CI secrets are unchanged, and nothing here has to be
+done under pressure: **a v5 review runs even while parts of the old config are still
+unmigrated** (each missing piece is a named degradation in the run report, never a crash).
 
-- [v3 → v4](#v3--v4) — current
-- [New in v4, optional](#new-in-v4-optional) — nothing breaks if you skip these
-- [Older migrations](#older-migrations) — v2 → v3
-
----
-
-# v3 → v4
-
-Your existing single-file config keeps working the whole time. Migrate when you
-are ready.
+The fast path:
 
 ```bash
-npx @juspay/yama migrate           # shows what moves where, writes nothing
-npx @juspay/yama migrate --write   # applies it
-npx @juspay/yama doctor --live --pr <n>   # proves the result
-npx @juspay/yama review --pr <n> --dry-run
+pnpm add -D @juspay/yama@^5
+pnpm exec yama init --platform github   # scaffolds .yama/ next to your old files; never overwrites
+# port your settings using the tables below, then prove it before CI does:
+pnpm exec yama doctor                    # exit 2 = something to fix, and it says what
+pnpm exec yama review --dry-run          # full review of the local diff, posts nothing
 ```
 
-Delete the old `yama.config.yaml` once you are satisfied. Until you do, Yama
-loads it, adapts it, and says so with a notice on every run.
-
-## Requirements
-
-- **Node 20.18.1 or newer.**
-- **A full checkout.** v4 reads the diff from the local repository. A shallow
-  clone produces a _wrong_ diff, not an absent one — use `fetch-depth: 0`.
-
-## Config becomes a file tree
-
-Only `.yama/yama.yaml` and `.yama/mcp.yaml` are required. Every other file
-absent means "that capability is off", never "broken".
-
-| v3                                                 | v4                                                 |
-| -------------------------------------------------- | -------------------------------------------------- |
-| `ai.*`                                             | `.yama/yama.yaml`                                  |
-| `ai.explore.*`                                     | `ai.subAgent`, `ai.judge`, `ai.compaction`         |
-| `mcpServers.servers.*`                             | `.yama/mcp.yaml`, plus a capability map            |
-| `review.excludePatterns`                           | `.yama/review.yaml` — now enforced in code         |
-| `review.blockingCriteria`                          | `.yama/policy/guards.yaml`                         |
-| `review.focusAreas`, `review.workflowInstructions` | `.yama/knowledge/**`                               |
-| `projectStandards.*`                               | `.yama/rules/*.yaml`                               |
-| — (new)                                            | `.yama/checks.yaml`, `.yama/policy/ownership.yaml` |
-
-## Breaking changes
-
-### Model slots take a list
-
-A scalar still works and means a chain of one.
-
-```yaml
-ai:
-  provider: [litellm, litellm]
-  model: [qwen3.8-27b-fast, deepseek-v4-flash]
-  timeout: 600000 # per model call — a hang detector, not a budget
-```
-
-Arrays pair by position; a single provider broadcasts across many models and
-vice versa; mismatched lengths are a loud error naming both counts. The chain
-advances when a model errors **and** when it returns an empty response — the
-latter is not an error but is not a review either.
-
-Yama walks the chain itself and pins the runtime's own fallback off. Left to
-itself the runtime resolves to whichever provider happens to have credentials in
-the environment, so a run could succeed on a model nobody configured while the
-report said it worked.
-
-### Servers need a capability map
-
-Code no longer knows any tool name — it asks for a capability and
-`.yama/mcp.yaml` supplies the name. `migrate` infers the map for well-known
-servers and leaves a TODO for anything it cannot. `doctor --live` verifies every
-entry against the running server and prints what that server really advertises
-when a name is wrong.
-
-A mapping is either a tool name or a tool name plus arguments pinned to every
-call. The object form exists because modern VCS servers consolidate many
-operations behind one tool selected by a parameter — and that parameter is part
-of the mapping, never part of Yama:
-
-```yaml
-capabilities:
-  postSummary: add_issue_comment # a bare name
-  readPullRequest: { tool: pull_request_read, args: { method: get } }
-  listChangedFiles: { tool: pull_request_read, args: { method: get_files } }
-```
-
-### Inline comments may need a review opened around them
-
-Where a provider only accepts an inline comment attached to an open review, map
-`beginReview` **and** `submitReview`; the post stage brackets its comments with
-them. Map both or neither — half the pair writes comments on a review that is
-never submitted, which are invisible to everyone. `doctor` fails on an unpaired
-mapping.
-
-### Prompt text has no v4 home
-
-v3 concatenated `focusAreas` and `workflowInstructions` into every prompt. v4
-has no prompt to put them in: the system instruction is a static constant, and
-everything else reaches the agent through tools. `migrate` writes them to
-`.yama/knowledge/` where they are retrieved on demand. They are neither silently
-dropped nor silently injected — but they do reach the model differently, and
-that is a real behaviour change.
-
-### `review.verification` becomes `review.confidenceThreshold`
-
-`migrate` translates it: `off` → `0`, `strict` → `90`, anything else → the
-default `80`. Unlike v3's critic mode, this one is enforced — every
-agent-sourced finding is scored by the `ai.judge` slot and refused below the
-bar. Set `0` to turn scoring off entirely and save a model call per submission.
-
-### Dropped keys
-
-Reported by name during migration. None of them were read by v3 either:
-`performance.tokenBudget`, `performance.costControls`,
-`performance.maxReviewDuration`, `review.toolPreferences`,
-`review.workflowInstructions`, `review.contextLines`,
-`review.fileAnalysisTimeout`, `descriptionEnhancement.autoFormat`,
-`monitoring.exportFormat`.
-
-### Tools were renamed
-
-Only relevant if you wrote rules or knowledge files that name a tool:
-
-| v3                | v4                                              | Why                                                       |
-| ----------------- | ----------------------------------------------- | --------------------------------------------------------- |
-| `submit_review`   | `submit_finding`                                | It gates one finding set, not a review                    |
-| `explore_context` | `delegate_*`                                    | Specialists are isolated agents, one delegation tool each |
-| —                 | `report_progress`                               | How a turn tells the harness its plan and when it is done |
-| —                 | `read_file`, `list_files`, `search_code`, `git` | Local reads, sandboxed to the repo                        |
-
-## New, and off by default
-
-- **Checks** — run your linters and report their output as inline findings.
-  Config and scripts are read from the base branch, never the pull request, and
-  forks are off unless explicitly enabled.
-- **Ownership** — deterministic path-to-owner rules, one grouped comment.
-- **Learning** — updates `.yama/rules/learned.yaml`, the product impact ledger,
-  and a scorecard when a pull request merges. Requires write credentials and is
-  off until configured.
-- **Bootstrap** — `yama bootstrap` mines merged pull requests once and proposes
-  a starting knowledge base. It never commits; you open the files as a pull
-  request.
-
-## After you migrate
-
-1. `yama config` — read the resolved result and every notice.
-2. `yama doctor --live --pr <n>` — every `✗` carries a remedy line.
-3. `yama review --pr <n> --dry-run` — compare against what v3 posted.
-4. Delete `yama.config.yaml`.
+The v2 → v4 migration history lives in this file's git history on the pre-v5 mainline.
 
 ---
 
-# New in v4, optional
+## `.yama/yama.yaml` — `version: 4` → `version: 1`
 
-Both keys below are optional, default to off, and preserve existing behaviour if
-you leave them out.
+The `ai:` block is gone. Models are **fallback chains per role**, and the review/verdict
+policy that lived in `review.yaml` moves in here.
 
-## `prompts:` — manage prompt text on Langfuse
+| v4                                    | v5                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| `ai.provider: [litellm, litellm]`     | `models.main.provider: litellm` (scalar broadcasts over the chain) |
+| `ai.model: [private-large, deepseek]` | `models.main.model: [open-fast, deepseek]`                         |
+| `ai.subAgent.*`                       | `models.worker.*` (falls back to `main` when unset)                |
+| `ai.temperature`                      | not carried — every turn is schema-bound structured output         |
+| `ai.maxTokens`                        | not carried — v5 caps generation internally and sizes for input    |
+| `ai.timeout`                          | not carried — a 10-minute per-call hang detector is built in       |
+| `ai.pool.strategy` / `cooldownMs`     | `pool.tier: low \| medium \| high` (1 / 3 / 6 parallel workers)    |
 
-Lets you iterate on wording without cutting a release.
+## `.yama/review.yaml` — folded into `yama.yaml`
 
-```yaml
-# .yama/yama.yaml
-prompts:
-  enabled: true # default false
-  provider: langfuse
-  label: production # or: version: 3
-  timeoutMs: 10000
-  publicKeyEnv: LANGFUSE_PUBLIC_KEY # these three are the defaults
-  secretKeyEnv: LANGFUSE_SECRET_KEY
-  baseUrlEnv: LANGFUSE_BASE_URL
-  only: [yama-review] # optional: manage just some prompts
-```
+| v4                                       | v5                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------------ |
+| `concurrency.power`                      | `pool.tier`                                                                    |
+| `verdict.enabled` + `blockOn` token list | `verdict.blockOn: [CRITICAL]` / `commentOn: [MAJOR]` (severities)              |
+| `verdict.majorThreshold`                 | `verdict.blockAfter` (0 disables)                                              |
+| `stages.checks` / `stages.enhance`       | `delivery.*` flags (`inlineComments`, `summaryComment`, `verdict`, `describe`) |
+| `remediation.maxAttemptsPerStage`        | built in: schema gate retries once, then a tools-off finalize                  |
+| `excludePatterns`                        | not carried in v5 — express file guidance in the rulebook                      |
 
-Prompt ids: `yama-review`, `yama-judge`, `yama-triage`, `yama-bootstrap`,
-`yama-extraction`, `yama-subagent-impact`, `yama-subagent-security`,
-`yama-subagent-history`, `yama-subagent-tests`, `yama-subagent-conventions`.
-(`yama-description` is accepted but no call site reads it yet.)
+## `.yama/mcp.yaml` — capabilities move to the top level and get dotted names
 
-Every failure path — credentials unset, no network, no entry for that id, a
-timeout, the SDK missing — falls back to the text Yama ships, adds a warning,
-and continues the run. Prompts are fetched once per run. `yama doctor` prints a
-**Prompts:** section saying which came from the platform and which are built in.
+v4 mapped camelCase capabilities per server and scoped tools with `stages:`/`roles:`/
+`allowedTools:`. v5 has one top-level `capabilities:` map; stage scoping is built in
+(posting tools exist only during Delivery; workers never hold them), and only mapped tools
+are reachable at all.
 
-## `review.description.sections` — require sections in the description
+| v4 capability               | v5 capability                                                 |
+| --------------------------- | ------------------------------------------------------------- |
+| `readPullRequest`           | `pr.read`                                                     |
+| `listComments`              | `comment.list`                                                |
+| `listChangedFiles`          | gone — the diff always comes from git, never the platform     |
+| `beginReview`               | `review.begin` (map with `review.submit`, both or neither)    |
+| `postInlineComment`         | `comment.inline.create`                                       |
+| `submitReview`              | `review.submit`                                               |
+| `postSummary`               | `comment.summary.create`                                      |
+| `updateDescription`         | `pr.describe`                                                 |
+| `stages:` / `roles:`        | built in — phase-scoped exposure, not configuration           |
+| `allowedTools/blockedTools` | unmapped = unreachable; opt extra read tools in via `expose:` |
+| `timeout`                   | `timeoutMs`                                                   |
+| `retryConfig`               | gone — model fallback chains + the schema gate cover it       |
 
-```yaml
-# .yama/review.yaml
-description:
-  sections:
-    - { title: "Testing", required: true }
-    - { title: "Rollback", required: true }
-```
+GitHub note: map `comment.list` to `pull_request_read` with
+`args: { method: get_review_comments, perPage: 100 }` — the server pages at 30 and a
+review-heavy pull request outgrows that.
 
-S5 verifies these by re-reading the pull request after the agent updates it, not
-by believing the agent said it wrote them. A missing required section re-prompts
-the stage. With no `sections`, S5 only has to prove the description actually
-changed — which is the previous behaviour.
+## `.yama/checks.yaml` — argv arrays, resolved from the base branch
 
-## Behaviour that changed without a config change
+| v4                              | v5                                                                    |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `enabled` / `allowForks`        | gone — presence of `version: 1` + `checks:` is on                     |
+| `run: "pnpm run type-check"`    | `command: ["pnpm", "run", "type-check"]` (argv, never a shell string) |
+| `parse: tsc`, `type: builtin.*` | not carried — output is evidence the agent reads                      |
+| `blocking: true`                | severity of the resulting finding + `verdict.blockOn`                 |
 
-None of these need action, but they change what a run does:
+**Sequencing that matters:** checks are read from the **base branch**. Until your migrated
+`checks.yaml` is merged to main, v5 reviews report `checks: off` as a named degradation and
+run fine — the first review _after_ the migration merge picks them up.
 
-- **`parse: agent` checks now work.** They were a stub that returned nothing. A
-  check's raw output is now turned into findings by one schema-bound pass on the
-  `ai.extraction` slot; `hint:` describes the output shape. If extraction fails,
-  the check is reported FAILED rather than "no findings".
-- **`review.confidenceThreshold` is enforced.** It previously had no effect.
-  Every agent-sourced finding is now scored and refused below the threshold
-  (default 80). Set `0` to restore the old no-op behaviour and save a model call
-  per submission.
-- **The product model is loaded and used.** `.yama/product/capabilities.yaml`
-  and `.yama/product/impact-log/*.yaml` are read at startup, surfaced through
-  `recall`, and produce an **Impact** section in the summary comment. Absent,
-  impact analysis degrades quietly.
-- **`yama learn` writes more.** In addition to `.yama/rules/learned.yaml` it now
-  writes `.yama/product/impact-log/pr-<n>.yaml` and
-  `.yama/knowledge/scorecard.md`, and consumes and deletes the per-pull-request
-  artifact. All in one commit.
-- **Every model call is schema-bound.** Mostly invisible, with one exception:
-  if a run warns that a structured result was truncated, raise `ai.maxTokens`
-  for the slot the warning names.
-- **GitHub Action outputs work.** `decision`, `posted`, `critical`, `major`,
-  `partial` and `summary` are populated from the run report, and
-  `fail-on-blocked` actually fires. They were previously always empty.
-- **`yama bootstrap` and `yama config` exist.** `bootstrap` was documented but
-  missing; `config` prints the fully resolved configuration.
+## Everything else in `.yama/`
 
----
+| v4                                            | v5                                                               |
+| --------------------------------------------- | ---------------------------------------------------------------- |
+| `rules/*.yaml`                                | `rulebook/*.md` with an `index.md` — prose rules, read at WarmUp |
+| `policy/ownership.yaml`, `policy/guards.yaml` | not carried — fold the intent into the rulebook                  |
+| `state/`, `reports/`                          | `artifacts/` — the run store; a CI artifact, never committed     |
+| `knowledge/`                                  | `memory/` — written only by `yama learn`, committed              |
 
-# Older migrations
+## CI, secrets and re-review compatibility
 
-Still accurate for anyone upgrading from v2. If you are already on v3, skip
-this and read [v3 → v4](#v3--v4).
+- Replace the v4 workflows with the recipes `yama init` drops in `.yama/ci/`, or use the
+  composite action (`action.yml`). Secrets are unchanged: `LITELLM_BASE_URL`,
+  `LITELLM_API_KEY`, `YAMA_GITHUB_TOKEN` (plus optional `LANGFUSE_*`).
+- Give the review job a 90-minute `timeout-minutes` on self-hosted gateways, restore/save
+  `.yama/artifacts/` between runs, and check out with `fetch-depth: 0`.
+- **Markers:** v5 recognises v4's `<!-- yama:finding:… -->` markers wherever the forge
+  returns raw comment bodies. GitHub's hosted MCP strips HTML comments from its read-back,
+  so v5 posts a second, visible `` `yama:finding:<id>` `` token alongside. Practical
+  effect: the **first** v5 review of a pull request that only has v4-era comments may
+  re-post findings once on that forge; every review after that dedupes.
 
-## v2 → v3
-
-**Removed API:**
-
-| Removed                        | Replacement                                    |
-| ------------------------------ | ---------------------------------------------- |
-| `setupV2CLI()`                 | `setupCLI()`                                   |
-| `src/cli/v2.cli.ts` entrypoint | `src/cli/cli.ts` (the `yama` bin is unchanged) |
-| `GetIssueResponse` (type)      | removed with Jira                              |
-
-`YamaV2Orchestrator`, `createYamaV2()` and `YamaV2Config` remained as deprecated
-aliases for `YamaOrchestrator`, `createYama()` and `YamaConfig`.
-
-**Jira removed.** Drop `mcpServers.jira` from your config; `JIRA_EMAIL`,
-`JIRA_API_TOKEN` and `JIRA_BASE_URL` are no longer read. Add Jira back as a
-user-configured MCP server if you still want that context.
-
-**`mcpServers` restructured (breaking).** Server definitions moved under
-`mcpServers.servers.<id>` as full generic definitions. The old flat shape
-(`mcpServers.bitbucket: {...}` at the top level) is rejected at startup rather
-than silently producing a review with no tools.
-
-**Also removed:** `ai.enableToolFiltering` and `ai.toolFilteringMode`.
-Destructive-tool safety moved to each server's `blockedTools` denylist and
-fail-closed `allowedTools` allowlist.
-
-**Config precedence:** `.yama/config.yaml` became preferred;
-`yama.config.yaml` still loaded with a deprecation warning.
-
-**`ai.temperature` stopped defaulting to `0.2`** (and `ai.explore.temperature`
-to `0.1`). Unset means the provider's own default applies — set them explicitly
-to keep the old behaviour.
-
-**Project MCP became opt-in.** `.yama/mcp.json` can launch local processes and
-lives in the reviewed checkout, so it is not loaded unless
-`YAMA_ENABLE_PROJECT_MCP=true` is set from a trusted context. The same caution
-applies to the main config in CI that reviews untrusted forks.
-
-**Behaviour changes in v3:**
-
-- The decision policy became code-derived: any CRITICAL finding, or MAJOR
-  findings at or above the threshold (default 3), reports `BLOCKED` regardless
-  of the model's own approval signal.
-- The verdict moved to structured output; Yama stopped hand-parsing JSON out of
-  model text, and an unparseable verdict failed safe to `CHANGES_REQUESTED`
-  instead of `APPROVED`.
-- Partial reviews stopped being able to approve.
-- New opt-in keys with behaviour-preserving defaults: `state.*` (cross-run
-  review state at `.yama/state`), `review.verification` (the `submit_review`
-  gate), `performance.loop.*`, `ai.conversationMemory.contextCompaction`,
-  `ai.mcpOutputLimits`, and `.yama/rules/**`.
-- One intentional default change: `performance.maxReviewDuration` became unset
-  (was `15m`), so reviews were bounded by work rather than wall clock and could
-  take longer.
-- `yama doctor` was introduced.
+Exit codes are unchanged as a contract: `0` approve/comment, `1` block, `2` config
+(`yama doctor` says how), `3` the run itself failed.
