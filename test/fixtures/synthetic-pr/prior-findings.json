@@ -1,0 +1,39 @@
+{
+  "updatedAt": "2026-08-01T09:04:11.000Z",
+  "findings": [
+    {
+      "id": "auth-token-logged",
+      "file": "src/auth.ts",
+      "line": 42,
+      "severity": "CRITICAL",
+      "category": "security",
+      "summary": "the refresh token is written to the request log",
+      "impact": "anyone with log access can replay a session",
+      "fix": "redact `token` before logging",
+      "evidence": [{ "kind": "code", "ref": "src/auth.ts:42" }],
+      "confidence": 0.95
+    },
+    {
+      "id": "weak-hash",
+      "file": "src/tokens.ts",
+      "line": 17,
+      "severity": "MAJOR",
+      "category": "crypto",
+      "summary": "password hashing uses a single unsalted round",
+      "impact": "a leaked table is trivially reversible",
+      "evidence": [{ "kind": "code", "ref": "src/tokens.ts:17" }],
+      "confidence": 0.8
+    },
+    {
+      "id": "duplicate-helper",
+      "file": "src/legacy/format.ts",
+      "line": 3,
+      "severity": "MINOR",
+      "category": "duplication",
+      "summary": "this helper duplicates formatUser",
+      "impact": "two copies drift",
+      "evidence": [{ "kind": "code", "ref": "src/legacy/format.ts:3" }],
+      "confidence": 0.6
+    }
+  ]
+}

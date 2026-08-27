@@ -1,0 +1,19 @@
+# Minimal valid mcp.yaml — PLAN.md section 4.
+#
+# TASKS:Y1.1/Y1.3 — validated by `src/config/schema.ts`; the startup capability
+# probe is written against this fixture. Keep the three in step.
+
+# MCP servers to connect at startup. argv arrays, never a shell string.
+servers:
+  git:
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-git", "--repository", "."]
+
+# capability -> "<server>.<tool>". Absent capability = feature off, never broken.
+# Posting capabilities are exposed to the main agent in Delivery only, and never
+# to workers (PLAN.md section 3, TASKS:Y5.1) — none are declared here, so this
+# fixture exercises the read-only, analysis-only path.
+capabilities:
+  pr.read: git.git_show
+  pr.diff: git.git_diff

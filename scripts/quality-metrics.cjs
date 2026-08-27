@@ -4,24 +4,29 @@
  * Quality Metrics Collection Script for Yama
  *
  * Collects and reports code quality metrics:
- * - Code coverage
  * - ESLint results
- * - TypeScript strictness
- * - Test results
- * - Build performance
- * - Security vulnerabilities
+ * - TypeScript compilation, both projects
+ * - Build performance and output size
+ * - End-to-end test results
+ * - Dependency vulnerabilities
+ *
+ * There is no coverage number here, and that is deliberate: Yama's suites are
+ * end-to-end against the BUILT package (test/run.ts), so a line-coverage figure
+ * over src/ would measure the wrong artifact.
+ *
+ * Writes quality-metrics.json in the working directory.
  */
 
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 
-function runCommand(command, description, silent = false) {
+function runCommand(command, description, silent = false, timeout = 60000) {
   try {
     const output = execSync(command, {
       encoding: "utf8",
       stdio: silent ? "pipe" : "inherit",
-      timeout: 60000, // 1 minute timeout
+      timeout,
     });
     return { success: true, output: output.trim() };
   } catch (error) {
@@ -29,25 +34,29 @@ function runCommand(command, description, silent = false) {
   }
 }
 
+/**
+ * The build and the end-to-end suites are minutes of work, not seconds. The old
+ * one-minute bound killed them and recorded the kill as a failure, which read as
+ * "the build is broken" on a perfectly good tree.
+ */
+const LONG_TIMEOUT_MS = 15 * 60 * 1000;
+
 function collectESLintMetrics() {
   console.log("🔍 Collecting ESLint metrics...");
 
+  // The whole tree, the same surface `pnpm run lint` covers — src/ alone left
+  // eslint-rules/ and the test harness unmeasured.
   const result = runCommand(
-    "npx eslint src/ --format=json",
+    "pnpm exec eslint . --format=json",
     "ESLint analysis",
     true,
+    LONG_TIMEOUT_MS,
   );
 
-  if (!result.success) {
-    return {
-      errors: 0,
-      warnings: 0,
-      files: 0,
-      status: "failed",
-      message: result.error,
-    };
-  }
-
+  // eslint exits non-zero WHEN IT FINDS ERRORS, and still writes its JSON report
+  // to stdout. Treating that exit as "the tool failed" scored a tree full of
+  // errors as zero errors — the report was cleanest exactly when the code was
+  // worst. The output is parsed either way; only unparseable output is a failure.
   try {
     const eslintData = JSON.parse(result.output);
 
@@ -77,7 +86,7 @@ function collectESLintMetrics() {
       warnings: 0,
       files: 0,
       status: "parse_error",
-      message: parseError.message,
+      message: `${parseError.message}${result.error ? ` (${result.error})` : ""}`,
     };
   }
 }
@@ -85,10 +94,13 @@ function collectESLintMetrics() {
 function collectTypeScriptMetrics() {
   console.log("🔧 Collecting TypeScript metrics...");
 
+  // `check` compiles BOTH projects — src and test. Calling tsc directly would
+  // type-check src only and report a clean tree while the suites do not compile.
   const result = runCommand(
-    "npx tsc --noEmit --strict",
+    "pnpm run check",
     "TypeScript compilation",
     true,
+    LONG_TIMEOUT_MS,
   );
 
   return {
@@ -103,44 +115,43 @@ function collectTypeScriptMetrics() {
 function collectTestMetrics() {
   console.log("🧪 Collecting test metrics...");
 
+  // The suites drive dist/, so this has to run after the build below — see the
+  // order in main().
   const result = runCommand(
-    "npm run test -- --coverage --silent",
-    "Test execution with coverage",
+    "pnpm run test",
+    "Test execution",
     true,
+    LONG_TIMEOUT_MS,
   );
 
   const metrics = {
     testsRun: 0,
     testsPassed: 0,
     testsFailed: 0,
-    coverage: {
-      lines: 0,
-      functions: 0,
-      branches: 0,
-      statements: 0,
-    },
+    testsSkipped: 0,
     status: result.success ? "success" : "failed",
   };
 
-  if (result.success && result.output) {
-    // Try to parse Jest output for basic metrics
-    const lines = result.output.split("\n");
-
-    // Look for test results summary
-    const testLine = lines.find((line) => line.includes("Tests:"));
-    if (testLine) {
-      const passMatch = testLine.match(/(\d+) passed/);
-      const failMatch = testLine.match(/(\d+) failed/);
-
-      if (passMatch) metrics.testsPassed = parseInt(passMatch[1], 10);
-      if (failMatch) metrics.testsFailed = parseInt(failMatch[1], 10);
-      metrics.testsRun = metrics.testsPassed + metrics.testsFailed;
-    }
-  }
+  // The harness (test/run.ts) closes with a tally of `passed N` / `failed N` /
+  // `skipped N` / `total N`, one per line and wrapped in colour escapes. Those
+  // escapes are stripped and each line is matched whole, because a test NAME
+  // containing the word "passed" would otherwise be read as the tally.
+  // `failed` and `skipped` lines are omitted entirely when they are zero.
+  const output = `${result.output || ""}`.replace(/\u001b\[[0-9;]*m/g, "");
+  const count = (label) => {
+    const match = output.match(new RegExp(`^\\s*${label}\\s+(\\d+)\\s*$`, "m"));
+    return match ? parseInt(match[1], 10) : 0;
+  };
+  metrics.testsPassed = count("passed");
+  metrics.testsFailed = count("failed");
+  metrics.testsSkipped = count("skipped");
+  metrics.testsRun =
+    count("total") || metrics.testsPassed + metrics.testsFailed;
 
   console.log(`   Tests run: ${metrics.testsRun}`);
   console.log(`   Tests passed: ${metrics.testsPassed}`);
   console.log(`   Tests failed: ${metrics.testsFailed}`);
+  console.log(`   Tests skipped: ${metrics.testsSkipped}`);
 
   return metrics;
 }
@@ -149,7 +160,12 @@ function collectBuildMetrics() {
   console.log("🏗️ Collecting build metrics...");
 
   const startTime = Date.now();
-  const result = runCommand("npm run build", "Production build", true);
+  const result = runCommand(
+    "pnpm run build",
+    "Production build",
+    true,
+    LONG_TIMEOUT_MS,
+  );
   const buildTime = Date.now() - startTime;
 
   let buildSize = 0;
@@ -196,10 +212,17 @@ function collectBuildMetrics() {
 function collectSecurityMetrics() {
   console.log("🔒 Collecting security metrics...");
 
+  // `pnpm audit`, not `npm audit`: npm's audit needs a package-lock.json, which
+  // a pnpm repository does not have, so it failed on every run and reported zero
+  // vulnerabilities — a clean bill of health from a check that never ran.
+  //
+  // A non-zero exit means "vulnerabilities found", not "the audit broke", so the
+  // report is parsed whether or not the command succeeded.
   const auditResult = runCommand(
-    "npm audit --audit-level=moderate --json",
+    "pnpm audit --json",
     "Security audit",
     true,
+    LONG_TIMEOUT_MS,
   );
 
   let vulnerabilities = {
@@ -210,8 +233,9 @@ function collectSecurityMetrics() {
     critical: 0,
     total: 0,
   };
+  let auditParsed = false;
 
-  if (auditResult.success && auditResult.output) {
+  if (auditResult.output) {
     try {
       const auditData = JSON.parse(auditResult.output);
       if (auditData.metadata && auditData.metadata.vulnerabilities) {
@@ -219,12 +243,32 @@ function collectSecurityMetrics() {
           ...vulnerabilities,
           ...auditData.metadata.vulnerabilities,
         };
+        // pnpm reports the per-severity counts but no total; npm reports both.
+        if (auditData.metadata.vulnerabilities.total === undefined) {
+          vulnerabilities.total =
+            vulnerabilities.info +
+            vulnerabilities.low +
+            vulnerabilities.moderate +
+            vulnerabilities.high +
+            vulnerabilities.critical;
+        }
+        auditParsed = true;
       }
     } catch (parseError) {
       console.log(
         `   Warning: Could not parse audit results: ${parseError.message}`,
       );
     }
+  }
+
+  if (!auditParsed) {
+    // Unknown is not safe. Say so, rather than scoring an unrun audit as clean.
+    console.log("   Warning: audit produced no readable report");
+    return {
+      vulnerabilities,
+      auditSuccess: false,
+      status: "unknown",
+    };
   }
 
   console.log(`   Total vulnerabilities: ${vulnerabilities.total}`);
@@ -243,10 +287,15 @@ function collectSecurityMetrics() {
 }
 
 function generateQualityReport(metrics) {
+  // Read the version rather than restating it — a hardcoded one was still
+  // claiming 1.0.0 several majors later.
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+  );
   const report = {
     timestamp: new Date().toISOString(),
-    project: "yama",
-    version: "1.0.0",
+    project: pkg.name,
+    version: pkg.version,
     metrics: metrics,
     summary: {
       overallScore: 0,
@@ -257,6 +306,21 @@ function generateQualityReport(metrics) {
   // Calculate overall quality score (0-100)
   let score = 100;
   const recommendations = [];
+
+  // A check that could not run is unknown, not clean — score it as a gap, or the
+  // report reads greenest on the tree nobody could measure.
+  if (metrics.eslint.status === "parse_error") {
+    score -= 10;
+    recommendations.push(
+      "ESLint produced no readable report — lint is unmeasured",
+    );
+  }
+  if (metrics.security.status === "unknown") {
+    score -= 5;
+    recommendations.push(
+      "The dependency audit produced no readable report — vulnerability status is unknown",
+    );
+  }
 
   // ESLint deductions
   if (metrics.eslint.errors > 0) {
@@ -312,11 +376,15 @@ function main() {
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
   );
 
+  // The build comes BEFORE the tests: the e2e suites drive dist/cli/index.js and
+  // dist/index.js, never src/. Run the other way round they test the previous
+  // build, or report "nothing executed" on a fresh checkout and score it as
+  // missing coverage.
   const metrics = {
     eslint: collectESLintMetrics(),
     typescript: collectTypeScriptMetrics(),
-    tests: collectTestMetrics(),
     build: collectBuildMetrics(),
+    tests: collectTestMetrics(),
     security: collectSecurityMetrics(),
   };
 
@@ -338,11 +406,18 @@ function main() {
     `   TypeScript: ${metrics.typescript.compilationSuccess ? "Compiled successfully" : "Compilation failed"}`,
   );
   console.log(
-    `   Tests: ${metrics.tests.testsPassed}/${metrics.tests.testsRun} passed`,
+    `   Tests: ${metrics.tests.testsPassed}/${metrics.tests.testsRun} passed` +
+      (metrics.tests.testsSkipped > 0
+        ? `, ${metrics.tests.testsSkipped} skipped`
+        : ""),
   );
   console.log(`   Build: ${metrics.build.success ? "Success" : "Failed"}`);
   console.log(
-    `   Security: ${metrics.security.vulnerabilities.total} vulnerabilities`,
+    `   Security: ${
+      metrics.security.status === "unknown"
+        ? "audit unreadable — status unknown"
+        : `${metrics.security.vulnerabilities.total} vulnerabilities`
+    }`,
   );
 
   if (report.summary.recommendations.length > 0) {

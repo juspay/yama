@@ -9,12 +9,10 @@ dist/
 build/
 *.tsbuildinfo
 
-# Environment variables
+# Environment variables. .env.example is the one committed exception.
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 
 # IDE files
 .vscode/
@@ -130,7 +128,11 @@ simple-test.js
 *.old.js
 *.backup.js
 .claude/
-.yama/state/
-# Per-run reports. Carried between runs by CI artifacts, never committed.
-.yama/reports/
-yama-junit.xml
+# Yama's own run store: stage outputs, worker reports, the findings ledger.
+# Carried between runs by CI artifacts, never committed.
+.yama/artifacts/
+
+# Written at the repo root by `pnpm run quality:metrics`. A snapshot of one
+# machine's lint/build/test/audit numbers — regenerated on demand, never a
+# source of truth worth committing.
+quality-metrics.json

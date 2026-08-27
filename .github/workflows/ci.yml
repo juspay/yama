@@ -7,10 +7,8 @@ on:
     # [skip ci]. This is the second guard: [skip ci] is honoured inconsistently
     # across CI systems, and a knowledge update has nothing to build or test.
     paths-ignore:
-      - ".yama/knowledge/**"
-      - ".yama/product/**"
-      - ".yama/state/**"
-      - ".yama/reports/**"
+      - ".yama/memory/**"
+      - ".yama/artifacts/**"
   pull_request:
     branches: [main]
 
@@ -19,7 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20, 22, 26]
+        # `engines.node` is >=22, so 20 can no longer install this package.
+        # The shape is unchanged: minimum supported, current LTS, latest.
+        node-version: [22, 24, 26]
 
     steps:
       - name: Checkout code
@@ -27,8 +27,10 @@ jobs:
 
       - name: Setup PNPM
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.14.0
+        # No `version:` input on purpose. With one, action-setup hard-errors when
+        # it disagrees with `packageManager` in package.json; without one it takes
+        # the version from that field, so the manifest stays the single source.
+        # Do not reintroduce it.
 
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -37,7 +39,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Check formatting
         # Check, never write: `pnpm run format` reformatted the checkout in place
@@ -62,6 +64,9 @@ jobs:
         run: pnpm run build
 
       - name: Run tests
+        # Must stay AFTER the build. The suites are end-to-end by rule: they drive
+        # dist/cli/index.js and dist/index.js, never src/. Without dist/ there is
+        # nothing to test.
         run: pnpm run test
 
   build-check:
@@ -72,8 +77,6 @@ jobs:
 
       - name: Setup PNPM
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.14.0
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -82,7 +85,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Check package build
         run: pnpm run prepack
@@ -103,8 +106,6 @@ jobs:
 
       - name: Setup PNPM
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.14.0
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -113,7 +114,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: 🔍 Build Validation
         run: |
@@ -154,7 +155,7 @@ jobs:
 
       - name: 🛡️ Dependency Audit (production)
         run: |
-          echo "🛡️ Auditing production dependencies (advisory — see docs/dependency-audit.md)..."
+          echo "🛡️ Auditing production dependencies (advisory)..."
           pnpm audit --prod || true
         continue-on-error: true
 
@@ -169,17 +170,22 @@ jobs:
           echo "📈 Running TypeScript compiler strict checks on source files..."
           pnpm run type-check
 
-      - name: 🎯 Code Coverage Analysis
+      - name: 🎯 End-to-End Suite (advisory)
+        # Was "Code Coverage Analysis". There is no coverage instrument to run:
+        # the suites are end-to-end and drive the built artifact, so what this gate
+        # can report is whether that artifact behaves — hence the build first.
+        # Advisory here; the `test` job is the one that gates.
         run: |
-          echo "🎯 Running tests with coverage..."
-          pnpm run test --coverage || echo "Tests completed with warnings"
+          echo "🎯 Building and running the end-to-end suite..."
+          pnpm run build
+          pnpm run test || echo "Tests completed with warnings"
         continue-on-error: true
 
       - name: 📋 Quality Summary
         run: |
           echo "📋 Build Rule Enforcement Summary:"
           echo "✅ Build validation passed"
-          echo "✅ Environment validation passed" 
+          echo "✅ Environment validation passed"
           echo "✅ Security validation passed"
           echo "✅ TypeScript compilation passed"
           echo "✅ Commit message format validated"

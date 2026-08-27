@@ -1,0 +1,12 @@
+# NEGATIVE FIXTURE (TASKS:Y1.1, Y8.1) — a capability id Yama does not know.
+# `comment.inline.post` is a plausible typo for `comment.inline.create`, and a
+# strict schema is the only thing standing between it and a review that silently
+# never posts anything. The error must list the ids that DO exist.
+servers:
+  forge:
+    transport: stdio
+    command: node
+    args: ["-e", "0"]
+capabilities:
+  comment.list: forge.list_comments
+  comment.inline.post: forge.create_inline

@@ -1,92 +1,147 @@
-# Connections.
+# Connections, and the capability map — how Yama reviews Yama's own pull requests.
 #
-# Yama's code never names a tool. It asks for a CAPABILITY and this map supplies
-# the tool name, which is what lets the same code drive any VCS. `yama doctor`
-# verifies every mapping against the live server and prints what the server
-# actually advertises when a name is wrong.
+# THE CAPABILITY MAP IS THE WHOLE POINT. Yama's code never spells a platform tool name: it
+# asks for a CAPABILITY and this file says which tool provides it, with the arguments every
+# call of that tool needs. Moving to another forge is an edit here, not a code change.
+#
+# Two forms are accepted:
+#
+#   <capability>: <server>.<tool>
+#
+#   <capability>:
+#     tool: <server>.<tool>
+#     args: { owner: "…", pullNumber: "${pr}" }
+#
+# In `args`, `${pr}` / `${branch}` / `${base}` / `${mode}` come from the run target and
+# everything else is an environment variable, expanded at load time and loud when unset.
+# An unmapped capability is switched OFF, never broken.
+#
+# Note what is NOT here: nothing maps the diff. Yama takes it from git
+# (merge-base(base, head)..head) — deterministic, no API call, and identical on every
+# forge. The platform is only ever asked for the pull request, its comments, and posting.
+
+version: 1
+
 servers:
   github:
+    # GitHub's HOSTED MCP server. No process to install, no npx download on every CI run,
+    # and it tracks GitHub's own API without a version bump here.
     transport: http
     url: https://api.githubcopilot.com/mcp/
     headers:
-      # A non-reserved env name: ${GITHUB_TOKEN} is not reliably forwarded
-      # inside a composite action.
+      # A non-reserved variable name on purpose: ${GITHUB_TOKEN} is not reliably forwarded
+      # into a composite action, so the workflow passes the token as YAMA_GITHUB_TOKEN.
+      # Server variables are expanded at CONNECT time, not at load time — a local review
+      # that never talks to GitHub does not need this set.
       Authorization: "Bearer ${YAMA_GITHUB_TOKEN}"
-    #
-    # GitHub's MCP server consolidated many operations behind a few tools chosen
-    # by a `method` argument. That argument is part of the MAPPING, so it lives
-    # here with the tool name — Yama's code still only ever asks for a
-    # capability. `yama doctor --live` verifies each name against the running
-    # server and prints what it actually advertises when one is wrong.
-    capabilities:
-      readPullRequest: { tool: pull_request_read, args: { method: get } }
-      listComments:
-        { tool: pull_request_read, args: { method: get_review_comments } }
-      listApprovals: { tool: pull_request_read, args: { method: get_reviews } }
-      listChangedFiles: { tool: pull_request_read, args: { method: get_files } }
-      findPullRequest: list_pull_requests
-      listMergedPullRequests: list_pull_requests
-      # Inline comments attach to an open review, so the review is opened before
-      # they are written and submitted after. Comments on a review that is never
-      # submitted are invisible to everyone.
-      beginReview: { tool: pull_request_review_write, args: { method: create } }
-      postInlineComment: add_comment_to_pending_review
-      submitReview:
-        {
-          tool: pull_request_review_write,
-          args: { method: submit_pending, event: COMMENT },
-        }
-      postSummary: add_issue_comment
-      updateDescription: update_pull_request
-    # Posting is exposed only in the stages that post. A review turn reading an
-    # attacker-controlled diff must not be able to write to the pull request.
-    stages: [resolve, orient, post, checks, enhance, verdict]
-    roles: [main]
-    timeout: 30000
-    retryConfig:
-      maxAttempts: 3
-      initialDelay: 1000
-      maxDelay: 10000
-      backoffMultiplier: 2
-    # Fail-closed allowlist: exactly the tools the capability map above names,
-    # and nothing else. The registry enforces it by discovering what the server
-    # advertises and blocking the remainder, so a tool added upstream cannot
-    # appear in the agent's reach without a change here.
-    #
-    # This used to say schema cost was no reason to narrow the set, because the
-    # runtime defers external tool schemas behind a search catalog — measured
-    # once at ~2.4k tokens against 44 tools. Production disproved it. On PR #85
-    # the server registered 47 tools and the first turn was rejected before it
-    # reached the model:
-    #
-    #   ContextBudgetExceededError: Estimated 106431 tokens, budget 83200
-    #   ... no compaction is possible (only prompt + tools)
-    #
-    # The system instruction is ~771 tokens and the opening message is a few
-    # lines, so effectively all of that was tool schemas. The deferral is real
-    # but the pre-dispatch budget check runs BEFORE it, so it never applied.
-    # Until that ordering is fixed upstream, the allowlist is what keeps the
-    # payload small — and it is worth keeping afterwards regardless, because
-    # Yama reads code from the local checkout far faster than through this API.
-    allowedTools:
-      - pull_request_read
-      - list_pull_requests
-      - pull_request_review_write
-      - add_comment_to_pending_review
-      - add_issue_comment
-      - update_pull_request
-    # Kept as defence in depth: if the allowlist is ever widened, these stay
-    # denied. Yama reviews; it does not commit.
-    blockedTools:
-      - push_files
-      - create_or_update_file
-      - update_pull_request_branch
-      - request_copilot_review
-      - run_secret_scanning
-      - sub_issue_write
-      - issue_write
-      - create_branch
-      - delete_file
-      - merge_pull_request
-      - create_repository
-      - fork_repository
+    # A hang detector, not a budget.
+    timeoutMs: 30000
+
+  # Tree-sitter code graph (github.com/tirth8205/code-review-graph): out-of-diff context
+  # for the reviewer — blast radius, callers and dependents, flows, architecture overview.
+  # The workflow warms the uvx cache so connect stays inside its timeout; a machine
+  # without uvx, or a failed spawn, is a named degradation, never a failed review.
+  # Workers share the host's MCP connections on NeuroLink 12.2, so ONE process serves
+  # the whole run (the v4 per-worker respawn deadlocked on uv's cache lock).
+  code-review-graph:
+    transport: stdio
+    command: uvx
+    args: ["--from", "code-review-graph==2.3.7", "code-review-graph", "serve"]
+    timeoutMs: 60000
+    # Read/analyze only — exposed to the REVIEW stages, never delivery. Mutating or
+    # expensive tools (refactor, embeddings, wiki, cross-repo) stay unexposed.
+    expose:
+      - build_or_update_graph_tool
+      - get_minimal_context_tool
+      - get_impact_radius_tool
+      - get_review_context_tool
+      - query_graph_tool
+      - traverse_graph_tool
+      - semantic_search_nodes_tool
+      - list_graph_stats_tool
+      - find_large_functions_tool
+      - list_flows_tool
+      - get_flow_tool
+      - get_affected_flows_tool
+      - get_architecture_overview_tool
+      - detect_changes_tool
+      - get_hub_nodes_tool
+
+capabilities:
+  # This repository's own coordinates, written out rather than read from the environment:
+  # they are public, they never change, and a literal cannot be unset in a runner.
+  #
+  # THE ARGUMENT NAMES ARE THE SERVER'S, INCLUDING ITS INCONSISTENCY. The pull-request
+  # tools take `pullNumber` (camelCase); the issue tools take `issue_number` (snake_case).
+  # `yama doctor` verifies TOOL names against what the server advertises; argument names it
+  # cannot check — a server only reports those when a call is made. If a capability fails
+  # at run time with "missing required parameter", the name it asks for goes here.
+
+  # --- review phase: available to the main agent from WarmUp onwards, never to a worker.
+  #
+  # GitHub's server consolidated many read operations behind one tool chosen by a `method`
+  # argument. That argument is part of the MAPPING, so it lives here beside the tool name —
+  # the code still only ever asks for a capability.
+  pr.read:
+    tool: github.pull_request_read
+    args:
+      method: get
+      owner: juspay
+      repo: yama
+      pullNumber: "${pr}"
+  comment.list:
+    tool: github.pull_request_read
+    args:
+      method: get_review_comments
+      owner: juspay
+      repo: yama
+      pullNumber: "${pr}"
+      # The server pages at 30 threads by default, OLDEST first — a busy pull request's
+      # newest comments (the ones dedupe most needs) fall off page one without this.
+      perPage: 100
+
+  # --- delivery phase: exposed during Delivery and nowhere else. A review turn reading an
+  # attacker-controlled diff must not be holding a tool that can write to the pull request.
+  #
+  # On this server an inline comment is written into a PENDING review, which has to be
+  # created first and submitted after for anyone to see it — that is what the
+  # review.begin / review.submit pair below maps. The pair is both-or-neither: each
+  # requires the other, and the probe refuses half of it.
+  review.begin:
+    tool: github.pull_request_review_write
+    args:
+      method: create
+      owner: juspay
+      repo: yama
+      pullNumber: "${pr}"
+  review.submit:
+    tool: github.pull_request_review_write
+    args:
+      method: submit_pending
+      event: COMMENT
+      owner: juspay
+      repo: yama
+      pullNumber: "${pr}"
+  comment.inline.create:
+    tool: github.add_comment_to_pending_review
+    args:
+      owner: juspay
+      repo: yama
+      pullNumber: "${pr}"
+  comment.summary.create:
+    tool: github.add_issue_comment
+    args:
+      owner: juspay
+      repo: yama
+      issue_number: "${pr}"
+
+  # Off, and deliberately: `delivery.verdict` and `delivery.describe` are false in
+  # yama.yaml — this repository does not let its own agent gate a merge or rewrite an
+  # author's description. Map these when it does.
+  #
+  # verdict.set:
+  #   tool: github.pull_request_review_write
+  #   args: { method: create_and_submit, owner: juspay, repo: yama, pullNumber: "${pr}" }
+  # pr.describe:
+  #   tool: github.update_pull_request
+  #   args: { owner: juspay, repo: yama, pullNumber: "${pr}" }

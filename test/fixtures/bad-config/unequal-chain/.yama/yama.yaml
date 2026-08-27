@@ -1,0 +1,8 @@
+# NEGATIVE FIXTURE (TASKS:Y1.4, Y8.1) — a fallback chain whose parallel fields are
+# different lengths. Two providers and three models is not a chain: there is no
+# honest way to pair them up, and guessing one would silently review with a model
+# nobody asked for. The loader must name both lengths and stop.
+models:
+  main:
+    provider: [google-ai, anthropic]
+    model: [gemini-2.5-pro, claude-sonnet-4-5, gpt-4o]

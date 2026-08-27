@@ -13,7 +13,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
-  # Reading this pull request's memory means listing artifacts from EARLIER
+  # Reading this pull request's run store means listing artifacts from EARLIER
   # runs through the API, which the default token cannot do without this.
   actions: read
 
@@ -25,98 +25,148 @@ jobs:
       github.event.pull_request.draft == false &&
       github.event.pull_request.user.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    # Comfortably above `ai.timeout` in .yama/yama.yaml, so a slow model is cut
-    # off by Yama — which reports the stall honestly and still posts a summary —
+    # Comfortably above the per-stage budget in .yama/yama.yaml, so a slow model is
+    # cut off by Yama — which reports the stall honestly and still posts a summary —
     # rather than by the runner, which kills the job and reports nothing.
-    timeout-minutes: 45
+    # Sized from live evidence: a repository-rewrite pull request is ~40+ minutes of
+    # honest agentic work on this gateway's models (single big-generation steps run
+    # ~6 minutes each). 45 was the v4 number and killed a healthy review mid-flight.
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Yama reads the diff and the code from disk rather than through the
-          # API. Full history is what makes `git diff base...head` correct.
+          # API — nothing maps a diff capability, on purpose. Full history is what
+          # makes `git diff merge-base(base, head)..head` correct.
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+      - name: Setup PNPM
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        # Version comes from `packageManager` in package.json; passing one here
+        # only creates a second place for it to disagree.
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: "22"
+          cache: "pnpm"
 
       - name: Install
         run: pnpm install --frozen-lockfile
 
       - name: Build
+        # The review runs the BUILT cli, so this is not optional.
         run: pnpm run build
 
-      - name: Restore this pull request's memory
+      - name: Setup uv (code-review-graph server)
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Warm the code-review-graph package
+        # First uvx run resolves the package into uv's cache; doing it here keeps the
+        # review's MCP connect inside its 60s timeout. Failure is non-fatal — the
+        # server becomes a named degradation at connect time, never a failed review.
+        run: uvx --from code-review-graph==2.3.7 code-review-graph --help >/dev/null 2>&1 || echo "warm failed — the review runs without the graph"
+
+      - name: Restore this pull request's run store
         # Carries what earlier runs on this pull request established: what was
-        # explored, what was rejected and why. Absent is fine — comment markers
-        # are the authority on what was already said, and they live on the pull
-        # request itself.
+        # explored, what was rejected and why, and the open findings ledger.
+        # Absent is fine — comment markers are the second, independent source of
+        # what was already said, and they live on the pull request itself.
         #
         # actions/download-artifact cannot fetch by name from a PREVIOUS run, so
         # the artifact is located through the API first. Pointing it at
         # github.run_id would silently download nothing, every time.
-        id: memory
+        id: store
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          name="yama-pr-${{ github.event.pull_request.number }}"
-          id=$(gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+          name="yama-pr-${PR_NUMBER}"
+          id=$(gh api "repos/${REPOSITORY}/actions/artifacts?per_page=100" \
                  --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)]
                        | sort_by(.created_at) | reverse | .[0].id // empty")
           if [ -z "$id" ]; then
-            echo "No previous memory for this pull request — reviewing from comment markers."
+            echo "No previous run store for this pull request — reviewing from comment markers."
             exit 0
           fi
-          mkdir -p .yama/state
-          gh api "repos/${{ github.repository }}/actions/artifacts/$id/zip" > /tmp/yama-memory.zip
-          unzip -o -q /tmp/yama-memory.zip -d .yama/state
-          echo "Restored memory from artifact $id."
+          mkdir -p .yama/artifacts
+          gh api "repos/${REPOSITORY}/actions/artifacts/$id/zip" > "$RUNNER_TEMP/yama-store.zip"
+          unzip -o -q "$RUNNER_TEMP/yama-store.zip" -d .yama/artifacts
+          echo "Restored the run store from artifact $id."
 
       - name: Verify the setup
-        # Everything that could fail late — connections, credentials, every
-        # capability the run needs — is checked here instead.
+        # Everything that could fail late — config, MCP connections, credentials,
+        # and every capability this run needs probed against the tools the servers
+        # really advertise — is checked here instead.
+        #
+        # Same --pr and --base as the review below, deliberately: the probe resolves
+        # the ${pr} arguments the capability map will really be called with, and its
+        # base-ref row proves the ref the diff is taken from actually resolves in
+        # this clone. Probing a different target proves nothing about this run.
         env:
           YAMA_GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          # The GitHub MCP server takes its credential from GITHUB_TOKEN (see the
+          # server block in .yama/mcp.yaml). It is Yama's own token, not the
+          # runner's default one, so what Yama posts carries Yama's identity.
+          GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
           LANGFUSE_ENABLED: "true"
-        run: node dist/v4/cli/cli.js doctor --live
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          node dist/cli/index.js doctor \
+            --pr "$PR_NUMBER" \
+            --base "origin/$BASE_REF"
 
       - name: Review
         id: review
+        # Not a dry run: this workflow posts real reviews. What actually lands is
+        # the `delivery:` block in .yama/yama.yaml, not a flag here.
+        #
+        # Exit codes are a contract: 0 approve/comment, 1 BLOCK, 2 bad config,
+        # 3 the run itself failed. 1 failing this job is the point.
         env:
           YAMA_GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
           LANGFUSE_ENABLED: "true"
-          YAMA_CONCURRENCY: high
-          GITHUB_REPOSITORY: ${{ github.repository }}
+          # Branch names are attacker-controllable; they go through env, never
+          # straight into the shell.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          node dist/v4/cli/cli.js review \
-            --pr ${{ github.event.pull_request.number }}
+          node dist/cli/index.js review \
+            --pr "$PR_NUMBER" \
+            --base "origin/$BASE_REF"
 
-      - name: Save this pull request's memory
+      - name: Save this pull request's run store
+        # `always()`: a run that failed still banked what it did, and that is both
+        # what you read afterwards and what the next run starts from.
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: yama-pr-${{ github.event.pull_request.number }}
-          path: .yama/state
+          path: .yama/artifacts
           retention-days: 30
           overwrite: true
 
@@ -126,5 +176,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: yama-report-${{ github.event.pull_request.number }}-${{ github.run_id }}
-          path: .yama/reports
+          path: .yama/artifacts/pr-${{ github.event.pull_request.number }}/reports
           retention-days: 14

@@ -1,0 +1,4 @@
+# Valid on purpose: each negative fixture must break in exactly ONE way, or the
+# test proves nothing about which error fired.
+servers: {}
+capabilities: {}

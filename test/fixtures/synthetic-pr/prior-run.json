@@ -1,0 +1,15 @@
+{
+  "runId": "run-2026-08-01T09-00-00-000Z",
+  "mode": "pr",
+  "target": { "mode": "pr", "pr": 7 },
+  "startedAt": "2026-08-01T09:00:00.000Z",
+  "finishedAt": "2026-08-01T09:04:11.000Z",
+  "headSha": "0000000000000000000000000000000000000000",
+  "stages": [],
+  "tasks": [],
+  "degradations": [],
+  "verdict": {
+    "decision": "block",
+    "reasons": ["1 CRITICAL: auth-token-logged — blockOn covers CRITICAL"]
+  }
+}

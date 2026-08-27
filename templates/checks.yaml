@@ -1,0 +1,19 @@
+# .yama/checks.yaml — commands Yama may run as evidence (optional).
+#
+# READ FROM THE BASE BRANCH, never from the change under review: a pull request does not
+# get to introduce the command that reviews it. If the head modifies this file, every check
+# is refused; if it modifies a script a check names, that one check is refused by name.
+#
+# Commands are argv arrays, never shell strings — no pipes, no globs, no `&&`.
+
+version: 1
+
+checks: []
+# checks:
+#   - id: typecheck
+#     command: ["pnpm", "run", "check"]
+#     timeoutMs: 300000
+#   - id: lint
+#     command: ["pnpm", "run", "lint"]
+#     # A failing optional check is evidence, not a blocker.
+#     optional: true

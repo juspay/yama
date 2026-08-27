@@ -1,12 +1,13 @@
 {
   "name": "@juspay/yama",
-  "version": "4.0.0",
-  "description": "Enterprise-grade Pull Request automation toolkit with AI-powered code review and description enhancement",
+  "version": "5.0.0",
+  "description": "Autonomous, checklist-driven pull-request review agent powered by NeuroLink",
   "keywords": [
     "pr",
     "pull-request",
     "code-review",
     "ai",
+    "agent",
     "automation",
     "bitbucket",
     "github",
@@ -24,121 +25,90 @@
   "license": "MIT",
   "author": "Juspay Technologies <support@juspay.in> (https://juspay.io)",
   "type": "module",
-  "main": "dist/v4/index.js",
-  "types": "dist/v4/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/v4/index.d.ts",
-      "import": "./dist/v4/index.js"
-    }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "bin": {
-    "yama": "dist/v4/cli/cli.js"
-  },
-  "directories": {
-    "test": "tests"
+    "yama": "./dist/cli/index.js"
   },
   "files": [
     "dist",
-    "!dist/**/*.test.*",
     "!dist/**/*.map",
-    "data",
-    "skills",
+    "templates",
     "README.md",
     "CHANGELOG.md",
-    "MIGRATION.md",
     "LICENSE",
-    "action.yml",
-    "docs/v4"
+    "action.yml"
+  ],
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.15.1",
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc && tsc-alias",
-    "build:action": "npm run build",
-    "dev": "tsx watch src/v4/cli/cli.ts",
-    "dev:run": "tsx src/v4/cli/cli.ts",
-    "mcp:git:server": "uvx mcp-server-git || npx -y @modelcontextprotocol/server-git",
-    "test": "jest",
+    "build": "tsc",
+    "check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "type-check": "pnpm run check",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "type-check": "tsc --noEmit --skipLibCheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "docs": "typedoc src",
-    "clean": "rimraf dist",
+    "test": "tsx test/run.ts",
+    "cli": "node dist/cli/index.js",
+    "dev": "tsx src/cli/index.ts",
     "prepare": "husky",
-    "prepack": "npm run build && npm run test",
-    "changeset": "changeset",
-    "changeset:version": "changeset version && git add --all",
-    "release": "npm run build && npm run test && changeset publish",
-    "release:dry": "npm publish --dry-run",
-    "release:github": "npm publish --registry https://npm.pkg.github.com",
-    "version:check": "npm version --no-git-tag-version",
-    "pack:verify": "npm pack && tar -tzf *.tgz | head -20",
-    "validate": "npm run validate:env && npm run validate:security",
-    "validate:all": "npm run lint && npm run type-check && npm run validate",
+    "prepack": "pnpm run build && pnpm run test",
+    "validate": "pnpm run validate:env && pnpm run validate:security",
+    "validate:all": "pnpm run lint && pnpm run type-check && pnpm run validate",
     "validate:env": "node scripts/validate-env.cjs",
     "validate:security": "node scripts/validate-security.cjs",
     "validate:build": "node scripts/build-validations.cjs",
     "validate:commit": "node scripts/commit-validation.cjs",
     "pre-commit": "lint-staged",
-    "pre-push": "npm run validate && npm run test",
-    "quality:all": "npm run lint && npm run format && npm run test",
+    "pre-push": "pnpm run validate && pnpm run check && pnpm run lint && pnpm run build && pnpm run test",
+    "quality:all": "pnpm run lint && pnpm run format && pnpm run test",
     "quality:metrics": "node scripts/quality-metrics.cjs",
-    "quality:report": "npm run quality:metrics && echo 'Quality metrics saved to quality-metrics.json'",
-    "check:all": "npm run lint && npm run format:check && npm run validate && npm run validate:commit"
+    "quality:report": "pnpm run quality:metrics && echo 'Quality metrics saved to quality-metrics.json'",
+    "check:all": "pnpm run lint && pnpm run format:check && pnpm run validate && pnpm run validate:commit"
   },
   "dependencies": {
-    "@juspay/neurolink": "^11.23.0",
-    "commander": "^11.0.0",
-    "langfuse": "^3.38.20",
-    "yaml": "^2.3.0",
-    "zod": "^4.3.6"
+    "@juspay/neurolink": "^12.7.2",
+    "js-yaml": "^4.3.1",
+    "yargs": "^18.0.0",
+    "zod": "4.3.6"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.5.1",
-    "@changesets/cli": "^2.26.2",
-    "@eslint/js": "^9.0.0",
+    "@eslint/js": "^10.0.1",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/commit-analyzer": "^13.0.0",
     "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^11.0.0",
     "@semantic-release/npm": "^12.0.1",
     "@semantic-release/release-notes-generator": "^14.0.1",
-    "@types/inquirer": "^9.0.8",
-    "@types/jest": "^29.0.0",
-    "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^9.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.20.0",
+    "@types/yargs": "^17.0.35",
+    "eslint": "^10.0.2",
+    "globals": "^16.0.0",
     "husky": "^9.0.0",
-    "jest": "^29.0.0",
-    "jest-junit": "^17.0.0",
     "lint-staged": "^15.0.0",
-    "prettier": "^3.0.0",
-    "publint": "^0.3.0",
-    "rimraf": "^5.0.0",
+    "prettier": "^3.8.1",
     "semantic-release": "^24.0.0",
-    "ts-jest": "^29.0.0",
-    "ts-node": "^10.0.0",
-    "ts-node-dev": "^2.0.0",
-    "tsc-alias": "^1.8.0",
-    "tsx": "^4.20.6",
-    "typedoc": "^0.25.0",
-    "typescript": "^5.0.0"
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.2"
   },
-  "peerDependencies": {
-    "typescript": ">=4.5.0"
-  },
-  "engines": {
-    "node": ">=20.18.1",
-    "npm": ">=10.0.0",
-    "pnpm": ">=9.0.0"
-  },
-  "os": [
-    "darwin",
-    "linux",
-    "win32"
-  ],
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -148,13 +118,7 @@
       "esbuild"
     ],
     "overrides": {
-      "@semantic-release/npm": "^13.1.2",
-      "undici": "~7.22.0",
-      "protobufjs": ">=7.5.5",
-      "jws": ">=4.0.1",
-      "form-data": ">=4.0.6",
-      "@grpc/grpc-js": ">=1.13.5",
-      "adm-zip": ">=0.6.0"
+      "zod": "4.3.6"
     }
   },
   "lint-staged": {
@@ -164,7 +128,6 @@
     ],
     "*.{json,md,yml,yaml}": [
       "prettier --write"
-    ],
-    "*.ts": []
+    ]
   }
 }

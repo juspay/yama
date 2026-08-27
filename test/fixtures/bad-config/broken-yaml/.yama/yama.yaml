@@ -1,0 +1,6 @@
+# NEGATIVE FIXTURE (TASKS:Y1.2, Y8.1) — not valid YAML. The tab below is the
+# classic one: YAML forbids tabs as indentation, and the parse error must name
+# this file rather than surfacing three stages later as an odd default.
+models:
+  main:
+	provider: google-ai

@@ -1,0 +1,5 @@
+# Valid: this fixture breaks in mcp.yaml, not here.
+models:
+  main:
+    provider: google-ai
+    model: gemini-2.5-flash
