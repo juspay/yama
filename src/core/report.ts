@@ -61,11 +61,18 @@ export const gateStats = (input: {
  */
 export const deliveryStats = (
   delivery: DeliveryStageResult,
+  options: { verdictProofRequired?: boolean } = {},
 ): RunDeliveryStats => ({
+  ...(options.verdictProofRequired !== undefined
+    ? { verdictProofRequired: options.verdictProofRequired }
+    : {}),
   actions: [...delivery.plan.actions],
   intended: delivery.plan.comments.length,
   posted: delivery.confirmation.posted.length,
   unposted: [...delivery.confirmation.unposted],
+  ...(delivery.summaryOnly !== undefined && delivery.summaryOnly.length > 0
+    ? { summaryOnly: [...delivery.summaryOnly] }
+    : {}),
   alreadyPosted: delivery.plan.alreadyPosted.length,
   stale: [...delivery.plan.stale],
   summaryPosted: delivery.summaryPosted,

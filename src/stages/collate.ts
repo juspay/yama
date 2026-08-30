@@ -15,7 +15,6 @@ import {
   rankFindings,
 } from "../gates/index.js";
 import { READ_ONLY_TOOLS, mergeFindings } from "../tools/index.js";
-import { writeLedger } from "../store/index.js";
 import type {
   ChecklistGateResult,
   CollateStageResult,
@@ -178,11 +177,10 @@ export const runCollate = async (options: {
     ...(Object.keys(merged).length > 0 ? { merged } : {}),
   };
 
-  await writeLedger(options.paths, {
-    updatedAt: new Date().toISOString(),
-    findings: ranked.findings,
-  });
-
+  // No ledger write here: grounding runs AFTER collate, and a ledger written before
+  // the gate recorded dropped findings as real — a later run then carried them as
+  // prior-open, blessing their own resurrection past the gate (found live on #91).
+  // The shell writes the ledger from the GROUNDED list.
   return {
     output,
     ranked,

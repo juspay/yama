@@ -94,7 +94,7 @@
     "@semantic-release/commit-analyzer": "^13.0.0",
     "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^11.0.0",
-    "@semantic-release/npm": "^12.0.1",
+    "@semantic-release/npm": "^13.1.2",
     "@semantic-release/release-notes-generator": "^14.0.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.20.0",
@@ -118,7 +118,13 @@
       "esbuild"
     ],
     "overrides": {
-      "zod": "4.3.6"
+      "zod": "4.3.6",
+      "@semantic-release/npm": "^13.1.2",
+      "protobufjs": ">=7.5.5",
+      "jws": ">=4.0.1",
+      "form-data": ">=4.0.6",
+      "@grpc/grpc-js": ">=1.13.5",
+      "adm-zip": ">=0.6.0"
     }
   },
   "lint-staged": {

@@ -20,6 +20,7 @@ import {
 import {
   ensureStore,
   storePathsForDir,
+  writeLedger,
   writeRunReport,
 } from "../store/index.js";
 import {
@@ -375,6 +376,13 @@ export const runReview = async (
       carriedOver: insertion.prior.open,
       policy: config.yama.verdict,
     });
+    // The ledger records what SURVIVED the gate (TASKS:Y7.1). Written any earlier, a
+    // dropped finding came back as a prior-open carry-over and blessed its own
+    // resurrection past grounding on the next run.
+    await writeLedger(paths, {
+      updatedAt: new Date().toISOString(),
+      findings: ranked.findings,
+    });
 
     report.gates = gateStats({
       metrics: session.metrics(),
@@ -400,6 +408,9 @@ export const runReview = async (
         checklistComplete: work.checklist.complete,
         dryRun: run.dryRun,
       }),
+      // Intent from CONFIG, not from the probe: a repo that turned verdict delivery on
+      // is owed proof even on the runs where every capability degraded away.
+      { verdictProofRequired: config.yama.delivery.verdict },
     );
     await persist();
 

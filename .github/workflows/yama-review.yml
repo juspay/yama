@@ -154,9 +154,17 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
+          rc=0
           node dist/cli/index.js review \
             --pr "$PR_NUMBER" \
-            --base "origin/$BASE_REF"
+            --base "origin/$BASE_REF" || rc=$?
+          # Exit 1 is a DELIVERED verdict — BLOCK arrives on the pull request as a
+          # request-changes review (delivery.verdict + the verdict.set mapping), so the
+          # job stays green. A red check means the run itself broke: config error (2), or
+          # exit 3 — a crash, a delivery that never landed as claimed, or a BLOCK that was
+          # decided but never proven as the review state.
+          if [ "$rc" = "1" ]; then echo "verdict BLOCK — delivered as a request-changes review"; exit 0; fi
+          exit $rc
 
       - name: Save this pull request's run store
         # `always()`: a run that failed still banked what it did, and that is both

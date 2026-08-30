@@ -14,11 +14,13 @@
  * disagree.
  */
 import {
+  confirmAcceptedWrites,
   confirmCreated,
   confirmFromComments,
   confirmPosted,
   confirmToolRan,
   dedupePostedFindings,
+  mergeConfirmations,
   postingFailure,
 } from "../gates/index.js";
 import { readDescription, readTargetComments } from "../platform/index.js";
@@ -53,6 +55,16 @@ const DELIVERY_MAX_STEPS = 48;
 
 /** Marker kind carried by the one summary comment a run posts. */
 const RUN_MARKER_KIND = "run";
+
+/**
+ * The review event that MEANS each decision — the verdict.set capability's contract:
+ * whatever tool config maps must accept one of these as its `event`.
+ */
+const VERDICT_EVENTS: Record<string, string> = {
+  block: "REQUEST_CHANGES",
+  comment: "COMMENT",
+  approve: "APPROVE",
+};
 
 /** One finding as a comment body, marker appended (TASKS:Y5.3). */
 export const renderFindingComment = (finding: Finding): string =>
@@ -311,7 +323,7 @@ export const buildDeliveryPrompt = (input: {
 
   if (plan.actions.includes("verdict")) {
     lines.push(
-      `Set the review state to ${plan.verdict.decision.toUpperCase()} with \`${registry.toolFor("verdict.set")}\`.${renderArgs(registry, "verdict.set")} The reasons are: ${plan.verdict.reasons.join("; ") || "no findings the policy acts on"}.`,
+      `Set the review state to ${plan.verdict.decision.toUpperCase()} with \`${registry.toolFor("verdict.set")}\`.${renderArgs(registry, "verdict.set")} Where this tool takes a review EVENT, pass the one that MEANS ${plan.verdict.decision.toUpperCase()} on this platform — a BLOCK is its request-changes event (spelled REQUEST_CHANGES on forges that use that vocabulary), a COMMENT its comment event, an APPROVE its approve event; never any other. The reasons are: ${plan.verdict.reasons.join("; ") || "no findings the policy acts on"}.`,
       "",
     );
   }
@@ -363,6 +375,8 @@ export const confirmDelivery = (input: {
   readBack?: readonly ExistingComment[];
 }): {
   confirmation: PostingConfirmation;
+  /** Inline never anchored; the posted summary carries these findings instead. */
+  summaryOnly: string[];
   summaryPosted: boolean;
   verdictSet: boolean;
   described: boolean;
@@ -374,16 +388,33 @@ export const confirmDelivery = (input: {
       .filter((result) => tool === undefined || result.name === tool)
       .map((result) => result.result);
 
-  // GitHub's hosted MCP answers a review-comment write with a bare success string, so
-  // the write results alone cannot confirm inline posts there — the re-read of the
-  // target (`readBack`) is the evidence that can.
-  const confirmation = confirmFromComments({
-    confirmation: confirmPosted({
-      intended: plan.comments.map((comment) => ({ id: comment.findingId })),
-      results: payloadsOf(registry.toolFor("comment.inline.create")),
+  // Three evidence sources, strongest first. (1) ACCEPTED WRITES: the captured call's
+  // params carry each body verbatim, marker included, and a clean result is the
+  // platform accepting it — race-free, but only once the lifecycle submit (where one is
+  // mapped) came back clean, because an accepted write into a review nobody submits is
+  // invisible. (2) Result bodies, for forges that echo them. (3) The re-read of the
+  // target — right when it answers, but served from an eventually-consistent view.
+  const submitOk =
+    registry.toolFor("review.begin") === undefined ||
+    confirmToolRan(results, registry.toolFor("review.submit"));
+  const intended = plan.comments.map((comment) => ({ id: comment.findingId }));
+  const accepted = submitOk
+    ? confirmAcceptedWrites({
+        intended,
+        results,
+        tool: registry.toolFor("comment.inline.create"),
+      })
+    : confirmPosted({ intended, results: [] });
+  const confirmation = mergeConfirmations(
+    accepted,
+    confirmFromComments({
+      confirmation: confirmPosted({
+        intended,
+        results: payloadsOf(registry.toolFor("comment.inline.create")),
+      }),
+      comments: input.readBack ?? [],
     }),
-    comments: input.readBack ?? [],
-  });
+  );
   // The summary is an issue comment: its write result carries an id (no body), and the
   // review-comment re-read never lists it — an id from a clean result is the fallback.
   const summaryResults = payloadsOf(registry.toolFor("comment.summary.create"));
@@ -394,10 +425,28 @@ export const confirmDelivery = (input: {
       results: summaryResults,
       kind: RUN_MARKER_KIND,
     }).unposted.length === 0 ||
-      confirmCreated(summaryResults));
+      confirmCreated(summaryResults) ||
+      confirmAcceptedWrites({
+        intended: [{ id: input.runId }],
+        results,
+        tool: registry.toolFor("comment.summary.create"),
+        kind: RUN_MARKER_KIND,
+      }).ok);
+  // The verdict state is proven from the accepted call's own params: the tool ran
+  // clean AND the event it carried is the one that MEANS the decision. The event
+  // vocabulary (REQUEST_CHANGES / COMMENT / APPROVE) is part of the verdict.set
+  // capability contract, not a forge name.
+  const expectedEvent = VERDICT_EVENTS[plan.verdict.decision];
   const verdictSet =
     plan.actions.includes("verdict") &&
-    confirmToolRan(results, registry.toolFor("verdict.set"));
+    results.some(
+      (result) =>
+        result.name === registry.toolFor("verdict.set") &&
+        !result.isError &&
+        String(
+          (result.params as { event?: unknown } | undefined)?.event ?? "",
+        ).toUpperCase() === expectedEvent,
+    );
   const described =
     plan.description !== undefined &&
     confirmToolRan(results, registry.toolFor("pr.describe"));
@@ -408,13 +457,23 @@ export const confirmDelivery = (input: {
     registry.toolFor("review.begin") === undefined ||
     confirmToolRan(results, registry.toolFor("review.submit"));
 
+  // A finding whose inline post never anchored is still DELIVERED when the summary
+  // that lists every finding is provably on the target: nothing is lost, the location
+  // is worse. Reported as summaryOnly, not as a failure — a model choosing a line
+  // outside the diff must not turn a delivered review into a red run.
+  const summaryOnly = summaryPosted ? confirmation.unposted : [];
+  const effective = summaryPosted
+    ? { ...confirmation, unposted: [], ok: confirmation.unmatched.length === 0 }
+    : confirmation;
+
   return {
-    confirmation,
+    confirmation: effective,
+    summaryOnly,
     summaryPosted,
     verdictSet,
     described,
     failures: [
-      postingFailure(confirmation),
+      postingFailure(effective),
       plan.summary !== undefined && !summaryPosted
         ? "the summary comment was never confirmed as posted"
         : undefined,
@@ -427,12 +486,22 @@ export const confirmDelivery = (input: {
       !reviewSubmitted
         ? "inline comments were written into a pending review that was never submitted — nobody can see them"
         : undefined,
+      plan.actions.includes("verdict") && !verdictSet
+        ? "the review state was set with the wrong event, or never proven — the accepted call must carry the event that means the decision"
+        : undefined,
     ],
   };
 };
 
-/** How long the confirm re-read waits before its one retry (read-after-write lag). */
-const RECONFIRM_DELAY_MS = 15_000;
+/**
+ * The confirm re-read ladder. GitHub answers the review-comment listing from an
+ * eventually-consistent view, and a single 15-second retry was measured LOSING that
+ * race live: a comment verifiably on the pull request was still unlisted at the second
+ * read, and the run honestly exited 3 over a delivery that had in fact landed. Three
+ * reads across a 45-second window outlast the observed lag; a ladder longer than the
+ * suite's 60-second hang budget is itself a defect.
+ */
+const RECONFIRM_DELAYS_MS = [0, 15_000, 30_000] as const;
 
 /** Nothing was delivered, and this is why. Used for dry runs and for no-action runs. */
 const skippedResult = (
@@ -555,9 +624,14 @@ export const runDelivery = async (options: {
   // The write results could not prove the posts. Ask the platform what the pull request
   // now shows — the one source that is right whatever the results looked like. A review
   // submitted moments ago may not be listable yet (GitHub answers the re-read from an
-  // eventually-consistent view), so an empty first answer earns ONE delayed retry.
-  for (const delay of [0, RECONFIRM_DELAY_MS]) {
-    if (confirmed.confirmation.ok || plan.comments.length === 0) {
+  // eventually-consistent view), so the ladder re-reads across a window that outlasts
+  // the lag. Only a MISSING capability ends it early: with no way to read comments,
+  // waiting cannot help — but a read that merely ERRORED gets retried like an empty
+  // one, because a transient failure at t=0 says nothing about t+30s (a break on it
+  // ended the ladder immediately and reported a delivered review as unconfirmed, live).
+  const canReRead = options.registry.toolFor("comment.list") !== undefined;
+  for (const delay of RECONFIRM_DELAYS_MS) {
+    if (!canReRead || confirmed.confirmation.ok || plan.comments.length === 0) {
       break;
     }
     if (delay > 0) {
@@ -575,7 +649,8 @@ export const runDelivery = async (options: {
       readBack: after.comments,
     });
   }
-  const { confirmation, summaryPosted, verdictSet, described } = confirmed;
+  const { confirmation, summaryOnly, summaryPosted, verdictSet, described } =
+    confirmed;
 
   const failures = [
     ...confirmed.failures,
@@ -588,6 +663,7 @@ export const runDelivery = async (options: {
     ...(output !== undefined ? { output } : {}),
     plan,
     confirmation,
+    ...(summaryOnly.length > 0 ? { summaryOnly } : {}),
     summaryPosted,
     verdictSet,
     described,

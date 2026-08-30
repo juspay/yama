@@ -13,6 +13,18 @@ name: Yama learn
 on:
   pull_request:
     types: [closed]
+  # Recovery lever: a learn run that failed for an environmental reason (a missing
+  # runner dependency, an outage) can be re-run for the same pull request without
+  # waiting for another merge. The merged-and-not-bot guard the closed trigger
+  # enforces is re-checked by the job's own verify step below, so a dispatch cannot
+  # aim the write job at an unmerged or bot-authored pull request; and learn refuses
+  # to run off its own commit, so a re-run cannot feed itself back in.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number to learn from (must be merged)"
+        required: true
+        type: string
 
 # Serialised: two learn runs would race each other pushing to main, and the
 # loser would be rebased onto a knowledge base it never read.
@@ -31,12 +43,37 @@ jobs:
     # Only a MERGED pull request teaches anything. A closed-unmerged one was
     # rejected, and learning from it would record conventions nobody adopted.
     if: >
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.user.login != 'github-actions[bot]'
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.user.login != 'github-actions[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
+      - name: Verify the dispatched pull request is merged and human-authored
+        # The closed trigger's `if:` cannot see a dispatched run, so the SAME guard is
+        # enforced here from the platform's own record before anything else happens —
+        # learn writes the knowledge base every later review reads, and an unmerged or
+        # bot-authored pull request must not get to write it from either trigger.
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          merged=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.merged')
+          author=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.user.login')
+          if [ "$merged" != "true" ]; then
+            echo "::error::pull request #${PR_NUMBER} is not merged — learn only learns from merged work"
+            exit 1
+          fi
+          if [ "$author" = "github-actions[bot]" ]; then
+            echo "::error::pull request #${PR_NUMBER} is bot-authored — refusing the self-feed loop"
+            exit 1
+          fi
+          echo "pull request #${PR_NUMBER} is merged and authored by ${author} — proceeding"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,7 +115,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
           set -euo pipefail
           name="yama-pr-${PR_NUMBER}"
@@ -107,6 +144,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Setup uv (code-review-graph server)
+        # .yama/mcp.yaml declares the graph server; doctor proves every declared
+        # server and exits 2 on one it cannot spawn. The review job carries these
+        # same two steps — learn needs them for the same reason.
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Warm the code-review-graph package
+        run: uvx --from code-review-graph==2.3.7 code-review-graph --help >/dev/null 2>&1 || echo "warm failed — doctor will say what that means"
+
       - name: Verify the write path
         # Proves the config, the connections and the credentials BEFORE computing
         # anything. Discovering at push time that the bot cannot write loses the
@@ -125,9 +171,14 @@ jobs:
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
           LANGFUSE_ENABLED: "true"
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          # On dispatch the event has no PR payload; the base comes from the PR record
+          # itself, so a PR merged into a non-default base still learns against it.
+          BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
         run: |
+          if [ -z "$BASE_REF" ]; then
+            BASE_REF=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.base.ref')
+          fi
           node dist/cli/index.js doctor \
             --pr "$PR_NUMBER" \
             --base "origin/$BASE_REF"
@@ -147,7 +198,7 @@ jobs:
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
           LANGFUSE_ENABLED: "true"
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
           node dist/cli/index.js learn \
             --pr "$PR_NUMBER"

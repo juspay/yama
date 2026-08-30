@@ -77,6 +77,10 @@ export type RunGateStats = {
  * What reached the platform. Posting is confirmed by comment id, never assumed
  * (TASKS:Y4.4) — until Delivery lands (TASKS:Y3.5) `posted` is 0 and `skipped` says why.
  */
+/** Whether this repository CONFIGURED verdict delivery — the CLI's exit contract
+ * depends on intent, not on what survived the capability probe: a BLOCK in a repo that
+ * promised review-state delivery must be proven there, even when delivery was skipped
+ * because every capability degraded. */
 export type RunDeliveryStats = {
   /** Actions this run could actually perform: config x capability x target mode. */
   actions: DeliveryAction[];
@@ -86,6 +90,8 @@ export type RunDeliveryStats = {
   posted: number;
   /** Intended but unconfirmed — the run says these out loud. */
   unposted: string[];
+  /** Inline post never anchored; the posted summary carries the finding instead. */
+  summaryOnly?: string[];
   /** Already on the target from an earlier run, so this one did not post them again. */
   alreadyPosted?: number;
   /** Markers on the target this run did not find again — Y7.1 classifies them. */
@@ -94,6 +100,8 @@ export type RunDeliveryStats = {
   summaryPosted?: boolean;
   /** The platform's own review state was set. */
   verdictSet?: boolean;
+  /** True when yama.yaml configured `delivery.verdict` — see the type's doc note. */
+  verdictProofRequired?: boolean;
   /** The description-enhancement hook ran (TASKS:Y7.3). */
   described?: boolean;
   /** Why nothing was delivered, when nothing was. */
