@@ -352,7 +352,12 @@ export const renderLearnResult = (result: LearnResult): string => {
         ]
       : []),
     ...(result.write.skipped !== undefined
-      ? result.write.skipped.split("\n").map((line) => `  NOT DONE   ${line}`)
+      ? result.write.skipped
+          .split("\n")
+          .map(
+            (line) =>
+              `  ${result.write.nothingToCommit === true ? "NOTHING NEW" : "NOT DONE  "} ${line}`,
+          )
       : []),
     ...(result.notes.length > 0
       ? [

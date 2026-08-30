@@ -220,9 +220,11 @@ export const commitMemory = async (options: {
     };
   }
   if (staged.length === 0) {
+    // Nothing to commit is an OUTCOME, not a refusal — see GitWriteResult.
     return {
       ...base,
       written,
+      nothingToCommit: true,
       skipped: "the memory files are identical to what is already committed",
     };
   }
