@@ -83,7 +83,12 @@ jobs:
           # Correction linking walks history to connect a fix back to what it
           # fixed, which is the signal that makes the impact ledger useful.
           fetch-depth: 0
-          token: ${{ secrets.YAMA_GITHUB_TOKEN }}
+          # The WORKFLOW token is the push credential: this job declares
+          # `contents: write`, and the learn commit's [skip ci] plus CI's
+          # paths-ignore break the loop. YAMA_GITHUB_TOKEN is the API/MCP read
+          # credential only — it has no push access to this repository, and the
+          # first production learn died pushing with it (403).
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup PNPM
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
