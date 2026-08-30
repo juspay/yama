@@ -1,3 +1,9 @@
+## [5.0.1](https://github.com/juspay/yama/compare/v5.0.0...v5.0.1) (2026-08-30)
+
+### Bug Fixes
+
+* **action:** doctor preflight needs the same base fallback as the review step ([f4a5dcf](https://github.com/juspay/yama/commit/f4a5dcf405610d92a3d35797ded3553633fffdcb))
+
 ## [5.0.0](https://github.com/juspay/yama/compare/v4.0.1...v5.0.0) (2026-08-30)
 
 ### ⚠ BREAKING CHANGES
