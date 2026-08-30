@@ -1,3 +1,10 @@
+## [4.0.1](https://github.com/juspay/yama/compare/v4.0.0...v4.0.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **ci:** learn uvx + guarded dispatch; restore pnpm overrides (npm OIDC, security floors); deliver BLOCK as request-changes ([9132912](https://github.com/juspay/yama/commit/913291282f79425b53938a04f3f82e64789ae941))
+
 # [4.0.0](https://github.com/juspay/yama/compare/v3.0.4...v4.0.0) (2026-08-24)
 
 

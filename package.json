@@ -1,6 +1,6 @@
 {
   "name": "@juspay/yama",
-  "version": "5.0.0",
+  "version": "4.0.1",
   "description": "Autonomous, checklist-driven pull-request review agent powered by NeuroLink",
   "keywords": [
     "pr",
