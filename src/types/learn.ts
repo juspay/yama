@@ -67,6 +67,13 @@ export type GitWriteResult = {
   pushed: boolean;
   /** Why nothing happened, when nothing did. */
   skipped?: string;
+  /**
+   * True when there was NOTHING TO WRITE — the knowledge this run distilled is
+   * already committed. Distinct from `skipped`, which means there WAS something and
+   * the write was refused or failed: a run that learned nothing new is a successful
+   * run, and reporting it as a failure trains people to ignore a red learn job.
+   */
+  nothingToCommit?: boolean;
 };
 
 /** What one `yama learn` run came to (TASKS:Y7.2). */

@@ -581,6 +581,65 @@ if (!isBuilt()) {
     });
   });
 
+  await test("learning nothing new is an outcome, not a failure", async () => {
+    const mod = await import(DIST_ENTRY);
+    await withTempDir("learn-noop", async (dir) => {
+      await learnWorkspace(dir);
+      await seedStore(dir);
+      // Production's case (juspay/yama #91, #92, #93): memory already exists from
+      // an earlier merge, and this pull request's discussion holds no durable
+      // fact. Nothing is rendered but the index, which rebuilds to exactly what
+      // is already committed — so there is nothing TO commit, which is an
+      // OUTCOME, not the refusal a bare `skipped` reported it as.
+      const seeded = await learnEngine();
+      const first = await mod.runLearn(
+        { root: dir, pr: 7, dryRun: false },
+        seeded.engine,
+      );
+      assert(
+        first.write.commit !== undefined,
+        "the earlier merge wrote memory",
+      );
+
+      // Someone else's commit, so this run is not sitting on learn's own.
+      await gitIn(dir)([
+        "commit",
+        "--allow-empty",
+        "-q",
+        "-m",
+        "chore: unrelated work",
+      ]);
+
+      const { engine } = await learnEngine({
+        triage: {
+          resolutions: [],
+          facts: [],
+          summary: "nothing in this discussion was worth keeping",
+        },
+      });
+      const result = await mod.runLearn(
+        { root: dir, pr: 7, dryRun: false },
+        engine,
+      );
+      assertEqual(result.write.commit, undefined, "nothing was committed");
+      assertEqual(
+        result.write.nothingToCommit,
+        true,
+        "and the result says there was nothing TO commit",
+      );
+      assertIncludes(
+        String(result.write.skipped),
+        "identical",
+        "the reason still reads plainly",
+      );
+      assertIncludes(
+        mod.renderLearnResult(result),
+        "NOTHING NEW",
+        "and it prints as an outcome, not as a refusal",
+      );
+    });
+  });
+
   await test("a detached HEAD names the knob that fixes it", async () => {
     const mod = await import(DIST_ENTRY);
     await withTempDir("learn-detached", async (dir) => {

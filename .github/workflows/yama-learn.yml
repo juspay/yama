@@ -11,18 +11,38 @@ name: Yama learn
 # cannot re-trigger this event at all. The paths-ignore that matters lives on CI's
 # push trigger, where a learn commit DOES land.
 on:
-  pull_request:
-    types: [closed]
-  # Recovery lever: a learn run that failed for an environmental reason (a missing
-  # runner dependency, an outage) can be re-run for the same pull request without
-  # waiting for another merge. The merged-and-not-bot guard the closed trigger
-  # enforces is re-checked by the job's own verify step below, so a dispatch cannot
-  # aim the write job at an unmerged or bot-authored pull request; and learn refuses
-  # to run off its own commit, so a re-run cannot feed itself back in.
+  # Chained AFTER the release workflow on the default branch — the same place in
+  # the pipeline semantic-release occupies, one stage later.
+  #
+  # Why not `pull_request: closed` (what this used to be): that fires the INSTANT
+  # the merge lands, at the same moment the release workflow starts. Learn spends
+  # minutes distilling the discussion, then pushes into a branch the release bot
+  # has meanwhile moved — the push is rejected ("fetch first"), and learn refuses
+  # to force. Chaining removes the race by construction: the release run has
+  # finished (its version commit pushed and all) before learn is even queued.
+  #
+  # Why not a plain `push`: that is the same race in different clothes.
+  # `workflow_run` is the only trigger that starts after another workflow's push
+  # has landed.
+  #
+  # The pull request is resolved from the pushed commit through the API, so this
+  # works under squash, merge-commit and rebase merges alike. A push with no
+  # associated pull request (a direct commit) has no discussion to learn from and
+  # exits cleanly. GitHub skips runs for `[skip ci]` commits, so neither the
+  # release bot's version commit nor learn's own memory commit re-enters here.
+  workflow_run:
+    workflows: ["Release and Publish"]
+    types: [completed]
+
+  # Recovery lever: a learn that failed for an environmental reason can be re-run
+  # for the same pull request. The merged-and-human guard is re-checked below from
+  # GitHub's own record, so a dispatch cannot aim the write job at an unmerged or
+  # bot-authored pull request; learn refuses to run off its own commit, so a re-run
+  # cannot feed itself back in.
   workflow_dispatch:
     inputs:
       pr:
-        description: "Pull request number to learn from (must be merged)"
+        description: "Merged pull request number to learn from"
         required: true
         type: string
 
@@ -44,42 +64,50 @@ jobs:
     # rejected, and learning from it would record conventions nobody adopted.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.merged == true &&
-       github.event.pull_request.user.login != 'github-actions[bot]')
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Verify the dispatched pull request is merged and human-authored
-        # The closed trigger's `if:` cannot see a dispatched run, so the SAME guard is
-        # enforced here from the platform's own record before anything else happens —
-        # learn writes the knowledge base every later review reads, and an unmerged or
-        # bot-authored pull request must not get to write it from either trigger.
-        if: github.event_name == 'workflow_dispatch'
+      - name: Resolve the pull request this run learns from
+        id: target
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ inputs.pr }}
+          DISPATCH_PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          merged=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.merged')
-          author=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.user.login')
-          if [ "$merged" != "true" ]; then
-            echo "::error::pull request #${PR_NUMBER} is not merged — learn only learns from merged work"
-            exit 1
+          if [ -n "${DISPATCH_PR:-}" ]; then
+            PR="$DISPATCH_PR"
+          else
+            # Which pull request produced this commit. Works for squash, merge and
+            # rebase merges alike: GitHub associates the resulting commit with it.
+            PR=$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/pulls" \
+                   --jq '[.[] | select(.merged_at != null)] | sort_by(.merged_at) | reverse | .[0].number // empty')
           fi
-          if [ "$author" = "github-actions[bot]" ]; then
-            echo "::error::pull request #${PR_NUMBER} is bot-authored — refusing the self-feed loop"
-            exit 1
+          if [ -z "${PR:-}" ]; then
+            echo "::notice::No merged pull request behind ${HEAD_SHA} — a direct push has no discussion to learn from."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          echo "pull request #${PR_NUMBER} is merged and authored by ${author} — proceeding"
+          # The guard the closed trigger used to carry, re-checked from the
+          # platform's own record so every trigger path is held to it.
+          merged=$(gh api "repos/${REPOSITORY}/pulls/${PR}" --jq '.merged')
+          author=$(gh api "repos/${REPOSITORY}/pulls/${PR}" --jq '.user.login')
+          [ "$merged" = "true" ] || { echo "::error::PR #${PR} is not merged"; exit 1; }
+          [ "$author" != "github-actions[bot]" ] || { echo "::error::PR #${PR} is bot-authored — refusing the self-feed loop"; exit 1; }
+          echo "Learning from PR #${PR} (merged, authored by ${author})."
+          echo "pr=${PR}" >> "$GITHUB_OUTPUT"
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
+        if: steps.target.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Named, not detached: learn refuses to commit on a detached HEAD, and a
           # pull_request checkout is detached by default.
-          ref: main
+          ref: ${{ github.event.repository.default_branch }}
           # Correction linking walks history to connect a fix back to what it
           # fixed, which is the signal that makes the impact ledger useful.
           fetch-depth: 0
@@ -91,22 +119,27 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup PNPM
+        if: steps.target.outputs.run == 'true'
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         # Version comes from `packageManager` in package.json.
 
       - name: Setup Node.js
+        if: steps.target.outputs.run == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "pnpm"
 
       - name: Install
+        if: steps.target.outputs.run == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build
+        if: steps.target.outputs.run == 'true'
         run: pnpm run build
 
       - name: Restore the pull request's run store
+        if: steps.target.outputs.run == 'true'
         # What the reviews on this pull request established. Learning promotes
         # from it into the repository knowledge base — the impact ledger entry
         # comes from here — and then discards the rest.
@@ -120,7 +153,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          PR_NUMBER: ${{ steps.target.outputs.pr }}
         run: |
           set -euo pipefail
           name="yama-pr-${PR_NUMBER}"
@@ -137,6 +170,7 @@ jobs:
           echo "Restored the review store from artifact $id."
 
       - name: Set the commit identity
+        if: steps.target.outputs.run == 'true'
         # Yama shells out to plain `git commit`; it never passes an author of its
         # own, on purpose — the identity a repository's agent commits under is the
         # repository's decision, not the tool's. A runner has no git identity
@@ -150,15 +184,18 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Setup uv (code-review-graph server)
+        if: steps.target.outputs.run == 'true'
         # .yama/mcp.yaml declares the graph server; doctor proves every declared
         # server and exits 2 on one it cannot spawn. The review job carries these
         # same two steps — learn needs them for the same reason.
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Warm the code-review-graph package
+        if: steps.target.outputs.run == 'true'
         run: uvx --from code-review-graph==2.3.7 code-review-graph --help >/dev/null 2>&1 || echo "warm failed — doctor will say what that means"
 
       - name: Verify the write path
+        if: steps.target.outputs.run == 'true'
         # Proves the config, the connections and the credentials BEFORE computing
         # anything. Discovering at push time that the bot cannot write loses the
         # feedback from this pull request permanently.
@@ -176,10 +213,10 @@ jobs:
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
           LANGFUSE_ENABLED: "true"
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          PR_NUMBER: ${{ steps.target.outputs.pr }}
           # On dispatch the event has no PR payload; the base comes from the PR record
           # itself, so a PR merged into a non-default base still learns against it.
-          BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          BASE_REF: ""
         run: |
           if [ -z "$BASE_REF" ]; then
             BASE_REF=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.base.ref')
@@ -189,6 +226,7 @@ jobs:
             --base "origin/$BASE_REF"
 
       - name: Learn
+        if: steps.target.outputs.run == 'true'
         # A refused or failed write exits non-zero, so a silent no-op cannot pass
         # for a successful learn.
         env:
@@ -203,7 +241,7 @@ jobs:
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
           LANGFUSE_ENABLED: "true"
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          PR_NUMBER: ${{ steps.target.outputs.pr }}
         run: |
           node dist/cli/index.js learn \
             --pr "$PR_NUMBER"

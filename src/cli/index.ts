@@ -266,8 +266,12 @@ await yargs(hideBin(process.argv))
           say("", `learn result written to ${file}`);
         }
         // A refused or failed write is not a successful learn: CI has to see it.
+        // A run that found nothing new to write IS successful — the knowledge is
+        // already committed, and reddening that job teaches people to ignore it.
         process.exitCode =
-          result.write.skipped !== undefined && !argv.dryRun
+          result.write.skipped !== undefined &&
+          result.write.nothingToCommit !== true &&
+          !argv.dryRun
             ? EXIT_CODES.runError
             : EXIT_CODES.ok;
       } catch (error) {
