@@ -1,3 +1,9 @@
+## [5.0.2](https://github.com/juspay/yama/compare/v5.0.1...v5.0.2) (2026-08-30)
+
+### Bug Fixes
+
+* **learn:** nothing new to learn is a success; chain learn after the release run ([7d3de03](https://github.com/juspay/yama/commit/7d3de03814373d17c0522c6af79791d8c539533b))
+
 ## [5.0.1](https://github.com/juspay/yama/compare/v5.0.0...v5.0.1) (2026-08-30)
 
 ### Bug Fixes
