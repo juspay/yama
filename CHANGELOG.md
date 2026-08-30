@@ -1,3 +1,15 @@
+## [5.0.0](https://github.com/juspay/yama/compare/v4.0.1...v5.0.0) (2026-08-30)
+
+### ⚠ BREAKING CHANGES
+
+* **release:** re-declares the v5 rewrite's major. The angular preset ignored the
+feat! shorthand, so v5 was analyzed as no release and published as 4.0.1; with the
+conventionalcommits preset this commit releases it as 5.0.0.
+
+### Bug Fixes
+
+* **release:** conventionalcommits preset; learn pushes with the workflow token ([d33330a](https://github.com/juspay/yama/commit/d33330a847959aea3bc4f59b2524848ef2de08fe))
+
 ## [4.0.1](https://github.com/juspay/yama/compare/v4.0.0...v4.0.1) (2026-08-30)
 
 
