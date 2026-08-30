@@ -191,6 +191,8 @@ export type DeliveryStageResult = {
   output?: StageOutput<Stage, DeliveryReport>;
   plan: DeliveryPlan;
   confirmation: PostingConfirmation;
+  /** Findings whose inline post never anchored, delivered by the posted summary instead. */
+  summaryOnly?: string[];
   summaryPosted: boolean;
   verdictSet: boolean;
   described: boolean;

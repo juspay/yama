@@ -211,7 +211,10 @@ Jenkins pipeline. Both do the three things a review needs from CI:
 
 1. check out deep enough for the merge base (`fetch-depth: 0`);
 2. restore and save `.yama/artifacts/` between runs, so a re-review remembers;
-3. let the exit code decide the job — `1` is a BLOCK verdict, not a crash.
+3. decide how a BLOCK verdict gates: let the exit code fail the job (`1` is a BLOCK
+   verdict, not a crash) — or, as this repository does, map `verdict.set` so BLOCK is
+   delivered as a request-changes review state and the job stays green for everything
+   but a config error (`2`) or a crash (`3`).
 
 This repository also publishes a composite GitHub Action ([`action.yml`](./action.yml)) if you
 would rather not write the steps yourself.

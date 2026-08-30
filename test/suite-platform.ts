@@ -1320,7 +1320,12 @@ if (!isBuilt()) {
   /** A session that answers Delivery with a fixed report and a fixed set of tool results. */
   const deliverySession = (options: {
     report: unknown;
-    toolResults: { name: string; result: unknown; isError?: boolean }[];
+    toolResults: {
+      name: string;
+      params?: unknown;
+      result: unknown;
+      isError?: boolean;
+    }[];
   }) => {
     const seen: { prompt: string; tools?: string[] }[] = [];
     return {
@@ -1343,7 +1348,7 @@ if (!isBuilt()) {
         toolResults: () =>
           options.toolResults.map((entry) => ({
             name: entry.name,
-            params: {},
+            params: entry.params ?? {},
             result: entry.result,
             isError: entry.isError === true,
             truncated: false,
@@ -1379,7 +1384,11 @@ if (!isBuilt()) {
             name: "create_summary",
             result: { id: 102, body: "summary <!-- yama:run:run-1 -->" },
           },
-          { name: "set_state", result: { state: "CHANGES_REQUESTED" } },
+          {
+            name: "set_state",
+            params: { event: "REQUEST_CHANGES" },
+            result: { state: "CHANGES_REQUESTED" },
+          },
         ],
       });
       const result = await mod.runDelivery({

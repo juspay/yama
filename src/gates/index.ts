@@ -19,10 +19,12 @@ export {
   unresolvedPriorFindings,
 } from "./recurrence.js";
 export {
+  confirmAcceptedWrites,
   confirmCreated,
   confirmFromComments,
   confirmPosted,
   confirmToolRan,
+  mergeConfirmations,
   postingFailure,
 } from "./posting.js";
 export { decideVerdict, rankFindings } from "./verdict.js";

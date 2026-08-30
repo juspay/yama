@@ -115,6 +115,69 @@ export const confirmFromComments = (input: {
 };
 
 /**
+ * The race-free half of posted-=-confirmed: what the platform ACCEPTED for writing.
+ * Some forges answer a write with a bare success string and serve the read-back from an
+ * eventually-consistent view that lags past any polite waiting window — measured live
+ * losing at 15 and again at 45 seconds. But the captured CALL carries the body VERBATIM
+ * in its params, marker included, and a clean result is the platform accepting exactly
+ * that body. An accepted write cannot lag. Callers gate this on the lifecycle submit
+ * where one exists — an accepted write into a review nobody submits is not delivery.
+ */
+export const confirmAcceptedWrites = (input: {
+  intended: readonly { id: string }[];
+  results: readonly EngineToolResult[];
+  tool: string | undefined;
+  kind?: string;
+}): PostingConfirmation => {
+  const wanted = new Set(input.intended.map((entry) => entry.id));
+  const posted: PostedComment[] = [];
+  const confirmed = new Set<string>();
+  for (const result of input.results) {
+    if (
+      input.tool === undefined ||
+      result.name !== input.tool ||
+      result.isError
+    ) {
+      continue;
+    }
+    const body = (result.params as { body?: unknown } | undefined)?.body;
+    if (typeof body !== "string") {
+      continue;
+    }
+    for (const id of scanMarkers(body, input.kind)) {
+      if (wanted.has(id) && !confirmed.has(id)) {
+        confirmed.add(id);
+        posted.push({ findingId: id, commentId: "(accepted write)" });
+      }
+    }
+  }
+  const unposted = [...wanted].filter((id) => !confirmed.has(id));
+  return { posted, unposted, unmatched: [], ok: unposted.length === 0 };
+};
+
+/** Union of two confirmations over the same intended set: posted once is posted. */
+export const mergeConfirmations = (
+  a: PostingConfirmation,
+  b: PostingConfirmation,
+): PostingConfirmation => {
+  const seen = new Set(a.posted.map((entry) => entry.findingId));
+  const posted = [
+    ...a.posted,
+    ...b.posted.filter((entry) => !seen.has(entry.findingId)),
+  ];
+  const ids = new Set(posted.map((entry) => entry.findingId));
+  const unposted = [...new Set([...a.unposted, ...b.unposted])].filter(
+    (id) => !ids.has(id),
+  );
+  return {
+    posted,
+    unposted,
+    unmatched: a.unmatched,
+    ok: unposted.length === 0,
+  };
+};
+
+/**
  * Whether a named tool ran and did not report an error.
  *
  * Setting a review state or rewriting a description produces no comment and therefore no

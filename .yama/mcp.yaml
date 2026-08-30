@@ -135,13 +135,20 @@ capabilities:
       repo: yama
       issue_number: "${pr}"
 
-  # Off, and deliberately: `delivery.verdict` and `delivery.describe` are false in
-  # yama.yaml — this repository does not let its own agent gate a merge or rewrite an
-  # author's description. Map these when it does.
-  #
-  # verdict.set:
-  #   tool: github.pull_request_review_write
-  #   args: { method: create_and_submit, owner: juspay, repo: yama, pullNumber: "${pr}" }
+  # The verdict lands as GitHub's own review state: the agent supplies the `event`
+  # this platform spells the decision with (BLOCK → REQUEST_CHANGES, COMMENT → COMMENT,
+  # APPROVE → APPROVE) — an argument that varies by verdict cannot live in this static
+  # map. The delivery gate confirms the tool ran clean, not the agent's account of it.
+  verdict.set:
+    tool: github.pull_request_review_write
+    args:
+      method: create_and_submit
+      owner: juspay
+      repo: yama
+      pullNumber: "${pr}"
+
+  # Still off, and deliberately: this repository's descriptions are written by the
+  # single-commit policy's own template. Map it when that changes.
   # pr.describe:
   #   tool: github.update_pull_request
   #   args: { owner: juspay, repo: yama, pullNumber: "${pr}" }

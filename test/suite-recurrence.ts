@@ -526,7 +526,7 @@ if (!isBuilt()) {
     );
   });
 
-  await test("collate carries the open set into the ranked list and the ledger", async () => {
+  await test("collate carries the open set into the ranked list", async () => {
     const mod = await import(DIST_ENTRY);
     await withTempDir("carried", async (dir) => {
       const paths = mod.storePathsForDir(dir);
@@ -604,12 +604,9 @@ if (!isBuilt()) {
         "the agent was told they are already counted",
       );
 
-      const ledger = await mod.readLedger(paths);
-      assertEqual(
-        ledger.findings.map((finding: Finding) => finding.id).join(","),
-        "auth-token-logged,duplicate-helper",
-        "and the ledger is the full open set the next run inherits",
-      );
+      // The ledger is written by the SHELL after grounding, from the grounded list —
+      // a collate-time write recorded findings the gate later dropped, and a following
+      // run carried them back in as prior-open (found live on #91).
     });
   });
 

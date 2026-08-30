@@ -128,7 +128,35 @@ await yargs(hideBin(process.argv))
           const file = await writeJson(resolve(argv.json), result);
           say("", `findings and run report written to ${file}`);
         }
-        process.exitCode = exitCodeFor(result.verdict);
+        // A verdict that failed to DELIVER is a failed run, not a delivered verdict:
+        // exit 1 is a pure function of the decision, and a workflow that reads 1 as
+        // "BLOCK was posted as a review" needs that to be TRUE. Skipped delivery (a
+        // dry run, no actions) records no failure and is not one.
+        const deliveryFailure = result.report.delivery?.failure;
+        if (deliveryFailure !== undefined && deliveryFailure.length > 0) {
+          complain(
+            "yama review: the verdict was decided but delivery did not land as intended:",
+            deliveryFailure,
+            `The run store keeps what did happen: ${storeDir}`,
+          );
+          process.exitCode = EXIT_CODES.runError;
+        } else if (
+          !argv.dryRun &&
+          result.verdict.decision === "block" &&
+          result.report.delivery?.verdictProofRequired === true &&
+          result.report.delivery?.verdictSet !== true
+        ) {
+          // The exit-code contract a CI gates on: 1 means a DELIVERED block. A repo
+          // that maps verdict.set is promising the block arrives as the review state;
+          // exiting 1 without that proof would let a workflow green an invisible block.
+          complain(
+            "yama review: verdict BLOCK was decided but never proven as the pull request's review state",
+            `The run store keeps what did happen: ${storeDir}`,
+          );
+          process.exitCode = EXIT_CODES.runError;
+        } else {
+          process.exitCode = exitCodeFor(result.verdict);
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         complain(

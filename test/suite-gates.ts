@@ -833,4 +833,43 @@ if (!isBuilt()) {
       "a bare success string is not",
     );
   });
+
+  await test("an accepted write confirms race-free: the sent body carries the marker", async () => {
+    const call = (over: Record<string, unknown> = {}) => ({
+      name: "create_inline",
+      params: { body: "text\n\n<!-- yama:finding:f1 -->" },
+      result: { content: [{ type: "text", text: "added" }] },
+      isError: false,
+      truncated: false,
+      ...over,
+    });
+    const ok = mod.confirmAcceptedWrites({
+      intended: [{ id: "f1" }, { id: "f2" }],
+      results: [call()],
+      tool: "create_inline",
+    });
+    assertEqual(
+      ok.posted[0]?.findingId,
+      "f1",
+      "the accepted body's marker confirms it",
+    );
+    assertEqual(
+      ok.unposted.join(","),
+      "f2",
+      "what was never accepted stays unposted",
+    );
+    const errored = mod.confirmAcceptedWrites({
+      intended: [{ id: "f1" }],
+      results: [call({ isError: true })],
+      tool: "create_inline",
+    });
+    assertEqual(errored.posted.length, 0, "an errored call accepts nothing");
+    const merged = mod.mergeConfirmations(ok, {
+      posted: [{ findingId: "f2", commentId: "9" }],
+      unposted: ["f1"],
+      unmatched: [],
+      ok: false,
+    });
+    assertEqual(merged.ok, true, "posted once anywhere is posted");
+  });
 }

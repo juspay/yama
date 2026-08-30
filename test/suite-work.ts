@@ -506,7 +506,7 @@ if (!isBuilt()) {
     );
   });
 
-  await test("duplicates merge, the list is ranked and the ledger is written", async () => {
+  await test("duplicates merge and the list is ranked", async () => {
     const mod = await import(DIST_ENTRY);
     await withTempDir("collate", async (dir) => {
       await gitWorkspace(dir);
@@ -562,9 +562,8 @@ if (!isBuilt()) {
         "the policy blocks on CRITICAL",
       );
       assertEqual(mod.exitCodeFor(result.verdict), 1, "block is exit 1");
-
-      const ledger = await mod.readLedger(paths);
-      assertEqual(ledger.findings.length, 2, "the ledger holds the final list");
+      // The ledger is written by the SHELL after grounding, not by collate — the
+      // end-to-end runReview case owns that assertion now.
     });
   });
 

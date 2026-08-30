@@ -69,11 +69,13 @@ delivery:
   inlineComments: true
   # One comment per run: what was reviewed, what was found, and the decision.
   summaryComment: true
-  # Setting GitHub's own review state is a merge gate, and this repository does not gate
-  # merges on its own agent yet. The verdict is still computed and reported — see the
-  # `verdict:` block below and the run's exit code; it just does not touch the pull
-  # request's review state.
-  verdict: false
+  # The verdict is DELIVERED as the pull request's review state — BLOCK arrives as a
+  # request-changes review, visible and dismissible where reviewers look, gateable by
+  # branch protection. The CI job stays green on a BLOCK (the review workflow treats
+  # exit 1 as a delivered outcome); a red check is reserved for a run that BROKE
+  # (config error, crash). The exit-code contract itself is unchanged for CIs that
+  # prefer to gate on it.
+  verdict: true
   # Description enhancement. Yama writes only inside its own fenced block and never touches
   # a word the author wrote — but the pull request description here is written by the
   # single-commit policy's own template, so leave it alone.
