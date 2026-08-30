@@ -173,6 +173,7 @@ runs:
         GITHUB_REPO: ${{ github.event.repository.name }}
         YAMA_INPUT_PR: ${{ inputs.pr || github.event.pull_request.number }}
         YAMA_INPUT_BRANCH: ${{ inputs.branch }}
+        YAMA_INPUT_BASE: ${{ inputs.base }}
         YAMA_INPUT_VERSION: ${{ inputs.yama-version }}
       run: |
         set -euo pipefail
@@ -183,6 +184,17 @@ runs:
         DOCTOR_ARGS=(doctor)
         if [ -n "${YAMA_INPUT_PR:-}" ]; then DOCTOR_ARGS+=(--pr "$YAMA_INPUT_PR"); fi
         if [ -n "${YAMA_INPUT_BRANCH:-}" ]; then DOCTOR_ARGS+=(--branch "$YAMA_INPUT_BRANCH"); fi
+        # The SAME base fallback as the review step below. Without it, doctor
+        # resolved the base from the remote's default branch — and on a
+        # repository whose mainline is `release` with no main/master, nothing
+        # resolved and every preflight died on "no base ref resolves" (found
+        # live by the first external consumer, whose default branch is not the
+        # branch pull requests target).
+        if [ -n "${YAMA_INPUT_BASE:-}" ]; then
+          DOCTOR_ARGS+=(--base "$YAMA_INPUT_BASE")
+        elif [ -n "${GITHUB_BASE_REF:-}" ]; then
+          DOCTOR_ARGS+=(--base "origin/${GITHUB_BASE_REF}")
+        fi
         npx --yes "@juspay/yama@$YAMA_INPUT_VERSION" "${DOCTOR_ARGS[@]}"
 
     - name: Review
