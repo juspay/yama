@@ -1,3 +1,9 @@
+## [5.0.3](https://github.com/juspay/yama/compare/v5.0.2...v5.0.3) (2026-08-31)
+
+### Bug Fixes
+
+* **platform:** read comments out of Bitbucket's pull-request envelope ([daa9c1d](https://github.com/juspay/yama/commit/daa9c1d97d9dcb3c6abbb26b5c0a82988c3e8334))
+
 ## [5.0.2](https://github.com/juspay/yama/compare/v5.0.1...v5.0.2) (2026-08-30)
 
 ### Bug Fixes
