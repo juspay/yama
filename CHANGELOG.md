@@ -1,3 +1,9 @@
+## [5.1.0](https://github.com/juspay/yama/compare/v5.0.4...v5.1.0) (2026-08-31)
+
+### Features
+
+* **review:** config-driven path exclusion, and delivery that reads the platform's own schema ([1abb226](https://github.com/juspay/yama/commit/1abb226b177d69914db7a738a4f20c82a0fe5276))
+
 ## [5.0.4](https://github.com/juspay/yama/compare/v5.0.3...v5.0.4) (2026-08-31)
 
 ### Bug Fixes
