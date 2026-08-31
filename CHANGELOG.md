@@ -1,3 +1,9 @@
+## [5.0.4](https://github.com/juspay/yama/compare/v5.0.3...v5.0.4) (2026-08-31)
+
+### Bug Fixes
+
+* **session:** retry a transient provider failure, the way v3 did ([9844648](https://github.com/juspay/yama/commit/9844648eda85977a1ef74108a4822a99d3b2585b))
+
 ## [5.0.3](https://github.com/juspay/yama/compare/v5.0.2...v5.0.3) (2026-08-31)
 
 ### Bug Fixes
