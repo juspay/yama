@@ -185,3 +185,4 @@ export {
   severityAtLeast,
   severityRank,
 } from "./util/severity.js";
+export { isTransientProviderError } from "./util/transient.js";
