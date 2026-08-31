@@ -199,6 +199,17 @@ export const renderRunSummary = (
       : ["  (none ran)"]),
   ];
 
+  if (report.excludedFiles !== undefined && report.excludedFiles.length > 0) {
+    // Said out loud: a reader must be able to see what the review did not look at.
+    lines.push(
+      "",
+      "not reviewed (review.exclude)",
+      ...report.excludedFiles.slice(0, 10).map((path) => `  ${path}`),
+      ...(report.excludedFiles.length > 10
+        ? [`  … and ${report.excludedFiles.length - 10} more`]
+        : []),
+    );
+  }
   if (report.gates !== undefined) {
     lines.push("", "gates", ...gateLines(report.gates));
   }

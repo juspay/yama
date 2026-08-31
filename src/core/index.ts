@@ -326,7 +326,12 @@ export const runReview = async (
       brief: brief.data,
       recurrence,
       extraTools: reviewTools,
+      exclude: config.yama.review.exclude,
     });
+    if (insertion.excluded !== undefined && insertion.excluded.length > 0) {
+      // Visible, not silent: what a review did not look at belongs in its own report.
+      report.excludedFiles = insertion.excluded;
+    }
     report.recurrence = recurrenceStats({
       recurrence,
       prior: insertion.prior,

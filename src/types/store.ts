@@ -147,6 +147,8 @@ export type RunReport = {
   /** Head commit this run reviewed. A later run compares against it (TASKS:Y7.1). */
   headSha?: string;
   stages: RunStageMetric[];
+  /** Paths `review.exclude` kept out of this run's diff. Present only when some were. */
+  excludedFiles?: string[];
   /** Checklist as it stood when the run ended — a closed item is a documented gap. */
   tasks: TaskItem[];
   /** Capabilities that were off, carried through so a reader knows what was not looked at. */

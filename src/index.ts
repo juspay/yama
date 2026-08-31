@@ -39,6 +39,7 @@ export {
   WorkOutcomeSchema,
   acquireIncrementalDiff,
   acquireTargetDiff,
+  excludeFromDiff,
   buildCollatePrompt,
   buildDeliveryPlan,
   buildDeliveryPrompt,
@@ -177,6 +178,7 @@ export {
   unwrapRecords,
   usesPlatform,
 } from "./platform/index.js";
+export { matchesAnyGlob, matchesGlob } from "./util/glob.js";
 export { resolveWithinRoot } from "./util/fs.js";
 export { jsonSchemaOf, readParams, refuse, sessionOf } from "./util/tool.js";
 export {

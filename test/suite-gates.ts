@@ -740,6 +740,230 @@ if (!isBuilt()) {
     });
   });
 
+  await test("review.exclude keeps generated files out of the diff, and says which", async () => {
+    // Measured on a real pull request: 940 of 953 changed lines were the lockfile, and
+    // the rulebook could only ASK the model to skip it. This drops it before any stage
+    // sees it — and reports what was dropped, because a review that quietly narrows
+    // what it looked at is the failure this project exists to prevent.
+    const patch = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml",
+      "@@ -1 +1 @@",
+      "-lock old",
+      "+lock new",
+      "",
+    ].join("\n");
+    const diff = {
+      files: [
+        { path: "src/a.ts", status: "modified", additions: 1, deletions: 1 },
+        {
+          path: "pnpm-lock.yaml",
+          status: "modified",
+          additions: 400,
+          deletions: 380,
+        },
+        { path: "docs/logo.svg", status: "added", additions: 12, deletions: 0 },
+      ],
+      additions: 413,
+      deletions: 381,
+      patch,
+      empty: false,
+    };
+    const out = mod.excludeFromDiff(diff, ["pnpm-lock.yaml", "*.svg"]);
+    assertEqual(
+      out.diff.files.map((f: { path: string }) => f.path).join(","),
+      "src/a.ts",
+      "only the reviewable file survives",
+    );
+    assertEqual(
+      out.excluded.join(","),
+      "pnpm-lock.yaml,docs/logo.svg",
+      "and what was dropped is named — a basename pattern catches a nested path",
+    );
+    assertEqual(
+      out.diff.additions,
+      1,
+      "the counts are recomputed, not inherited",
+    );
+    assert(
+      !out.diff.patch.includes("lock new"),
+      "the banked patch loses the excluded hunks too — otherwise a read-back returns them",
+    );
+    assert(out.diff.patch.includes("+new"), "and keeps the ones under review");
+
+    const untouched = mod.excludeFromDiff(diff, []);
+    assertEqual(untouched.excluded.length, 0, "an empty list excludes nothing");
+    assertEqual(untouched.diff, diff, "and returns the diff it was given");
+
+    // The matcher itself, on the shapes a repository actually writes.
+    assertEqual(
+      mod.matchesGlob("dist/x/y.js", "dist/**"),
+      true,
+      "directory tree",
+    );
+    assertEqual(
+      mod.matchesGlob("src/dist.ts", "dist/**"),
+      false,
+      "not a prefix match",
+    );
+    assertEqual(
+      mod.matchesGlob("a/b/c.min.js", "**/*.min.js"),
+      true,
+      "nested suffix",
+    );
+    assertEqual(
+      mod.matchesGlob("src/deep/a.ts", "src/*.ts"),
+      false,
+      "* stays in one segment",
+    );
+
+    // Header shapes git really writes. The patch and the file list run one predicate,
+    // so a header this cannot read is a file whose hunks would survive its exclusion.
+    const headers = [
+      'diff --git "a/weird name.svg" "b/weird name.svg"',
+      "@@ -1 +1 @@",
+      "-quoted old",
+      "+quoted new",
+      "diff --git a/src/old.ts b/src/renamed.svg",
+      "@@ -1 +1 @@",
+      "-renamed old",
+      "+renamed new",
+      "diff --git a/has b/dir.svg b/has b/dir.svg",
+      "@@ -1 +1 @@",
+      "-tricky old",
+      "+tricky new",
+      "diff --git a/src/keep.ts b/src/keep.ts",
+      "@@ -1 +1 @@",
+      "-keep old",
+      "+keep new",
+      "",
+    ].join("\n");
+    const parsed = mod.excludeFromDiff(
+      {
+        files: [
+          {
+            path: "weird name.svg",
+            status: "modified",
+            additions: 1,
+            deletions: 1,
+          },
+          {
+            path: "src/renamed.svg",
+            previousPath: "src/old.ts",
+            status: "renamed",
+            additions: 1,
+            deletions: 1,
+          },
+          {
+            path: "has b/dir.svg",
+            status: "modified",
+            additions: 1,
+            deletions: 1,
+          },
+          {
+            path: "src/keep.ts",
+            status: "modified",
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+        additions: 4,
+        deletions: 4,
+        patch: headers,
+        empty: false,
+      },
+      ["*.svg"],
+    );
+    assert(
+      !parsed.diff.patch.includes("quoted new"),
+      "a quoted header is read, so its hunks go with it",
+    );
+    assert(
+      !parsed.diff.patch.includes("renamed new"),
+      "a rename is read from the side the diff produces",
+    );
+    assert(
+      !parsed.diff.patch.includes("tricky new"),
+      "and a path that itself contains ' b/' is read from the identical halves",
+    );
+    assert(
+      parsed.diff.patch.includes("keep new"),
+      "while the reviewable file keeps every hunk",
+    );
+
+    // A quoted header escapes every byte it had to; `--name-status -z` does not. Both
+    // predicates have to see the SAME string, or the file list and the patch disagree
+    // about what was excluded — which is how a named exclusion kept its hunks.
+    const escaped = [
+      'diff --git "a/caf\\303\\251.svg" "b/caf\\303\\251.svg"',
+      "@@ -1 +1 @@",
+      "-accent old",
+      "+accent new",
+      "diff --git a/plain.svg b/plain.svg",
+      "@@ -1 +1 @@",
+      "-plain old",
+      "+plain new",
+      "",
+    ].join("\n");
+    const byName = mod.excludeFromDiff(
+      {
+        files: [
+          {
+            path: "caf\u00e9.svg",
+            status: "modified",
+            additions: 1,
+            deletions: 1,
+          },
+          {
+            path: "plain.svg",
+            status: "modified",
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+        additions: 2,
+        deletions: 2,
+        patch: escaped,
+        empty: false,
+      },
+      ["caf\u00e9.svg"],
+    );
+    assertEqual(
+      byName.excluded.join(","),
+      "caf\u00e9.svg",
+      "the named file leaves the file list",
+    );
+    assert(
+      !byName.diff.patch.includes("accent new"),
+      "and its hunks leave the patch too — the octal escapes are undone, not compared raw",
+    );
+    assert(
+      byName.diff.patch.includes("plain new"),
+      "while the file nobody excluded keeps its hunks",
+    );
+
+    // The conventional ignore-file spelling. A leading double-star spans zero
+    // directories, so it has to catch a file sitting at the repository root.
+    assertEqual(
+      mod.matchesGlob("c.svg", "**/*.svg"),
+      true,
+      "zero directories is a match",
+    );
+    assertEqual(
+      mod.matchesGlob("a/b/c.svg", "**/*.svg"),
+      true,
+      "and so is any depth",
+    );
+    assertEqual(
+      mod.matchesGlob("a/b.ts", "a/**/b.ts"),
+      true,
+      "a double star between segments spans zero of them as well",
+    );
+  });
+
   await test("a finding citing a file outside the change is dropped and named", async () => {
     const diff = {
       files: [
@@ -872,6 +1096,42 @@ if (!isBuilt()) {
       "nor is a model the key may not use",
     );
 
+    // The override path: a status the provider set decides, and the message does not
+    // get to overrule it. Each of these was retried three times before the fix.
+    assertEqual(
+      mod.isTransientProviderError({
+        status: 401,
+        message: "invalid x-api-key; upstream gateway timeout",
+      }),
+      false,
+      "a 401 whose body mentions a timeout still fails fast",
+    );
+    assertEqual(
+      mod.isTransientProviderError({
+        status: 400,
+        message: "invalid request: expected 500 tokens",
+      }),
+      false,
+      "and a 400 quoting a 5xx-looking number is not a 5xx",
+    );
+    assertEqual(
+      mod.isTransientProviderError({ status: 429, message: "slow down" }),
+      true,
+      "while a status that IS transient still retries",
+    );
+    // No usable status at all: the text is the only signal, which is the shape the
+    // gateway failure that started this arrives in.
+    assertEqual(
+      mod.isTransientProviderError({ code: "ECONNRESET" }),
+      true,
+      "a Node error code is read from the text, not mistaken for an HTTP status",
+    );
+    assertEqual(
+      mod.isTransientProviderError(undefined),
+      false,
+      "and nothing at all is not a reason to retry",
+    );
+
     // And the runner acts on the classification: a transient throw is re-attempted,
     // and the checkpoint succeeds without the stage ever seeing the failure.
     await withTempDir("gate-retry", async (dir) => {
@@ -939,5 +1199,75 @@ if (!isBuilt()) {
       ok: false,
     });
     assertEqual(merged.ok, true, "posted once anywhere is posted");
+  });
+
+  await test("a marker confirms whatever argument the platform carries it in", () => {
+    // Bitbucket takes the text as `comment_text`, GitHub as `body`, and one platform's
+    // spelling must not decide whether the other's comment counts as delivered.
+    const bitbucket = mod.confirmAcceptedWrites({
+      intended: [{ id: "f1" }],
+      results: [
+        {
+          name: "add_comment",
+          params: {
+            workspace: "acme",
+            repository: "svc",
+            pull_request_id: 702,
+            comment_text: "text\n\n<!-- yama:finding:f1 -->",
+            file_path: "src/a.ts",
+            line_number: 12,
+          },
+          result: { content: [{ type: "text", text: "created" }] },
+          isError: false,
+          truncated: false,
+        },
+      ],
+      tool: "add_comment",
+    });
+    assertEqual(
+      bitbucket.ok,
+      true,
+      "a marker in comment_text confirms the write",
+    );
+    const suggestion = mod.confirmAcceptedWrites({
+      intended: [{ id: "f2" }],
+      results: [
+        {
+          name: "add_comment",
+          params: {
+            comment_text: "prose\n\n<!-- yama:finding:f2 -->",
+            suggestion: "const x = 1;",
+            severity: "BLOCKER",
+          },
+          result: { content: [{ type: "text", text: "created" }] },
+          isError: false,
+          truncated: false,
+        },
+      ],
+      tool: "add_comment",
+    });
+    assertEqual(
+      suggestion.ok,
+      true,
+      "the platform's richer arguments do not hide the marker",
+    );
+    const elsewhere = mod.confirmAcceptedWrites({
+      intended: [{ id: "f3" }],
+      results: [
+        {
+          name: "add_comment",
+          params: { comment_text: "no marker here" },
+          result: { content: [{ type: "text", text: "created" }] },
+          isError: false,
+          truncated: false,
+        },
+      ],
+      tool: "add_comment",
+    });
+    assertEqual(
+      elsewhere.unposted.join(","),
+      "f3",
+      "and a call carrying no marker still confirms nothing",
+    );
   });
 }

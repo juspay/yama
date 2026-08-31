@@ -198,6 +198,13 @@ export const DeliveryReportSchema = z.object({
   failed: z.array(z.object({ findingId: Line, reason: Line })),
   summaryPosted: z.boolean(),
   verdictSet: z.boolean(),
+  /**
+   * True when this platform has NO review state that means the decision — several have
+   * approve and needs-work but nothing meaning "commented", and forcing one of those on
+   * would say something the review did not decide. Saying so is an outcome; leaving the
+   * state unset WITHOUT saying so is still a failure.
+   */
+  verdictStateless: z.boolean().optional(),
   described: z.boolean(),
   /** Anything a human should know about how delivery went. */
   notes: z.string(),
