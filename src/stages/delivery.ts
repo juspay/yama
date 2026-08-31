@@ -27,9 +27,12 @@ import { readDescription, readTargetComments } from "../platform/index.js";
 import {
   READ_ONLY_TOOLS,
   withFindingMarker,
+  scanMarkers,
   withMarker,
+  yamaMarker,
 } from "../tools/index.js";
 import type {
+  TargetFacts,
   CapabilityId,
   CapabilityRegistry,
   DeliveryAction,
@@ -49,6 +52,17 @@ import type {
 import { severityAtLeast } from "../util/severity.js";
 import { mergeDescription, renderDescriptionBlock } from "./describe.js";
 import { DeliveryReportSchema } from "./schema.js";
+import { renderTargetFacts } from "./target.js";
+
+/**
+ * Marker kind for a reply this reviewer wrote (TASKS:Y7.4).
+ *
+ * Deliberately NOT the finding kind: a reply is not a second posting of the finding, and
+ * marking it as one would make the dedup gate read the reply as the comment that carries
+ * the finding. Its own kind answers a different question — has this reviewer already told
+ * this thread the finding is still open?
+ */
+const REPLY_MARKER_KIND = "reply";
 
 /** Posting is a handful of tool calls, not an investigation. */
 const DELIVERY_MAX_STEPS = 48;
@@ -262,12 +276,29 @@ export const buildDeliveryPrompt = (input: {
   plan: DeliveryPlan;
   registry: CapabilityRegistry;
   dedupeProblem?: string;
+  /** The change under review — delivery reads files to build suggestions. */
+  facts?: TargetFacts;
 }): string => {
   const { plan, registry } = input;
+  const replyTool = registry.toolFor("comment.reply");
+  // Threads this reviewer has NOT already answered. A reply carries its own marker, so a
+  // recurring run can tell "still open and nobody has been told" from "still open and I
+  // said so last time" — without it, every re-run answers the same thread again, which is
+  // the duplicate-posting failure marker dedup exists to prevent, on the one write surface
+  // that sits outside the posted-confirmed contract.
+  const unanswered = plan.alreadyPosted.filter(
+    (entry) =>
+      !(entry.replies ?? []).some((reply) =>
+        scanMarkers(reply.body, REPLY_MARKER_KIND).includes(entry.findingId),
+      ),
+  );
   const lines: string[] = [
     "DELIVERY. The review is finished and decided. Put it on the pull request exactly as written below.",
+    ...(input.facts !== undefined ? ["", renderTargetFacts(input.facts)] : []),
     "",
-    "This is not a task you plan. Post what is here, do not edit it, do not add findings, do not leave any out, and do not post anything that is not on this list.",
+    "Every finding below must land, exactly as written: do not edit one, do not add one, do not leave one out. That list is the floor, and the shell confirms it against what the platform accepted.",
+    "",
+    "It is not a ceiling. You are the reviewer here, and a reviewer reads the thread it is posting into: if someone has answered an earlier finding, replying to them, resolving a thread your findings have settled, or following up where it genuinely helps the review is yours to judge. Nothing extra is counted as delivery — the findings above are what this run is held to — so post it because it serves the review, or not at all.",
     "",
   ];
 
@@ -344,7 +375,37 @@ The reasons for the decision are: ${plan.verdict.reasons.join("; ") || "no findi
 
   if (plan.alreadyPosted.length > 0) {
     lines.push(
-      `${plan.alreadyPosted.length} finding(s) are already on this pull request from an earlier run and must NOT be posted again: ${plan.alreadyPosted.map((entry) => `${entry.findingId} (comment ${entry.commentId})`).join(", ")}.`,
+      `${plan.alreadyPosted.length} finding(s) are already on this pull request from an earlier run, and this review found them STILL OPEN. Do not post any of them again — the comment that carries each one is already there:`,
+      ...unanswered.map((entry) => {
+        const answered = entry.replies ?? [];
+        return `  ${entry.findingId} — comment ${entry.commentId}${
+          answered.length === 0
+            ? " — nobody has replied to it"
+            : `\n${answered
+                .map(
+                  (reply) =>
+                    `      ${reply.author ?? "someone"} replied: ${reply.body.slice(0, 300)}`,
+                )
+                .join("\n")}`
+        }\n      marker for your reply: ${yamaMarker(REPLY_MARKER_KIND, entry.findingId)}`;
+      }),
+      "",
+      ...(unanswered.length === 0
+        ? [
+            "Every one of them already carries this reviewer's answer from an earlier run, so there is nothing to add. Do not answer any of them again.",
+          ]
+        : [
+            "These are the threads where this review has something to say and has not said it. A finding that survived a second look is worth a line saying so on its own comment — and one whose reply claimed a fix that this review did not find is worth answering, because the next reader will otherwise take the reply as settled.",
+            `END ANY REPLY YOU WRITE WITH ITS MARKER, exactly as given above for that finding. The marker is what stops the next run answering the same thread a second time; a reply without one will be repeated on every future review of this pull request.`,
+          ]),
+      ...(replyTool !== undefined
+        ? [
+            `You can answer one with \`${replyTool}\`.${renderArgs(registry, "comment.reply")} It needs the id of the comment you are answering and the text; READ ITS OWN PARAMETERS and call it the way IT is documented, because how a forge spells "this answers that comment" is the tool's business, not something to assume from another platform.`,
+          ]
+        : [
+            "Nothing you hold can answer an existing comment on this forge, so say that in your report rather than opening a new comment to stand in for a reply.",
+          ]),
+      "Whether any of this is worth saying is your judgement. None of it is counted as delivery — the findings listed above are what this run is held to — so reply where it serves the review and stay quiet where it does not.",
       "",
     );
   }
@@ -389,6 +450,14 @@ export const confirmDelivery = (input: {
   summaryPosted: boolean;
   verdictSet: boolean;
   described: boolean;
+  /**
+   * Findings whose thread this run actually answered, proven the way every other write is
+   * (TASKS:Y4.4): a clean result from the reply tool whose captured arguments carry the
+   * reply marker. Before this, a reply was the one write surface outside the contract —
+   * the marker sat in a body nobody checked was sent, so the agent's word was the only
+   * evidence, and a reply it merely claimed would be re-sent on the next run for ever.
+   */
+  repliesConfirmed: string[];
   failures: (string | undefined)[];
 } => {
   const { plan, registry, results } = input;
@@ -424,6 +493,16 @@ export const confirmDelivery = (input: {
       comments: input.readBack ?? [],
     }),
   );
+  // Replies, held to the same standard as everything else this stage writes. Nothing
+  // REQUIRES a reply — the findings list is still the only contract — so this proves what
+  // happened rather than gating on it.
+  const repliesConfirmed = confirmAcceptedWrites({
+    intended: plan.alreadyPosted.map((entry) => ({ id: entry.findingId })),
+    results,
+    tool: registry.toolFor("comment.reply"),
+    kind: REPLY_MARKER_KIND,
+  }).posted.map((entry) => entry.findingId);
+
   // The summary is an issue comment: its write result carries an id (no body), and the
   // review-comment re-read never lists it — an id from a clean result is the fallback.
   const summaryResults = payloadsOf(registry.toolFor("comment.summary.create"));
@@ -487,6 +566,7 @@ export const confirmDelivery = (input: {
     summaryPosted,
     verdictSet,
     described,
+    repliesConfirmed,
     failures: [
       postingFailure(effective),
       plan.summary !== undefined && !summaryPosted
@@ -558,6 +638,8 @@ export const runDelivery = async (options: {
   changeSummary?: string;
   riskAreas?: readonly string[];
   checklistComplete: boolean;
+  /** The change under review, restated so delivery can read files for suggestions. */
+  facts?: TargetFacts;
   dryRun: boolean;
 }): Promise<DeliveryStageResult> => {
   if (options.dryRun) {
@@ -617,6 +699,7 @@ export const runDelivery = async (options: {
         ...(target.problem !== undefined
           ? { dedupeProblem: target.problem }
           : {}),
+        ...(options.facts !== undefined ? { facts: options.facts } : {}),
       }),
       schema: DeliveryReportSchema,
       tools: [
@@ -687,6 +770,9 @@ export const runDelivery = async (options: {
     summaryPosted,
     verdictSet,
     described,
+    ...(confirmed.repliesConfirmed.length > 0
+      ? { repliesConfirmed: confirmed.repliesConfirmed }
+      : {}),
     ...(failures.length > 0 ? { failure: failures.join("\n") } : {}),
   };
 };

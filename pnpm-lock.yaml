@@ -13,13 +13,18 @@ overrides:
   '@grpc/grpc-js': '>=1.13.5'
   adm-zip: '>=0.6.0'
 
+patchedDependencies:
+  '@juspay/neurolink@12.7.2':
+    hash: b21c5257a906d085520e02cd683ee7dc7e3e7af8f8eba8e421fc0efb806f040f
+    path: patches/@juspay__neurolink@12.7.2.patch
+
 importers:
 
   .:
     dependencies:
       '@juspay/neurolink':
         specifier: ^12.7.2
-        version: 12.7.2(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.10.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)
+        version: 12.7.2(patch_hash=b21c5257a906d085520e02cd683ee7dc7e3e7af8f8eba8e421fc0efb806f040f)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.10.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)
       js-yaml:
         specifier: ^4.3.1
         version: 4.3.2
@@ -6281,7 +6286,7 @@ snapshots:
   '@js-sdsl/ordered-map@4.4.2':
     optional: true
 
-  '@juspay/neurolink@12.7.2(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.10.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)':
+  '@juspay/neurolink@12.7.2(patch_hash=b21c5257a906d085520e02cd683ee7dc7e3e7af8f8eba8e421fc0efb806f040f)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.10.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)':
     dependencies:
       '@ai-sdk/anthropic': 3.0.114(zod@4.3.6)
       '@ai-sdk/mistral': 3.0.62(zod@4.3.6)

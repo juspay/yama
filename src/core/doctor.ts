@@ -51,6 +51,36 @@ const modelChecks = (config: ResolvedConfig): DoctorCheck[] =>
         };
   });
 
+/**
+ * Whether this run would actually have a memory (TASKS:Y2.5).
+ *
+ * Worth a row of its own because its absence is INVISIBLE at run time: with memory off
+ * every stage still answers, it just answers having forgotten the stage before it — which
+ * is how a review once approved a change it had never read.
+ *
+ * Read off CONFIG, not off the engine: initialization is lazy, so at doctor time — before
+ * a single generate — no engine can honestly say more than what it was asked for. What
+ * actually came up is the run report's business (`memoryStatus`).
+ */
+const memoryCheck = (config: ResolvedConfig): DoctorCheck => {
+  if (!config.yama.memory.enabled) {
+    return {
+      group: "models",
+      name: "memory",
+      status: "off",
+      detail:
+        "off — every stage, retry and nudge round starts from nothing, and a stage that fails cannot be recovered",
+      fix: `set memory.enabled: true in ${CONFIG_DIR}/${CONFIG_FILES.yama}`,
+    };
+  }
+  return {
+    group: "models",
+    name: "memory",
+    status: "ok",
+    detail: `on, ${config.yama.memory.tokenThreshold} tokens of history, summarized by ${formatModelChain(config.chains.summarizer)} within ${config.yama.memory.summarizeTimeoutMs}ms`,
+  };
+};
+
 /** One row per declared MCP server: what it exposed, or why it exposed nothing. */
 const serverChecks = (connections: readonly McpConnection[]): DoctorCheck[] =>
   connections.length === 0
@@ -321,6 +351,7 @@ export const runDoctor = async (options: {
       detail: `${config.paths.dir} loaded`,
     },
     ...modelChecks(config),
+    memoryCheck(config),
     ...(await gitChecks(root, target)),
     ...serverChecks(connections),
     ...capabilityChecks(

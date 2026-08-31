@@ -35,6 +35,21 @@ export const dedupePostedFindings = (input: {
       }
     }
   }
+  // What was said back on each of those comments. A finding still open on a re-review is
+  // one thing when a maintainer has answered it and quite another when nobody has looked.
+  const answersTo = new Map<string, { author?: string; body: string }[]>();
+  for (const comment of input.comments) {
+    if (comment.inReplyTo === undefined) {
+      continue;
+    }
+    answersTo.set(comment.inReplyTo, [
+      ...(answersTo.get(comment.inReplyTo) ?? []),
+      {
+        ...(comment.author !== undefined ? { author: comment.author } : {}),
+        body: comment.body,
+      },
+    ]);
+  }
 
   const post: Finding[] = [];
   const alreadyPosted: PostedComment[] = [];
@@ -48,7 +63,12 @@ export const dedupePostedFindings = (input: {
     if (commentId === undefined) {
       post.push(finding);
     } else {
-      alreadyPosted.push({ findingId: finding.id, commentId });
+      const replies = answersTo.get(commentId);
+      alreadyPosted.push({
+        findingId: finding.id,
+        commentId,
+        ...(replies !== undefined && replies.length > 0 ? { replies } : {}),
+      });
     }
   }
 

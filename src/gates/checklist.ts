@@ -24,16 +24,75 @@ const describe = (task: EngineTask): string =>
   `  ${task.id} [${task.status}] ${task.title}`;
 
 /** Reads a checklist state as a gate result. Pure — the whole judgement is four filters. */
+/** How far along a status is, so a group of identical items reports its best state. */
+const PROGRESS: Record<string, number> = {
+  done: 3,
+  closed: 2,
+  in_progress: 1,
+  pending: 0,
+};
+
+/**
+ * The checklist as DISTINCT work (TASKS:Y4.2).
+ *
+ * `tasks_create` appends, and a model that calls it twice with overlapping titles gets
+ * two items for one piece of work. Measured on this repository's own pull request: 327
+ * items over 86 distinct titles — one of them created seventeen times — from a plan whose
+ * own 25 tasks were all unique. The work stage would then have to render all 327 and the
+ * completeness gate would demand every one of them be settled, so a stutter in one tool
+ * call becomes an unfinishable review.
+ *
+ * Two items with the same title are the same task; nothing downstream can tell them apart,
+ * and neither can a human reading the report. So the shell reads the checklist as the set
+ * of distinct titles, each carrying the furthest state any of its copies reached — work
+ * done once is done, whichever copy it was recorded against.
+ *
+ * The agent is not corrected for this and nothing is deleted: the engine keeps whatever it
+ * was told, and the shell simply declines to count the same work twice.
+ *
+ * The trade-off, deliberately taken and pinned by test: two GENUINELY different items that
+ * happen to share a title also collapse, so a `done` one can mask a `pending` one here.
+ * Keying on scope would separate them, but the engine's checklist has no scope — only the
+ * plan does (`InsertionTask.scope`, which is why `mergeTasks` can key on it and this
+ * cannot) — and collapsing conservatively instead would restore the failure this exists to
+ * fix: 327 items, 317 of them pending stutter copies, and a review that could never finish.
+ * The exposure is bounded on the other side: per-file coverage is checked at PREPARATION
+ * against the plan's scopes, so work that answers for a distinct file is accounted for
+ * before the completeness gate ever sees it. Two items with byte-identical titles are also
+ * indistinguishable to the human reading the checklist.
+ */
+export const distinctTasks = (tasks: readonly EngineTask[]): EngineTask[] => {
+  const byTitle = new Map<string, EngineTask>();
+  for (const task of tasks) {
+    const key = task.title.trim().toLowerCase();
+    const seen = byTitle.get(key);
+    if (
+      seen === undefined ||
+      (PROGRESS[task.status] ?? 0) > (PROGRESS[seen.status] ?? 0)
+    ) {
+      byTitle.set(key, {
+        ...task,
+        // A reason recorded against any copy explains the work, not the copy.
+        ...(task.note === undefined && seen?.note !== undefined
+          ? { note: seen.note }
+          : {}),
+      });
+    }
+  }
+  return [...byTitle.values()];
+};
+
 export const checkChecklist = (state: EngineTaskState): ChecklistGateResult => {
-  const pending = state.tasks.filter(
+  const tasks = distinctTasks(state.tasks);
+  const pending = tasks.filter(
     (task) => task.status === "pending" || task.status === "in_progress",
   );
-  const unexplained = state.tasks.filter(
+  const unexplained = tasks.filter(
     (task) => task.status === "closed" && (task.note ?? "").trim() === "",
   );
   return {
     complete: pending.length === 0 && unexplained.length === 0,
-    tasks: state.tasks,
+    tasks,
     pending,
     unexplained,
   };

@@ -18,6 +18,7 @@ export const CAPABILITY_IDS = [
   "comment.list",
   "comment.inline.create",
   "comment.summary.create",
+  "comment.reply",
   "comment.update",
   "verdict.set",
   "review.begin",
@@ -35,6 +36,20 @@ export const CAPABILITIES = {
   "comment.list": { phase: "review", requires: [] },
   "comment.inline.create": { phase: "delivery", requires: ["comment.list"] },
   "comment.summary.create": { phase: "delivery", requires: ["comment.list"] },
+  /**
+   * Answering an existing comment, rather than opening a new one (TASKS:Y7.4).
+   *
+   * What it is FOR is the recurring run: a finding this repository already posted, still
+   * open on a second look, sitting under a comment somebody either answered or ignored.
+   * Re-posting it would be a duplicate; saying nothing leaves a stale reply standing as
+   * though it settled the matter. Answering the thread is the only honest move, and it
+   * needs a tool that can address an existing comment.
+   *
+   * Optional everywhere: unmapped means the reviewer cannot answer and says so, which is
+   * a degradation like any other. It requires `comment.list` because a reply needs the id
+   * of the comment it answers, and that id comes from reading the target.
+   */
+  "comment.reply": { phase: "delivery", requires: ["comment.list"] },
   "comment.update": { phase: "delivery", requires: ["comment.list"] },
   "verdict.set": { phase: "delivery", requires: [] },
   // The pending-review lifecycle, for forges where an inline comment is written into a

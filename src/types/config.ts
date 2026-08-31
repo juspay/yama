@@ -12,6 +12,7 @@ import type {
   DeliveryConfigSchema,
   DescribeSectionSchema,
   LearnConfigSchema,
+  MemoryConfigSchema,
   McpConfigSchema,
   McpServerSchema,
   ModelChainLinkSchema,
@@ -46,6 +47,9 @@ export type ModelChains = Record<ModelRole, ModelChainLink[]>;
 export type PoolTier = z.infer<typeof PoolTierSchema>;
 
 export type PoolConfig = z.infer<typeof PoolConfigSchema>;
+
+/** The `memory:` block: the run's own short-term memory across stages (TASKS:Y2.5). */
+export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
 
 export type LearnConfig = z.infer<typeof LearnConfigSchema>;
 

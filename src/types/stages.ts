@@ -17,6 +17,7 @@ import type {
   WorkedTaskSchema,
 } from "../stages/schema.js";
 import type { DeliveryAction } from "./config.js";
+import type { RunTarget } from "./run.js";
 import type {
   ChecklistGateResult,
   PostedComment,
@@ -53,9 +54,33 @@ export type InsertionPlan = z.infer<typeof InsertionPlanSchema>;
  * is additional context, never a replacement — the checklist is written against the WHOLE
  * change, because that is what is being merged.
  */
+/**
+ * The change under review, restated for every stage that needs it (TASKS:Y3.2).
+ *
+ * A stage is one independent call: what its prompt does not carry, it does not have.
+ * Measured on curator PR #702, where the stages after Task Insertion were handed only
+ * the previous agent's prose and went looking for the pull request in conversation
+ * memory that was not enabled.
+ */
+export type TargetFacts = {
+  target: RunTarget;
+  diff: GitDiff;
+  banked: EngineBankedRef;
+  /** Paths `review.exclude` kept out — named, so a stage knows what it is not seeing. */
+  excluded?: readonly string[];
+};
+
 export type InsertionStageResult = {
   plan: StageOutput<Stage, InsertionPlan>;
   diff: GitDiff;
+  /** The change as every later stage is told it — built once, from this stage's own diff. */
+  facts: TargetFacts;
+  /**
+   * Changed files no checklist item accounts for, after every preparation round
+   * (TASKS:Y4.6). Present only when the run went ahead with a gap in its plan — the run
+   * report names them, because a review that narrows what it looked at has to say so.
+   */
+  uncovered?: string[];
   /** Paths `review.exclude` dropped from the diff — reported, never silently discarded. */
   excluded?: string[];
   banked: EngineBankedRef;
@@ -198,6 +223,13 @@ export type DeliveryStageResult = {
   summaryPosted: boolean;
   verdictSet: boolean;
   described: boolean;
+  /**
+   * Findings whose existing thread this run PROVABLY answered — a clean result from the
+   * reply tool whose captured arguments carried the reply marker (TASKS:Y4.4). Not a
+   * contract: nothing requires a reply. It is here so the answer is evidence rather than
+   * the agent's word, which is what kept a merely-claimed reply being re-sent for ever.
+   */
+  repliesConfirmed?: string[];
   /** The loud message when something intended did not land. */
   failure?: string;
   /** Why Delivery did nothing, when it did nothing. */

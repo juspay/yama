@@ -153,6 +153,7 @@ const stageEngine = (options: {
       };
     },
     registerTool: () => undefined,
+    memoryStatus: () => ({ enabled: true, ready: true, tokenThreshold: 64000 }),
     tasksApi: async (sessionId: string) => ({
       sessionId,
       tasks: tasks.map((task) => ({ ...task })),
@@ -189,7 +190,12 @@ const answerFor = (replies: {
     if (prompt.includes("WARM UP.")) {
       return replies.brief;
     }
-    if (prompt.includes("TASK INSERTION.")) {
+    // A preparation nudge is a task-insertion turn: the shell asks the same stage again
+    // for the same schema, with what is missing attached.
+    if (
+      prompt.includes("TASK INSERTION.") ||
+      prompt.includes("THE CHECKLIST IS NOT USABLE YET")
+    ) {
       return replies.plan;
     }
     return replies.work(turn);
@@ -755,12 +761,155 @@ if (!isBuilt()) {
     });
   });
 
+  await test("a plan with no checklist is nudged until there is one, and the run goes on", async () => {
+    // The recovery this whole change is about. On yama PR #101 the stage answered with a
+    // plan and no items over 15 files, and the run died there. Nothing about that moment
+    // was unrecoverable: the diff was banked, the checkout was on disk, and the agent had
+    // read most of the change. It just needed to be asked for the one thing missing.
+    const mod = await import(DIST_ENTRY);
+    await withTempDir("prepare", async (dir) => {
+      await gitWorkspace(dir);
+      const storeDir = path.join(dir, ".yama", "artifacts", "local");
+      const scripted = stageEngine({
+        // Nothing created by the first answer — the engine holds an empty checklist.
+        tasks: [],
+        answer: answerFor({
+          brief: BRIEF,
+          plan: PLAN,
+          work: () => ({
+            findings: [finding("auth-token-logged", "CRITICAL")],
+            worked: [worked("t1", { handledBy: "self" })],
+            openQuestions: [],
+          }),
+          collate: {
+            findings: [finding("auth-token-logged", "CRITICAL")],
+            merged: [],
+            summary: "the token path logs a secret",
+          },
+        }),
+        // The nudge is turn 2 (warmup, insertion, then the ask). The agent calls
+        // tasks_create this time, which is what the shell has been waiting for.
+        onTurn: (turn, tasks) => {
+          if (turn === 2) {
+            tasks.push({
+              id: "t1",
+              title: "check the endpoint",
+              status: "done",
+            });
+          }
+        },
+      });
+
+      const result = await mod.runReview(
+        {
+          runId: mod.newRunId(),
+          target: { mode: "local" },
+          root: dir,
+          storeDir,
+          dryRun: true,
+        },
+        scripted.engine,
+      );
+
+      const nudge = scripted.prompts[2] ?? "";
+      assertIncludes(
+        nudge,
+        "THE CHECKLIST IS NOT USABLE YET",
+        "the shell hands the gap back rather than failing the run",
+      );
+      assertIncludes(
+        nudge,
+        "tasks_create was never called",
+        "naming what was actually missing",
+      );
+      assertIncludes(
+        nudge,
+        "THE CHANGE UNDER REVIEW",
+        "with the change restated, so the ask stands on its own",
+      );
+      assertEqual(
+        result.verdict.decision,
+        "block",
+        "and the review that follows is a real one",
+      );
+      assertEqual(
+        result.tasks[0]?.id,
+        "t1",
+        "over the checklist the second ask produced",
+      );
+    });
+  });
+
+  await test("a run that worked nothing and found nothing fails instead of approving", async () => {
+    // curator PR #702 in one test: every checklist item closed unworked, no findings, and
+    // a verdict of APPROVE posted to a pull request over a change nobody had read. The
+    // run fails BEFORE delivery — an approval nobody earned is worse on a pull request
+    // than a red check.
+    const mod = await import(DIST_ENTRY);
+    await withTempDir("nothing", async (dir) => {
+      await gitWorkspace(dir);
+      const storeDir = path.join(dir, ".yama", "artifacts", "local");
+      const scripted = stageEngine({
+        tasks: [
+          {
+            id: "t1",
+            title: "check the endpoint",
+            status: "closed",
+            note: "blocked: could not identify the change",
+          },
+        ],
+        answer: answerFor({
+          brief: BRIEF,
+          plan: PLAN,
+          work: () => ({ findings: [], worked: [], openQuestions: [] }),
+          collate: { findings: [], merged: [], summary: "nothing to report" },
+        }),
+      });
+
+      let message = "";
+      try {
+        await mod.runReview(
+          {
+            runId: mod.newRunId(),
+            target: { mode: "local" },
+            root: dir,
+            storeDir,
+            dryRun: true,
+          },
+          scripted.engine,
+        );
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+
+      assertIncludes(
+        message,
+        "not a review that found nothing",
+        "the run says why it will not decide",
+      );
+      const onDisk = await mod.readRunReport(mod.storePathsForDir(storeDir));
+      assertEqual(
+        onDisk.verdict?.decision,
+        "approve",
+        "the policy still computed approve over zero findings — that is not the bug",
+      );
+      assertEqual(
+        onDisk.delivery,
+        undefined,
+        "the bug was posting it, and delivery never ran",
+      );
+    });
+  });
+
   await test("a stage that fails leaves the failure in the banked report", async () => {
     const mod = await import(DIST_ENTRY);
     await withTempDir("review", async (dir) => {
       await gitWorkspace(dir);
       const storeDir = path.join(dir, ".yama", "artifacts", "local");
       const scripted = stageEngine({
+        // The checklist has to exist for the run to reach the work stage at all — an
+        // empty one now fails during preparation, which is a different test.
+        tasks: [{ id: "t1", title: "check the endpoint", status: "pending" }],
         answer: answerFor({
           brief: BRIEF,
           plan: PLAN,

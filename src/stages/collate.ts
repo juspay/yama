@@ -16,6 +16,7 @@ import {
 } from "../gates/index.js";
 import { READ_ONLY_TOOLS, mergeFindings } from "../tools/index.js";
 import type {
+  TargetFacts,
   ChecklistGateResult,
   CollateStageResult,
   Finding,
@@ -28,9 +29,10 @@ import type {
   WorkerReport,
 } from "../types/index.js";
 import { CollationSchema } from "./schema.js";
+import { renderTargetFacts } from "./target.js";
 
-/** Enough to page through the banked reports and check a claim or two. */
-const COLLATE_MAX_STEPS = 32;
+/** Enough to page through the banked reports and check the claims that need it. */
+const COLLATE_MAX_STEPS = 64;
 
 const describeFinding = (finding: Finding): string =>
   `  ${finding.id}  ${finding.severity}  ${finding.file}:${finding.line}  ${finding.summary}`;
@@ -47,13 +49,18 @@ export const buildCollatePrompt = (input: {
   checklist: ChecklistGateResult;
   /** Still open from the previous review; already counted, never re-reported (Y7.1). */
   carriedOver?: readonly Finding[];
+  /** The change itself, so this stage never depends on the last one's prose. */
+  facts?: TargetFacts;
 }): string => {
   const { brief, plan, findings, workers, checklist } = input;
   const lines: string[] = [
     "COLLATE AND DECIDE. Everything below is what this run gathered. Turn it into the final list.",
     "",
+    ...(input.facts !== undefined ? [renderTargetFacts(input.facts), ""] : []),
+    "Page the banked reports and check what you need to check — read_file takes a whole file in one call, and its offset and limit are LINES. What this stage does NOT do is review the change again: the findings below are the review.",
+    "",
     `Review posture: ${brief.persona}`,
-    `The change: ${plan.changeSummary}`,
+    `What the earlier stage said this change does: ${plan.changeSummary}`,
     "",
     findings.length > 0
       ? `Findings reported while working the checklist (${findings.length}):`
@@ -144,6 +151,8 @@ export const runCollate = async (options: {
   carriedOver?: readonly Finding[];
   /** Live review-phase capability tools (TASKS:Y5.1); never a posting tool. */
   extraTools?: readonly string[];
+  /** The change under review, restated so this stage stands on its own. */
+  facts?: TargetFacts;
 }): Promise<CollateStageResult> => {
   const output = await checkpointWithSchemaGate({
     session: options.session,
@@ -158,6 +167,7 @@ export const runCollate = async (options: {
         ...(options.carriedOver !== undefined
           ? { carriedOver: options.carriedOver }
           : {}),
+        ...(options.facts !== undefined ? { facts: options.facts } : {}),
       }),
       schema: CollationSchema,
       tools: [...READ_ONLY_TOOLS, ...(options.extraTools ?? [])],

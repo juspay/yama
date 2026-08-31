@@ -35,6 +35,12 @@ export type RunContext = {
   dryRun: boolean;
   /** Cancellation for the whole run: stages, workers and background commands. */
   signal?: AbortSignal;
+  /**
+   * Called as each stage finishes, so a long run says where it is instead of going
+   * silent for twenty minutes and printing everything at the end. Progress only — the
+   * run report is still the record, and nothing here is load-bearing.
+   */
+  onProgress?: (line: string) => void;
 };
 
 /**

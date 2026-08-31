@@ -9,6 +9,7 @@ export {
   deliveryStats,
   ensureGitignore,
   gateStats,
+  memoryDegradation,
   newRunId,
   recurrenceStats,
   renderDoctorReport,
@@ -63,13 +64,23 @@ export {
   runWork,
   scanReportedFindings,
   withReportedMarkers,
+  renderTargetFacts,
 } from "./stages/index.js";
+export {
+  buildPreparationNudge,
+  checkCoverage,
+  checklistProblems,
+  preparationFatal,
+} from "./gates/index.js";
 export {
   NO_PRIOR_FINDINGS,
   buildChecklistNudge,
+  buildClosingPrompt,
   buildSchemaRetryPrompt,
   checkChecklist,
+  distinctTasks,
   checkpointWithSchemaGate,
+  describeAttempt,
   classifyPriorFindings,
   confirmAcceptedWrites,
   confirmCreated,
@@ -83,6 +94,8 @@ export {
   exitCodeFor,
   postingFailure,
   rankFindings,
+  reviewEstablishedNothing,
+  withRecoveryCaveat,
   groundFindings,
   unresolvedPriorFindings,
 } from "./gates/index.js";

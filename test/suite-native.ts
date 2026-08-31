@@ -189,7 +189,7 @@ if (!isBuilt()) {
 } else {
   section("the swap is a non-event: both paths, one contract");
 
-  await test("both paths expose the same nine seam members", async () => {
+  await test("both paths expose the same ten seam members", async () => {
     await withTempDir("seam-native", async (nativeDir) => {
       await withTempDir("seam-fallback", async (fallbackDir) => {
         const native = await bootSeam(true, nativeDir);
@@ -207,8 +207,8 @@ if (!isBuilt()) {
         );
         assertEqual(
           native.members.length,
-          9,
-          "the Engine surface is nine members",
+          10,
+          "the Engine surface is ten members",
         );
       });
     });

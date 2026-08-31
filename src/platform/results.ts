@@ -18,7 +18,17 @@ const MAX_DEPTH = 4;
 
 const IdSchema = z.union([z.string().min(1), z.number()]);
 
-/** The spellings real comment APIs use for the two fields that matter. */
+/** A person, however the forge spells their name. */
+const PersonSchema = z.object({
+  login: z.string().optional(),
+  display_name: z.string().optional(),
+  displayName: z.string().optional(),
+  name: z.string().optional(),
+  username: z.string().optional(),
+  nickname: z.string().optional(),
+});
+
+/** The spellings real comment APIs use for the fields that matter. */
 const CommentSchema = z.object({
   id: IdSchema.optional(),
   comment_id: IdSchema.optional(),
@@ -32,6 +42,14 @@ const CommentSchema = z.object({
     .union([z.string(), z.object({ raw: z.string().optional() })])
     .optional(),
   text: z.string().optional(),
+  /** Who wrote it, across the forges. A string on some wrappers, a person on others. */
+  user: z.union([z.string(), PersonSchema]).optional(),
+  author: z.union([z.string(), PersonSchema]).optional(),
+  /** The comment this one answers, as the forge spells it — or as `unwrap` inferred it. */
+  parent_id: IdSchema.optional(),
+  parentId: IdSchema.optional(),
+  in_reply_to_id: IdSchema.optional(),
+  __inReplyTo: IdSchema.optional(),
   comment: z
     .object({
       id: IdSchema.optional(),
@@ -59,6 +77,12 @@ const bodyOf = (
  * pull request itself as one body-less comment and marker dedup saw an empty target,
  * so every re-review posted everything again.
  */
+/**
+ * Where a comment's own replies hang. Distinct from {@link LIST_KEYS}: these are descended
+ * into IN ADDITION to the comment carrying them, never instead of it.
+ */
+const REPLY_KEYS = ["replies", "children", "responses"] as const;
+
 const LIST_KEYS = [
   "values",
   "comments",
@@ -82,10 +106,29 @@ const parseJson = (text: string): unknown => {
   }
 };
 
-/** Comment id and body out of one record, whichever spelling the platform used. */
+/** A person's name out of whichever field carried it. */
+const nameOf = (
+  value: z.infer<typeof PersonSchema> | string | undefined,
+): string | undefined => {
+  if (typeof value === "string") {
+    return value.length > 0 ? value : undefined;
+  }
+  return (
+    value?.login ??
+    value?.display_name ??
+    value?.displayName ??
+    value?.name ??
+    value?.username ??
+    value?.nickname
+  );
+};
+
+/** Comment id, body and author out of one record, whichever spelling the platform used. */
 export const readComment = (
   value: unknown,
-): { id?: string; body: string } | undefined => {
+):
+  | { id?: string; body: string; author?: string; inReplyTo?: string }
+  | undefined => {
   const parsed = CommentSchema.safeParse(value);
   if (!parsed.success) {
     return undefined;
@@ -100,13 +143,23 @@ export const readComment = (
     text,
     comment,
     raw,
+    user,
+    author,
+    parent_id,
+    parentId,
+    in_reply_to_id,
+    __inReplyTo,
   } = parsed.data;
   const anchored = html_url?.match(
     /#(?:discussion_r|issuecomment-)(\d+)$/,
   )?.[1];
   const found = id ?? comment_id ?? commentId ?? comment?.id ?? anchored;
+  const wrote = nameOf(user) ?? nameOf(author);
+  const answers = parent_id ?? parentId ?? in_reply_to_id ?? __inReplyTo;
   return {
     ...(found !== undefined ? { id: String(found) } : {}),
+    ...(wrote !== undefined ? { author: wrote } : {}),
+    ...(answers !== undefined ? { inReplyTo: String(answers) } : {}),
     body:
       body ??
       bodyOf(content) ??
@@ -117,6 +170,31 @@ export const readComment = (
       comment?.raw ??
       "",
   };
+};
+
+/**
+ * One list of comments, read as a THREAD: the first is the comment the rest are answering.
+ *
+ * GitHub's hosted server hands a review thread over as `review_threads` → `comments`, flat
+ * rather than parent-and-children, so parentage has to be read off the position — there is
+ * no field carrying it. A list of one, or of records that are not comments, is returned
+ * untouched: not every list is a conversation.
+ */
+const asThread = (records: readonly unknown[]): unknown[] => {
+  const head = readComment(records[0]);
+  if (records.length < 2 || head?.id === undefined) {
+    return [...records];
+  }
+  return [
+    records[0],
+    ...records
+      .slice(1)
+      .map((reply) =>
+        reply !== null && typeof reply === "object"
+          ? { ...(reply as Record<string, unknown>), __inReplyTo: head.id }
+          : reply,
+      ),
+  ];
 };
 
 /**
@@ -150,7 +228,29 @@ const unwrap = (value: unknown, depth: number, descend: boolean): unknown[] => {
   // and mistaking a thread for a comment swallows every comment inside it.
   const self = readComment(value);
   if (self?.id !== undefined && self.body !== "") {
-    return [value];
+    // …and so is anything nested UNDER it. Bitbucket hangs replies off the comment they
+    // answer, and returning the parent alone silently dropped every reply — so `learn`
+    // never saw a maintainer's answer to a finding, and the dedup gate never saw a thread
+    // it had already been argued out of. The parent comes first, then its replies.
+    const record = value as Record<string, unknown>;
+    const replies = REPLY_KEYS.flatMap((key) => {
+      const nested = record[key];
+      return Array.isArray(nested)
+        ? nested
+            .flatMap((entry) => unwrap(entry, depth + 1, descend))
+            // Parentage, kept: "somebody answered finding F7" is a different fact from
+            // "somebody commented", and a recurring run has to be able to tell them apart.
+            .map((reply) =>
+              reply !== null && typeof reply === "object"
+                ? {
+                    ...(reply as Record<string, unknown>),
+                    __inReplyTo: self.id,
+                  }
+                : reply,
+            )
+        : [];
+    });
+    return [value, ...replies];
   }
   // Only a caller that wants the CONTENTS of a document descends into its lists. One
   // that wants the document ITSELF must not: a Bitbucket pull request carries both its
@@ -162,7 +262,10 @@ const unwrap = (value: unknown, depth: number, descend: boolean): unknown[] => {
     for (const key of LIST_KEYS) {
       const nested = record[key];
       if (Array.isArray(nested)) {
-        return nested.flatMap((entry) => unwrap(entry, depth + 1, descend));
+        const flattened = nested.flatMap((entry) =>
+          unwrap(entry, depth + 1, descend),
+        );
+        return key === "review_threads" ? flattened : asThread(flattened);
       }
     }
   }
@@ -198,7 +301,14 @@ export const readComments = (value: unknown): ExistingComment[] => {
       continue;
     }
     seen.add(comment.id);
-    comments.push({ id: comment.id, body: comment.body });
+    comments.push({
+      id: comment.id,
+      body: comment.body,
+      ...(comment.author !== undefined ? { author: comment.author } : {}),
+      ...(comment.inReplyTo !== undefined
+        ? { inReplyTo: comment.inReplyTo }
+        : {}),
+    });
   }
   return comments;
 };

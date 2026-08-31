@@ -41,6 +41,8 @@ export type RunStageMetric = {
   model?: string;
   stepsUsed?: number;
   toolsUsed?: string[];
+  /** This checkpoint was the gate's recovery ask, not the stage's own turn (TASKS:Y4.1). */
+  recovered?: boolean;
   /** Where the structured envelope was banked. */
   envelopePath: string;
   /** Where the verbatim model output was banked. */
@@ -153,6 +155,19 @@ export type RunReport = {
   tasks: TaskItem[];
   /** Capabilities that were off, carried through so a reader knows what was not looked at. */
   degradations: ConfigDegradation[];
+  /**
+   * Changed files no checklist item ever answered for (TASKS:Y4.6). A review that went
+   * ahead with a gap in its plan says which files the gap was — the alternative is a
+   * verdict that reads as though it covered the whole change.
+   */
+  uncoveredFiles?: string[];
+  /**
+   * What the run itself said was missing: the brief's `gaps` and the work stage's
+   * `openQuestions`. Both were collected and then discarded — on curator PR #702 the
+   * work stage wrote "conversation memory retrieval is disabled in this environment",
+   * the one line that explained the whole run, and it reached no report and no log.
+   */
+  unknowns?: string[];
   /** What the gates between the stages observed. */
   gates?: RunGateStats;
   /** What this run inherited from the review before it (TASKS:Y7.1). */

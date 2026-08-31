@@ -30,12 +30,43 @@ models:
   worker:
     provider: litellm
     model: [open-fast, deepseek]
+  # Summarizing the conversation has a HARDCODED 60-second ceiling inside the engine, and
+  # a summary that misses it evicts nothing at all. So this role gets the fast model and
+  # no slow fallback: a summarizer that is merely thorough is a summarizer that times out.
+  summarizer:
+    provider: litellm
+    model: open-fast
 
 # How many delegated workers may run at once: low = 1, medium = 3, high = 6.
 # Medium: this repository's pull requests fan out to a handful of investigations, and the
 # gateway above is shared with other jobs — a wider pool buys latency at its expense.
 pool:
   tier: medium
+
+# The run's own short-term memory: what one stage said, still there for the next one.
+#
+# ON, and it has to be. A stage is one `generate()` call, so without this every stage,
+# every schema retry and every nudge round starts from nothing — which is how a review of
+# a 15-file change once retried twice, forgot both attempts, and answered "the change
+# details were not retrieved". It is also what lets the reviewer improve inside a run:
+# a correction handed back to it is only a correction if it remembers what it did.
+#
+# Eviction is the whole game: a summarization that does not finish evicts NOTHING and
+# returns, so the history stops being trimmed and grows until the context window ends the
+# run. Two settings decide whether it finishes — how much is summarized at once
+# (`tokenThreshold`, since the engine keeps 30% recent and summarizes the rest) and how
+# long it may take (`summarizeTimeoutMs`). Measured here at 32k and again at 16k, the
+# RE-reviews timed out either way (6 and 5 times) while the first review of the same branch
+# did not, which is what showed the ceiling was the binding half. Summarization runs on the
+# `summarizer` chain above, never the engine's own Vertex default, which this deployment
+# holds no credential for.
+memory:
+  enabled: true
+  summarize: true
+  tokenThreshold: 16000
+  # The engine's own ceiling is 60s, which is a guess about somebody else's gateway. A
+  # single call here routinely takes minutes, and an abandoned summary evicts NOTHING.
+  summarizeTimeoutMs: 120000
 
 # Post-merge knowledge update (`yama learn --pr N`). This is the only command in Yama that
 # ever changes the repository, and it is ON here deliberately: Yama's own review history is

@@ -17,6 +17,12 @@ export type SessionCheckpointRequest<T> = {
   /** Tool allowlist for this stage (TASKS:Y5.1). Omitted means every registered tool. */
   tools?: string[];
   maxSteps?: number;
+  /**
+   * This call is the schema gate's recovery ask. Recorded on the metric and stamped on the
+   * envelope, and it forces `trusted` false — a stage that had to be rescued did not pass,
+   * however well-formed the JSON it finally produced.
+   */
+  recovery?: boolean;
 };
 
 /** The run's single session, driven stage by stage and banked at every step. */

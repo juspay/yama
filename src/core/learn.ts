@@ -56,11 +56,18 @@ const LEARN_MAX_STEPS = 24;
 /** How much of the banked thread travels inline. The rest is one read-back away. */
 const THREAD_PREVIEW_CHARS = 4_000;
 
-/** One comment as the prompt shows it: id, the findings it names, and its text. */
+/**
+ * One comment as the prompt shows it: id, WHO wrote it, the findings it names, its text.
+ *
+ * The author is not decoration here. What `learn` is looking for is what a HUMAN decided,
+ * and half the thread is usually the reviewer talking to itself — a rule lifted from
+ * Yama's own comment is a memory of its own opinion, which makes every later review more
+ * confident and no more correct.
+ */
 const renderComment = (comment: ExistingComment): string => {
   const markers = scanMarkers(comment.body);
   return [
-    `--- comment ${comment.id}${markers.length > 0 ? ` (about finding ${markers.join(", ")})` : ""}`,
+    `--- comment ${comment.id}${comment.author !== undefined ? ` by ${comment.author}` : ""}${markers.length > 0 ? ` (about finding ${markers.join(", ")})` : ""}`,
     comment.body,
   ].join("\n");
 };

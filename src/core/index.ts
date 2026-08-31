@@ -6,6 +6,7 @@
  * that dies in the middle still leaves a store a human can read.
  */
 import { loadConfig } from "../config/index.js";
+import { StageError } from "./errors.js";
 import { connectPlatform } from "../platform/index.js";
 import {
   detectRecurrence,
@@ -34,10 +35,19 @@ import {
   registerCheckTools,
   registerFsTools,
 } from "../tools/index.js";
-import { decideVerdict, groundFindings } from "../gates/index.js";
+import {
+  checkCoverage,
+  decideVerdict,
+  distinctTasks,
+  groundFindings,
+  reviewEstablishedNothing,
+  withRecoveryCaveat,
+} from "../gates/index.js";
 import type {
   ChecksConfig,
   ChecksGuard,
+  ConfigDegradation,
+  EngineMemoryStatus,
   Engine,
   Finding,
   GitDiff,
@@ -62,6 +72,39 @@ import {
   startRunReport,
 } from "./report.js";
 import { createSessionRunner } from "./session.js";
+
+/**
+ * What is wrong with this run's memory, if anything (TASKS:Y2.5).
+ *
+ * Two different failures, and only the first was ever visible. Memory OFF means every
+ * stage starts from nothing. Memory ON WITH NOTHING EVICTING is worse, because it looks
+ * healthy: a summarization that cannot finish evicts nothing and returns, so the history
+ * grows on every call until the context window ends the run. Raised by this change's own
+ * review — "the failure is silent context growth" — and it is only silent while nobody
+ * says it, so the run report says it.
+ */
+export const memoryDegradation = (
+  memory: EngineMemoryStatus,
+): ConfigDegradation | undefined => {
+  if (!memory.enabled) {
+    return {
+      what: "memory",
+      reason:
+        "conversation memory is off — every stage, retry and nudge round starts from nothing",
+    };
+  }
+  if (memory.evicting === true) {
+    return undefined;
+  }
+  return {
+    what: "memory.eviction",
+    reason: `conversation memory is on but nothing will evict it — the history grows for the whole run and every call carries more of it${
+      memory.tokenThreshold !== undefined
+        ? ` (the ${memory.tokenThreshold}-token threshold will be crossed and not acted on)`
+        : ""
+    }`,
+  };
+};
 
 /** A run id that sorts by time and is safe in a file name. */
 export const newRunId = (now = new Date()): string =>
@@ -237,6 +280,14 @@ const bootRun = async (
     config: { root: config.paths.root },
   });
 
+  // Said out loud, because its absence is otherwise invisible: with no memory every stage
+  // answers having forgotten the one before it, and a stage that fails cannot be helped
+  // up — it can only be asked the same question again (TASKS:Y2.5).
+  const memoryProblem = memoryDegradation(active.memoryStatus());
+  if (memoryProblem !== undefined) {
+    config.degradations.push(memoryProblem);
+  }
+
   // MCP servers up, capability map proved against the tools they really expose, and the
   // delivery actions narrowed to what this run can actually perform (TASKS:Y1.3, Y5.4).
   const platform = await connectPlatform({
@@ -274,7 +325,9 @@ const reportWriter = (input: {
     report.stages = session.metrics();
     report.finishedAt = new Date().toISOString();
     const tasks = await engine.tasksApi(session.sessionId);
-    report.tasks = tasks.tasks.map((task): TaskItem => ({
+    // Distinct work, not every copy of it: a report listing one task seventeen times
+    // tells a reader nothing except that a tool call stuttered.
+    report.tasks = distinctTasks(tasks.tasks).map((task): TaskItem => ({
       id: task.id,
       title: task.title,
       status: task.status,
@@ -315,9 +368,45 @@ export const runReview = async (
   });
   const persist = reportWriter({ report, session, engine: active, paths });
 
-  try {
-    const brief = await runWarmUp({ session, config, extraTools: reviewTools });
+  /**
+   * One line per finished stage, as it finishes. A review is minutes of silence
+   * otherwise — measured at 956s on a real pull request — and silence is
+   * indistinguishable from a hang while it is happening. Reads the metrics the session
+   * already records, so it invents nothing and costs nothing.
+   */
+  let reported = 0;
+  const announce = (): void => {
+    if (run.onProgress === undefined) {
+      return;
+    }
+    const metrics = session.metrics();
+    for (const metric of metrics.slice(reported)) {
+      const seconds = (metric.durationMs / 1000).toFixed(1);
+      run.onProgress(
+        `  ${metric.stage.padEnd(14)} ${seconds.padStart(7)}s  ${
+          metric.recovered === true
+            ? "RECOVERED"
+            : metric.trusted
+              ? "ok       "
+              : "UNTRUSTED"
+        }  steps ${metric.stepsUsed ?? 0}${
+          (metric.toolsUsed ?? []).length > 0
+            ? `  ${(metric.toolsUsed ?? []).join(", ")}`
+            : ""
+        }`,
+      );
+    }
+    reported = metrics.length;
+  };
+  const step = async (): Promise<void> => {
     await persist();
+    announce();
+  };
+
+  try {
+    run.onProgress?.("stages");
+    const brief = await runWarmUp({ session, config, extraTools: reviewTools });
+    await step();
 
     const insertion = await runTaskInsertion({
       session,
@@ -328,9 +417,13 @@ export const runReview = async (
       extraTools: reviewTools,
       exclude: config.yama.review.exclude,
     });
+    announce();
     if (insertion.excluded !== undefined && insertion.excluded.length > 0) {
       // Visible, not silent: what a review did not look at belongs in its own report.
       report.excludedFiles = insertion.excluded;
+    }
+    if (insertion.uncovered !== undefined && insertion.uncovered.length > 0) {
+      report.uncoveredFiles = insertion.uncovered;
     }
     report.recurrence = recurrenceStats({
       recurrence,
@@ -340,6 +433,21 @@ export const runReview = async (
         : {}),
     });
     await persist();
+    // Counted off the ENGINE and off the diff, never off the plan's prose: a plan always
+    // claims at least one item (the schema pins it), and the run that printed
+    // "4 checklist item(s)" one line before failing with "no checklist at all" was
+    // reporting exactly that claim.
+    const files = insertion.diff.files.map((file) => file.path);
+    const prepared = distinctTasks((await active.tasksApi(run.runId)).tasks);
+    const coverage = checkCoverage({ files, tasks: insertion.plan.data.tasks });
+    run.onProgress?.(
+      `  → ${files.length} file(s) to review, ${prepared.length} checklist item(s), ${coverage.covered.length}/${files.length} covered`,
+    );
+
+    // The run's ground truth: built by Task Insertion from its own diff, and handed to
+    // every stage after it. A stage is an independent call — what its prompt does not
+    // carry, it does not have (TASKS:Y3.2).
+    const facts = insertion.facts;
 
     const checks = registerChecks({
       engine: active,
@@ -355,8 +463,9 @@ export const runReview = async (
       plan: insertion.plan.data,
       extraTools: [...reviewTools, ...checks.tools],
       checks: checks.ids,
+      facts,
     });
-    await persist();
+    await step();
 
     const collate = await runCollate({
       session,
@@ -371,6 +480,7 @@ export const runReview = async (
       // plus everything the last review left open that this one did not settle.
       carriedOver: insertion.prior.open,
       extraTools: reviewTools,
+      facts,
     });
 
     // The groundedness gate (see groundRanked): fabrication dies here, named.
@@ -389,13 +499,44 @@ export const runReview = async (
       findings: ranked.findings,
     });
 
+    // What the run said it could not establish. Collected by the stages, reported here
+    // instead of dying in an artifact nobody opens.
+    const unknowns = [
+      ...brief.data.gaps.map((gap) => `warmup: ${gap}`),
+      ...work.output.data.openQuestions.map(
+        (question: string) => `work: ${question}`,
+      ),
+    ];
+    if (unknowns.length > 0) {
+      report.unknowns = unknowns;
+    }
     report.gates = gateStats({
       metrics: session.metrics(),
       work,
       findingsAfterDedupe: ranked.findings.length,
     });
-    report.verdict = verdict;
-    await persist();
+    // A run the gate had to rescue does not get to say a change is fine (TASKS:Y4.1).
+    // `recovered` was recorded and printed and consulted by nothing until now.
+    const decided = withRecoveryCaveat(verdict, session.metrics());
+    report.verdict = decided;
+    await step();
+    run.onProgress?.(
+      `  → verdict ${decided.decision.toUpperCase()} over ${ranked.findings.length} finding(s)`,
+    );
+
+    // Last checkpoint before anything reaches the pull request (TASKS:Y4.7). A run that
+    // worked no item and found nothing over a real change has not reviewed it, and the
+    // one thing it must never do is say so out loud as an approval. It fails HERE,
+    // before delivery: an approval nobody earned is worse on a pull request than a red
+    // check, and the run store keeps everything a human needs to see why.
+    const nothing = reviewEstablishedNothing({
+      changedFiles: insertion.diff.files.length,
+      checklist: work.checklist.tasks,
+      findings: ranked.findings.length,
+    });
+    if (nothing !== undefined) {
+      throw new StageError("work", nothing, work.output.path ?? paths.dir);
+    }
 
     report.delivery = deliveryStats(
       await runDelivery({
@@ -406,22 +547,23 @@ export const runReview = async (
         actions: platform.deliveryActions,
         runId: run.runId,
         ranked,
-        verdict,
+        verdict: decided,
         summary: collate.output.data.summary,
         changeSummary: insertion.plan.data.changeSummary,
         riskAreas: insertion.plan.data.riskAreas,
         checklistComplete: work.checklist.complete,
+        facts,
         dryRun: run.dryRun,
       }),
       // Intent from CONFIG, not from the probe: a repo that turned verdict delivery on
       // is owed proof even on the runs where every capability degraded away.
       { verdictProofRequired: config.yama.delivery.verdict },
     );
-    await persist();
+    await step();
 
     return {
       ranked,
-      verdict,
+      verdict: decided,
       tasks: report.tasks,
       report,
     };

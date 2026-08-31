@@ -56,6 +56,15 @@ capabilities:
       workspace: "${BITBUCKET_WORKSPACE}"
       repository: "${BITBUCKET_REPO}"
       pull_request_id: "${pr}"
+  # Answering a comment already on the pull request (the recurring-run case). On this
+  # server it is the SAME tool as an inline comment — a reply is one that carries the id
+  # of the comment it answers, which the agent supplies along with the text.
+  comment.reply:
+    tool: bitbucket.add_comment
+    args:
+      workspace: "${BITBUCKET_WORKSPACE}"
+      repository: "${BITBUCKET_REPO}"
+      pull_request_id: "${pr}"
   comment.summary.create:
     tool: bitbucket.add_comment
     args:

@@ -83,11 +83,31 @@ export const scanReportedFindings = async (options: {
   const target = await readTargetComments(options);
   const reported: PostedComment[] = [];
   const seen = new Set<string>();
+  // Answers, indexed by the comment they answer. A finding's thread is how a later run
+  // learns that a human pushed back on it — or that nobody did.
+  const answers = new Map<string, { author?: string; body: string }[]>();
+  for (const comment of target.comments) {
+    if (comment.inReplyTo === undefined) {
+      continue;
+    }
+    answers.set(comment.inReplyTo, [
+      ...(answers.get(comment.inReplyTo) ?? []),
+      {
+        ...(comment.author !== undefined ? { author: comment.author } : {}),
+        body: comment.body,
+      },
+    ]);
+  }
   for (const comment of target.comments) {
     for (const findingId of scanMarkers(comment.body)) {
       if (!seen.has(findingId)) {
         seen.add(findingId);
-        reported.push({ findingId, commentId: comment.id });
+        const replies = answers.get(comment.id);
+        reported.push({
+          findingId,
+          commentId: comment.id,
+          ...(replies !== undefined && replies.length > 0 ? { replies } : {}),
+        });
       }
     }
   }
