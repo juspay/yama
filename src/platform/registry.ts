@@ -84,6 +84,11 @@ export const createCapabilityRegistry = (
         ...(actions.includes("inlineComments")
           ? [toolFor("review.begin"), toolFor("review.submit")]
           : []),
+        // Replying is not one of the configured ACTIONS — nothing schedules it and nothing
+        // counts it. It rides along whenever this run is posting at all, because whether a
+        // thread is worth answering is a judgement made while delivering, not a box a
+        // repository ticks in advance. Unmapped, it simply is not there.
+        ...(actions.length > 0 ? [toolFor("comment.reply")] : []),
       ]),
   };
 };

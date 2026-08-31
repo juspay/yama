@@ -21,7 +21,7 @@ import type {
 import { OperatingBriefSchema } from "./schema.js";
 
 /** Enough steps to walk a rulebook tree and read it; not enough to wander. */
-const WARMUP_MAX_STEPS = 24;
+const WARMUP_MAX_STEPS = 48;
 
 const rel = (root: string, path: string): string => relative(root, path) || ".";
 

@@ -36,6 +36,44 @@ export type EngineCommandPolicy = {
   maxOutputBytes?: number;
 };
 
+/**
+ * The run's short-term memory: what one stage said, still there for the next one.
+ *
+ * Off, every stage and every retry is a cold call — which is what v5 shipped, and what
+ * made a failed stage unrecoverable rather than merely expensive. The summarizer is named
+ * here because the engine's own default is a provider a gateway-only deployment cannot
+ * reach, and "memory filled up" must not become "the stage died".
+ */
+export type EngineMemory = {
+  enabled: boolean;
+  /** Summarize at the threshold rather than dropping the oldest turns outright. */
+  summarize: boolean;
+  /** Tokens of history kept before summarization folds the older half away. */
+  tokenThreshold: number;
+  /** How long one summarization may take before the engine abandons it, in ms. */
+  summarizeTimeoutMs: number;
+  /** Who summarizes. Falls back to nothing — never to the engine's own default. */
+  summarizer?: EngineModel;
+};
+
+/** What the seam can say about memory, for the report and for `yama doctor`. */
+export type EngineMemoryStatus = {
+  /** Configured on for this run. */
+  enabled: boolean;
+  /** A live manager exists. False before the first call — initialization is lazy. */
+  ready: boolean;
+  /** The bound the history is kept under, when memory is on. */
+  tokenThreshold?: number;
+  /**
+   * Whether anything will actually EVICT. Memory on with no eviction is the shape that
+   * grows until the context window ends the run, and it looks identical to a healthy run
+   * from the outside — so the shell reports it rather than letting it be silent.
+   */
+  evicting?: boolean;
+  /** How long one summarization may take before the engine abandons it, in ms. */
+  summarizeTimeoutMs?: number;
+};
+
 /** Everything the seam needs to boot the main session. */
 export type EngineConfig = {
   model: EngineModel;
@@ -54,6 +92,8 @@ export type EngineConfig = {
    * input 128001 + output 128000 against a 256k window).
    */
   maxTokens?: number;
+  /** The run's short-term memory across stages. Absent ⇒ every call is a cold one. */
+  memory?: EngineMemory;
   /** Model for delegated workers. Falls back to `model` (TASKS:Y1.4 worker role). */
   workerModel?: EngineModel;
   /**
@@ -339,6 +379,8 @@ export type Engine = {
    * would be both dearer and less reliable than calling the tool.
    */
   callTool: (name: string, params?: unknown) => Promise<unknown>;
+  /** Whether this run actually has a memory, and whether it came up (TASKS:Y2.5). */
+  memoryStatus: () => EngineMemoryStatus;
   /** Host-side checklist state for the completeness gate (TASKS:N1.2). */
   tasksApi: (sessionId: string) => Promise<EngineTaskState>;
   /** Spawns a background worker and returns its handle at once (TASKS:N2.1). */

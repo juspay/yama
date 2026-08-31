@@ -66,3 +66,4 @@ export const STAGES: readonly Stage[] = [
 
 /** Stages that are terminal for local and dry-run modes. */
 export const TERMINAL_STAGE_FOR_DRY_RUN: Stage = "collate";
+export { renderTargetFacts } from "./target.js";

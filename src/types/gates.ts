@@ -13,12 +13,42 @@ import type { Engine, EngineTask } from "./engine.js";
 import type { Finding } from "./findings.js";
 import type { SessionCheckpointRequest, SessionRunner } from "./session.js";
 
-/** One schema-gated stage call: the checkpoint, plus how many retries it may have. */
+/** One schema-gated stage call: the checkpoint, its retries, and how it closes out. */
 export type SchemaGateRequest<T> = {
   session: SessionRunner;
   request: SessionCheckpointRequest<T>;
   /** Extra attempts after the first. Default 1 — TASKS:Y4.1 asks for one agentic retry. */
   retries?: number;
+  /**
+   * The closing ask, for a stage that ran out of room or could not answer.
+   *
+   * `tools` is the stage's EFFECTING toolset — what it needs to make its answer true,
+   * never what it needs to keep investigating. Task Insertion closes holding
+   * `tasks_create`, because a plan claiming a checklist that does not exist is the exact
+   * failure the gate is there to prevent; a stage with nothing to record closes with no
+   * tools at all, which is the default.
+   */
+  recovery?: {
+    tools?: readonly string[];
+    maxSteps?: number;
+    /** Ground truth restated, so the ask makes sense without any history behind it. */
+    context?: string;
+  };
+};
+
+/**
+ * What the preparation gate makes of a plan (TASKS:Y4.6): which changed files an item
+ * answers for, and which the review would otherwise merge without looking at.
+ */
+export type ChecklistCoverage = {
+  /** Changed files some item's scope names. */
+  covered: string[];
+  /** Changed files no item accounts for. Non-empty ⇒ the checklist is not workable yet. */
+  uncovered: string[];
+  /** Scope entries matching nothing in the change — `<UNKNOWN>`, or a path that moved. */
+  unresolved: string[];
+  /** Nothing is uncovered. */
+  complete: boolean;
 };
 
 /** What the completeness gate reads off the checklist (TASKS:Y4.2). */
@@ -50,12 +80,30 @@ export type ChecklistGateRequest = {
 export type ExistingComment = {
   id: string;
   body: string;
+  /**
+   * Who wrote it, when the forge said. `yama learn` weighs a maintainer's answer
+   * differently from the reviewer's own comment, and it cannot do that without a name.
+   */
+  author?: string;
+  /**
+   * The comment this one answers, when the forge said so or the thread's shape implied it.
+   * What makes "somebody replied to finding F7" a fact a recurring run can act on.
+   */
+  inReplyTo?: string;
 };
 
 /** A finding bound to the comment that carries it — the marker is what binds them. */
 export type PostedComment = {
   findingId: string;
   commentId: string;
+  /**
+   * What was said back on that comment, if anything (TASKS:Y7.4).
+   *
+   * A recurring run needs this to tell three cases apart that look identical without it:
+   * somebody fixed the finding, somebody argued with it, and nobody looked at it. The
+   * reply is a CLAIM — the current code is what settles whether the finding is still open.
+   */
+  replies?: { author?: string; body: string }[];
 };
 
 /** Marker dedup, decided before anything is posted (TASKS:Y4.3). */

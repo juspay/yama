@@ -26,14 +26,19 @@ const renderRaw = <T>(
   stage: Stage,
   attempt: number,
   result: StructuredResult<T>,
+  recovered: boolean,
 ): string =>
   [
-    `# stage ${stage} (checkpoint ${attempt})`,
+    `# stage ${stage} (checkpoint ${attempt})${recovered ? " — RECOVERY ASK" : ""}`,
     `provider: ${result.raw.provider ?? "unknown"}`,
     `model: ${result.raw.model ?? "unknown"}`,
     `steps: ${result.raw.stepsUsed ?? 0}`,
     `tools: ${(result.raw.toolsUsed ?? []).join(", ") || "(none)"}`,
-    `repaired: ${result.raw.repaired} · truncated: ${result.raw.truncated} · trusted: ${result.trusted}`,
+    // The SAME `trusted` the envelope carries, recovery folded in. Printing the engine's
+    // raw verdict here said `trusted: true` over an answer the run had to rescue — which
+    // is the exact misreading this flag exists to prevent, in the one artifact a human
+    // opens after a failure.
+    `repaired: ${result.raw.repaired} · truncated: ${result.raw.truncated} · trusted: ${result.trusted && !recovered}${recovered ? " (rescued: the stage did not answer on its own)" : ""}`,
     ``,
     `## content`,
     result.raw.content,
@@ -114,17 +119,21 @@ export const createSessionRunner = (options: {
     lastToolResults = result.raw.toolResults ?? [];
     const attempt = (attempts.get(req.stage) ?? 0) + 1;
     attempts.set(req.stage, attempt);
+    // An answer the gate had to rescue is never trusted, however well-formed it is: the
+    // one thing `trusted` has to mean is "the stage did its job and said so".
+    const recovered = req.recovery === true;
     const banked = await writePayload(
       options.paths,
       attempt === 1 ? `stage-${req.stage}` : `stage-${req.stage}-${attempt}`,
-      renderRaw(req.stage, attempt, result),
+      renderRaw(req.stage, attempt, result, recovered),
     );
 
     const metric: RunStageMetric = {
       stage: req.stage,
       startedAt,
       durationMs: Date.now() - began,
-      trusted: result.trusted,
+      trusted: result.trusted && !recovered,
+      ...(recovered ? { recovered: true } : {}),
       truncated: result.raw.truncated,
       ...(result.raw.provider !== undefined
         ? { provider: result.raw.provider }
@@ -154,8 +163,10 @@ export const createSessionRunner = (options: {
     const envelope: StageOutput<Stage, T> = {
       stage: req.stage,
       data: result.data,
-      trusted: result.trusted,
+      trusted: result.trusted && !recovered,
       truncated: result.raw.truncated,
+      ...(recovered ? { recovered: true } : {}),
+      attempts: attempt,
       completedAt: new Date().toISOString(),
     };
     metric.envelopePath = await writeStage(options.paths, envelope);

@@ -88,6 +88,17 @@ export const buildEngineConfig = (
     // for input.
     maxTokens: 32_000,
     systemPrompt: SYSTEM_INSTRUCTION,
+    // The run's short-term memory (TASKS:Y2.5). The summarizer is the `summarizer` chain
+    // from this repository's own `models:` block, because the engine's default is a
+    // provider a gateway-only deployment has no credential for — and a memory that dies
+    // when it fills up is worse than no memory at all.
+    memory: {
+      enabled: config.yama.memory.enabled,
+      summarize: config.yama.memory.summarize,
+      tokenThreshold: config.yama.memory.tokenThreshold,
+      summarizeTimeoutMs: config.yama.memory.summarizeTimeoutMs,
+      summarizer: toEngineModel(config.chains.summarizer),
+    },
     storeDir: run.storeDir,
     // TASKS:Y5.1 — a worker reads and reports. It never posts, and it never delegates.
     workerTools: READ_ONLY_TOOLS,

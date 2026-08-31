@@ -167,6 +167,7 @@ const learnEngine = async (options: { triage?: unknown } = {}) => {
       toolCalls.push({ name, params });
       return comments;
     },
+    memoryStatus: () => ({ enabled: true, ready: true, tokenThreshold: 64000 }),
     tasksApi: async (sessionId: string) => ({ sessionId, tasks: [] }),
     delegate: async () => ({ workerId: "none" }),
     collect: async () => [],

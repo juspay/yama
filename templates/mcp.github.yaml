@@ -76,6 +76,17 @@ capabilities:
       owner: "${GITHUB_OWNER}"
       repo: "${GITHUB_REPO}"
       issue_number: "${pr}"
+  # Answering a comment already on the pull request. What it is for is the recurring run:
+  # a finding still open on a second look, under a comment somebody answered or ignored —
+  # re-posting it would duplicate, saying nothing leaves a stale reply standing. The agent
+  # supplies `commentId` and `body`; this tool wants the numeric id from a #discussion_r
+  # anchor, which is what the comment reader already takes out of `html_url`.
+  comment.reply:
+    tool: github.add_reply_to_pull_request_comment
+    args:
+      owner: "${GITHUB_OWNER}"
+      repo: "${GITHUB_REPO}"
+      pullNumber: "${pr}"
   # comment.update:
   #   tool: github.update_pull_request_review_comment
   #   args: { owner: "${GITHUB_OWNER}", repo: "${GITHUB_REPO}" }

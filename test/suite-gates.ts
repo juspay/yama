@@ -14,6 +14,7 @@ import { z } from "zod";
 import {
   DIST_ENTRY,
   FIXTURES,
+  REPO_ROOT,
   assert,
   assertEqual,
   assertIncludes,
@@ -31,6 +32,16 @@ type RawShape = {
   truncated: boolean;
   provider?: string;
   model?: string;
+  /** What the attempt spent. The gate reads this to tell "ran out" from "answered badly". */
+  stepsUsed?: number;
+  toolsUsed?: string[];
+  toolResults?: {
+    name: string;
+    params?: unknown;
+    result?: unknown;
+    isError?: boolean;
+    truncated?: boolean;
+  }[];
 };
 
 type Reply = { data: unknown; trusted: boolean; raw: RawShape };
@@ -52,12 +63,24 @@ const reply = (data: unknown, overrides: Partial<RawShape> = {}): Reply => ({
 /** An engine that answers with a scripted list, recording what it was asked. */
 const scriptedEngine = (replies: Reply[]) => {
   const prompts: string[] = [];
+  /** Every call as the gate made it — the toolset and the budget, not just the words. */
+  const calls: { prompt: string; tools?: string[]; maxSteps?: number }[] = [];
   let index = 0;
   return {
     prompts,
+    calls,
     engine: {
-      generateStructured: async (req: { prompt: string }) => {
+      generateStructured: async (req: {
+        prompt: string;
+        tools?: string[];
+        maxSteps?: number;
+      }) => {
         prompts.push(req.prompt);
+        calls.push({
+          prompt: req.prompt,
+          ...(req.tools !== undefined ? { tools: req.tools } : {}),
+          ...(req.maxSteps !== undefined ? { maxSteps: req.maxSteps } : {}),
+        });
         const next = replies[Math.min(index, replies.length - 1)];
         index += 1;
         return next;
@@ -210,20 +233,128 @@ if (!isBuilt()) {
       assertEqual(
         prompts.length,
         3,
-        "the retry AND the finalize ask were spent before giving up",
+        "the retry AND the closing ask were spent before giving up",
       );
       assertIncludes(
         prompts[2] ?? "",
-        "Do NOT call any more tools",
-        "the last ask is the finalize — JSON only, no more work",
+        "STOP INVESTIGATING NOW",
+        "the last ask is the closing one — finish, do not keep looking",
       );
-      assertIncludes(message, "finalize", "the failure says the finalize ran");
+      assertIncludes(
+        message,
+        "closing ask",
+        "the failure says the closing ask ran",
+      );
       assertIncludes(message, "banked output", "the failure names the file");
       const banked = session.metrics().at(-1)?.rawPath ?? "";
       assertIncludes(
         await readFile(banked, "utf8"),
         "## structured",
         "both attempts are on disk",
+      );
+    });
+  });
+
+  await test("a stage that ran out of steps is closed out, not asked the same thing again", async () => {
+    // Measured on yama PR #101: Task Insertion spent all 32 of its steps reading, produced
+    // no JSON, and the gate re-ran the WHOLE original prompt — which spent 32 more steps
+    // reading the same files. A budget that ran out means the stage was working, so the
+    // only useful next question is "finish", not "start again".
+    await withTempDir("gate-exhausted", async (dir) => {
+      const { session, calls } = await sessionOver(dir, [
+        reply(undefined, {
+          stepsUsed: 32,
+          toolResults: [
+            { name: "read_file", params: { path: "src/core/index.ts" } },
+            { name: "retrieve_context", params: { artifactId: "16e63c17" } },
+          ],
+        }),
+        reply({ ok: true }),
+      ]);
+      const out = await mod.checkpointWithSchemaGate({
+        session,
+        request: {
+          stage: "taskInsertion",
+          prompt: "the task",
+          schema: Payload,
+          tools: ["read_file", "list_files", "tasks_create"],
+          maxSteps: 32,
+        },
+        recovery: {
+          tools: ["tasks_create"],
+          context: "THE CHANGE UNDER REVIEW",
+        },
+      });
+
+      assertEqual(calls.length, 2, "no second full attempt was spent");
+      const closing = calls[1];
+      assertIncludes(
+        closing?.prompt ?? "",
+        "used all 32 of its steps",
+        "the closing ask names what actually went wrong",
+      );
+      assertIncludes(
+        closing?.prompt ?? "",
+        "read_file path=src/core/index.ts",
+        "and carries what the cut-off attempt already did",
+      );
+      assertIncludes(
+        closing?.prompt ?? "",
+        "THE CHANGE UNDER REVIEW",
+        "with the run's ground truth restated",
+      );
+      assertEqual(
+        closing?.tools?.join(","),
+        "tasks_create",
+        "exploring tools are dropped and the EFFECTING one is kept — a closing ask that cannot create the checklist can only produce a lie",
+      );
+      assertEqual(out.recovered, true, "the envelope says it was rescued");
+      assertEqual(
+        out.trusted,
+        false,
+        "and a rescued answer is never trusted, however well-formed it is",
+      );
+      assertEqual(
+        session.metrics().at(-1)?.recovered,
+        true,
+        "the run report carries the difference too",
+      );
+      // And so does the artifact a human opens after a failure. Printing the engine's
+      // own verdict here said `trusted: true` over an answer the run had to rescue.
+      const banked = await readFile(
+        session.metrics().at(-1)?.rawPath ?? "",
+        "utf8",
+      );
+      assertIncludes(banked, "RECOVERY ASK", "the evidence names what it is");
+      assertIncludes(
+        banked,
+        "trusted: false",
+        "and never calls a rescued answer trusted",
+      );
+    });
+  });
+
+  await test("a closing ask with nothing to record holds no tools at all", async () => {
+    await withTempDir("gate-closing", async (dir) => {
+      const { session, calls } = await sessionOver(dir, [
+        reply(undefined, { stepsUsed: 8 }),
+        reply(undefined, { stepsUsed: 8 }),
+        reply({ ok: true }),
+      ]);
+      await mod.checkpointWithSchemaGate({
+        session,
+        request: {
+          stage: "collate",
+          prompt: "the task",
+          schema: Payload,
+          tools: ["read_file"],
+          maxSteps: 32,
+        },
+      });
+      assertEqual(
+        calls[2]?.tools?.join(","),
+        "__closing_no_tools__",
+        "no effecting tools means no tools — an include-list that matches nothing",
       );
     });
   });
@@ -1199,6 +1330,689 @@ if (!isBuilt()) {
       ok: false,
     });
     assertEqual(merged.ok, true, "posted once anywhere is posted");
+  });
+
+  await test("a plan the agent never turned into a checklist is caught, and named", () => {
+    // The two live shapes this exists for. yama PR #101: no items at all over 15 files.
+    // curator PR #702: three items, every one scoped `<UNKNOWN>`, and a run that
+    // APPROVED a change nobody had read. Guarding `plan.tasks` catches neither — the
+    // schema pins it at .min(1), so a plan that validates always claims one.
+    const task = (scope: string[]) => ({
+      title: "check it",
+      rationale: "the diff changed it",
+      scope,
+      delegate: false,
+    });
+    const item = (id: string) => ({
+      id,
+      title: `check ${id}`,
+      status: "pending" as const,
+    });
+
+    const none = mod.checklistProblems({
+      files: ["src/a.ts"],
+      tasks: [task(["src/a.ts"])],
+      checklist: [],
+    });
+    assertEqual(none.length, 1, "a plan nobody created is a problem");
+    assertIncludes(
+      none[0] ?? "",
+      "tasks_create was never called",
+      "and the reason says what was not done",
+    );
+    assertEqual(
+      mod.preparationFatal({
+        files: ["src/a.ts"],
+        tasks: [task(["src/a.ts"])],
+        checklist: [],
+      }),
+      true,
+      "no checklist is fatal: there is nothing for the work stage to pick up",
+    );
+
+    assertEqual(
+      mod.preparationFatal({
+        files: ["src/a.ts", "src/b.ts"],
+        tasks: [task(["<UNKNOWN>"])],
+        checklist: [item("t1")],
+      }),
+      true,
+      "items that answer for NOT ONE file are the #702 shape, and just as fatal",
+    );
+
+    assertEqual(
+      mod.checklistProblems({
+        files: ["src/a.ts"],
+        tasks: [task(["src/a.ts"])],
+        checklist: [item("t1")],
+      }).length,
+      0,
+      "a checklist the engine holds, covering the change, passes",
+    );
+    assertEqual(
+      mod.checklistProblems({ files: [], tasks: [], checklist: [] }).length,
+      0,
+      "and a change with no reviewable file owes no checklist at all",
+    );
+  });
+
+  await test("coverage is measured against the change, not against the prose", () => {
+    const task = (scope: string[]) => ({
+      title: "check it",
+      rationale: "why",
+      scope,
+      delegate: false,
+    });
+    const files = [
+      "src/stages/work.ts",
+      "src/stages/collate.ts",
+      "docs/readme.md",
+    ];
+
+    const byDir = mod.checkCoverage({ files, tasks: [task(["src/stages"])] });
+    assertEqual(
+      byDir.covered.length,
+      2,
+      "a bare directory covers what is under it — nobody writing a scope means otherwise",
+    );
+    assertEqual(
+      byDir.uncovered.join(","),
+      "docs/readme.md",
+      "and what it does not cover is named, one path at a time",
+    );
+
+    const placeholder = mod.checkCoverage({
+      files,
+      tasks: [task(["<UNKNOWN>"]), task(["TBD"])],
+    });
+    assertEqual(
+      placeholder.covered.length,
+      0,
+      "a placeholder scope covers nothing",
+    );
+    assertEqual(
+      placeholder.unresolved.length,
+      0,
+      "and is not reported as a path that merely moved",
+    );
+
+    const stale = mod.checkCoverage({ files, tasks: [task(["src/gone.ts"])] });
+    assertEqual(
+      stale.unresolved.join(","),
+      "src/gone.ts",
+      "a scope naming a file the change does not touch is called out on its own",
+    );
+
+    assertEqual(
+      mod.checkCoverage({ files: ["a.ts", "b.ts"], tasks: [task([])] })
+        .complete,
+      true,
+      "an unscoped item means the whole change, and on a small one it is honest",
+    );
+    assertEqual(
+      mod.checkCoverage({
+        files: ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"],
+        tasks: [task([])],
+      }).covered.length,
+      0,
+      "on a large one it is how a plan looks when nobody read the diff",
+    );
+  });
+
+  await test("the preparation nudge says what is missing and what to do", () => {
+    const nudge = mod.buildPreparationNudge({
+      problems: ["2 of 3 changed file(s) are on no checklist item"],
+      files: ["a.ts", "b.ts", "c.ts"],
+      coverage: {
+        covered: ["a.ts"],
+        uncovered: ["b.ts", "c.ts"],
+        unresolved: ["<UNKNOWN>"],
+        complete: false,
+      },
+      checklist: [{ id: "t1", title: "check a.ts", status: "pending" }],
+      facts: "THE CHANGE UNDER REVIEW — pull request #101.",
+    });
+    assertIncludes(
+      nudge,
+      "THE CHANGE UNDER REVIEW",
+      "it restates the ground truth",
+    );
+    assertIncludes(nudge, "b.ts", "names the files nothing answers for");
+    assertIncludes(
+      nudge,
+      "t1",
+      "shows the checklist as the engine really holds it",
+    );
+    assertIncludes(nudge, "tasks_create", "and says the call that fixes it");
+    assertIncludes(
+      nudge,
+      "needs no review is still accounted for",
+      "while leaving the judgement — including 'this one is fine' — to the reviewer",
+    );
+    assertIncludes(
+      mod.buildPreparationNudge({
+        problems: ["no checklist exists"],
+        files: ["a.ts"],
+        coverage: {
+          covered: [],
+          uncovered: ["a.ts"],
+          unresolved: [],
+          complete: false,
+        },
+        checklist: [],
+        final: true,
+      }),
+      "LAST ROUND",
+      "and the last round asks for the smallest thing that can still work",
+    );
+  });
+
+  await test("a review that established nothing does not get to approve", () => {
+    // curator PR #702, exactly: four items, every one closed unworked, no findings, and
+    // `decideVerdict([], policy)` returning APPROVE over a change nobody had read.
+    const closed = (id: string) => ({
+      id,
+      title: `check ${id}`,
+      status: "closed" as const,
+      note: "blocked",
+    });
+    const reason = mod.reviewEstablishedNothing({
+      changedFiles: 7,
+      checklist: [closed("t1"), closed("t2")],
+      findings: 0,
+    });
+    assert(reason !== undefined, "a run that worked nothing cannot decide");
+    assertIncludes(
+      reason ?? "",
+      "not a review that found nothing",
+      "and the reason draws the distinction that matters",
+    );
+    assertEqual(
+      mod.reviewEstablishedNothing({
+        changedFiles: 7,
+        checklist: [{ id: "t1", title: "check", status: "done" }],
+        findings: 0,
+      }),
+      undefined,
+      "a run that WORKED its checklist and found nothing is a clean review, and says so",
+    );
+    assertEqual(
+      mod.reviewEstablishedNothing({
+        changedFiles: 7,
+        checklist: [closed("t1")],
+        findings: 2,
+      }),
+      undefined,
+      "and findings prove the review happened whatever the checklist looks like",
+    );
+    assertEqual(
+      mod.reviewEstablishedNothing({
+        changedFiles: 0,
+        checklist: [],
+        findings: 0,
+      }),
+      undefined,
+      "an empty change is owed nothing",
+    );
+  });
+
+  await test("the same task created seventeen times is one task", () => {
+    // Measured on this repository's own pull request: 327 checklist items over 86
+    // distinct titles, one of them created seventeen times, from a plan whose own 25
+    // tasks were all unique. `tasks_create` appends, so a model that calls it twice with
+    // overlapping arrays gets duplicates — and the completeness gate would then demand
+    // all 327 be settled, turning a stutter in one tool call into an unfinishable review.
+    const item = (
+      id: string,
+      title: string,
+      status: string,
+      note?: string,
+    ) => ({ id, title, status, ...(note !== undefined ? { note } : {}) });
+
+    const distinct = mod.distinctTasks([
+      item("t1", "check the token endpoint", "pending"),
+      item("t2", "check the token endpoint", "done"),
+      item("t3", "Check The Token Endpoint", "pending"),
+      item(
+        "t4",
+        "check the migration",
+        "closed",
+        "no migration in this change",
+      ),
+    ]);
+    assertEqual(distinct.length, 2, "two titles are two pieces of work");
+    assertEqual(
+      distinct.find((t: { title: string }) => t.title.includes("token"))
+        ?.status,
+      "done",
+      "work done once is done, whichever copy it was recorded against",
+    );
+
+    const gate = mod.checkChecklist({
+      sessionId: "run-1",
+      tasks: [
+        item("t1", "check the token endpoint", "done"),
+        item("t2", "check the token endpoint", "pending"),
+        item("t3", "check the token endpoint", "pending"),
+      ],
+    });
+    assertEqual(
+      gate.complete,
+      true,
+      "and the completeness gate is not held open by copies of finished work",
+    );
+    assertEqual(gate.tasks.length, 1, "it reports the work, not the copies");
+
+    // The trade-off, pinned rather than left implicit (raised in review of this change):
+    // two genuinely different items sharing a title also collapse, so a done one masks a
+    // pending one. The engine's checklist carries no scope to separate them by, and
+    // collapsing conservatively would restore the 317-pending failure this fixes. What
+    // bounds it is the other gate: per-file coverage is checked at preparation, against
+    // the plan's scopes, before the completeness gate is ever consulted.
+    const sharedTitle = mod.checkChecklist({
+      sessionId: "run-1",
+      tasks: [
+        item("t1", "check error handling", "done"),
+        item("t2", "check error handling", "pending"),
+      ],
+    });
+    assertEqual(
+      sharedTitle.complete,
+      true,
+      "same title collapses even when the work differed — the cost of making stutter copies survivable",
+    );
+
+    const stillOpen = mod.checkChecklist({
+      sessionId: "run-1",
+      tasks: [
+        item("t1", "check the token endpoint", "done"),
+        item("t2", "check the migration", "pending"),
+      ],
+    });
+    assertEqual(
+      stillOpen.complete,
+      false,
+      "a genuinely different item still holds the gate open",
+    );
+  });
+
+  await test("a reply is attached to the finding it answers, and travels as a claim", () => {
+    // The recurring-run case: review 1 posts five findings, somebody answers two of them,
+    // review 2 runs. It has to tell three situations apart that look identical without the
+    // thread — fixed, argued with, and ignored — and a reply saying "fixed" is a claim the
+    // current code either bears out or does not.
+    const marker = (id: string) => `<!-- yama:finding:${id} -->`;
+    const comments = [
+      { id: "c1", body: `logs a token ${marker("auth-token-logged")}` },
+      {
+        id: "c2",
+        body: "fixed in the latest commit",
+        author: "a maintainer",
+        inReplyTo: "c1",
+      },
+      { id: "c3", body: `weak hash ${marker("weak-hash")}` },
+    ];
+
+    const dedupe = mod.dedupePostedFindings({
+      findings: [
+        { id: "auth-token-logged", severity: "CRITICAL" },
+        { id: "weak-hash", severity: "MAJOR" },
+        { id: "new-one", severity: "MINOR" },
+      ],
+      comments,
+    });
+    assertEqual(
+      dedupe.post.map((f: { id: string }) => f.id).join(","),
+      "new-one",
+      "only the finding nobody has seen gets posted",
+    );
+    const answered = dedupe.alreadyPosted.find(
+      (p: { findingId: string }) => p.findingId === "auth-token-logged",
+    );
+    assertEqual(
+      answered?.replies?.[0]?.author,
+      "a maintainer",
+      "the finding carries who answered it",
+    );
+    assertIncludes(
+      answered?.replies?.[0]?.body ?? "",
+      "fixed in the latest commit",
+      "and what they said — which this run still found open, so it is a claim, not a fix",
+    );
+    const ignored = dedupe.alreadyPosted.find(
+      (p: { findingId: string }) => p.findingId === "weak-hash",
+    );
+    assertEqual(
+      ignored?.replies,
+      undefined,
+      "a finding nobody replied to is distinguishable from one that was answered",
+    );
+
+    const prompt = mod.buildDeliveryPrompt({
+      plan: {
+        actions: ["inlineComments"],
+        comments: [],
+        alreadyPosted: dedupe.alreadyPosted,
+        stale: [],
+      },
+      registry: {
+        toolFor: (capability: string) =>
+          capability === "comment.reply"
+            ? "add_reply_to_pull_request_comment"
+            : "add_comment",
+        argsFor: () => ({ owner: "juspay", repo: "yama" }),
+      },
+    });
+    assertIncludes(
+      prompt,
+      "add_reply_to_pull_request_comment",
+      "the reply tool is named from the capability map, never from code",
+    );
+    assertIncludes(
+      prompt,
+      "READ ITS OWN PARAMETERS",
+      "and the agent calls it the way that tool documents itself",
+    );
+    const noReply = mod.buildDeliveryPrompt({
+      plan: {
+        actions: ["inlineComments"],
+        comments: [],
+        alreadyPosted: dedupe.alreadyPosted,
+        stale: [],
+      },
+      registry: {
+        toolFor: (capability: string) =>
+          capability === "comment.reply" ? undefined : "add_comment",
+        argsFor: () => ({}),
+      },
+    });
+    assertIncludes(
+      noReply,
+      "Nothing you hold can answer an existing comment",
+      "a forge with no reply tool says so, rather than faking one with a new comment",
+    );
+    assertIncludes(
+      prompt,
+      "STILL OPEN",
+      "delivery is told they survived a second look",
+    );
+    assertIncludes(
+      prompt,
+      "a maintainer replied: fixed in the latest commit",
+      "with the reply that has not been answered",
+    );
+    assertIncludes(
+      prompt,
+      "nobody has replied to it",
+      "and the one nobody touched, said plainly",
+    );
+    assertIncludes(
+      prompt,
+      "your judgement",
+      "whether to answer is the reviewer's call, not a step the shell forces",
+    );
+    assertIncludes(
+      prompt,
+      "None of it is counted as delivery",
+      "and nothing extra is counted against the findings contract",
+    );
+  });
+
+  await test("a run the gate had to rescue does not approve", () => {
+    // Caught by this repository's own review of this change, and it was right: `recovered`
+    // was recorded on the metric, printed in the progress line, and consulted by nothing.
+    // decideVerdict is a pure function of findings, so a run whose stage had to be closed
+    // out by the gate returned APPROVE indistinguishably from one that did its job.
+    const clean = { decision: "approve" as const, reasons: ["nothing found"] };
+    const rescued = mod.withRecoveryCaveat(clean, [
+      { stage: "warmup", trusted: true },
+      { stage: "taskInsertion", recovered: true },
+    ]);
+    assertEqual(
+      rescued.decision,
+      "comment",
+      "an approval is a positive claim, and a rescued run cannot make it at full strength",
+    );
+    assertIncludes(
+      rescued.reasons.join(" "),
+      "taskInsertion",
+      "and the reason names the stage that had to be closed out",
+    );
+    assertEqual(
+      mod.withRecoveryCaveat(clean, [{ stage: "warmup", trusted: true }])
+        .decision,
+      "approve",
+      "a run that answered on its own still approves",
+    );
+    assertEqual(
+      mod.withRecoveryCaveat(clean, [{ stage: "work", recovered: true }])
+        .decision,
+      "approve",
+      "a rescued WORK round does not: it answers to its own completeness gate, and on a slow gateway it is closed out routinely",
+    );
+    assertEqual(
+      mod.withRecoveryCaveat(clean, [{ stage: "collate", recovered: true }])
+        .decision,
+      "comment",
+      "but the stage the findings themselves came out of does",
+    );
+    assertEqual(
+      mod.withRecoveryCaveat({ decision: "block", reasons: ["1 CRITICAL"] }, [
+        { stage: "work", recovered: true },
+      ]).decision,
+      "block",
+      "and a rescued run that still found something serious blocks on its own evidence",
+    );
+  });
+
+  await test("a thread this reviewer already answered is not answered again", () => {
+    // The one write surface this change adds outside the posted-confirmed contract. Without
+    // a marker of its own, every recurring run would tell the same thread the same thing
+    // again — the duplicate-posting failure that marker dedup exists to prevent.
+    const replyMarker = (id: string) => `<!-- yama:reply:${id} -->`;
+    const prompt = (replies: { body: string }[]) =>
+      mod.buildDeliveryPrompt({
+        plan: {
+          actions: ["inlineComments"],
+          comments: [],
+          alreadyPosted: [{ findingId: "weak-hash", commentId: "c3", replies }],
+          stale: [],
+        },
+        registry: {
+          toolFor: (capability: string) =>
+            capability === "comment.reply" ? "add_reply" : "add_comment",
+          argsFor: () => ({}),
+        },
+      });
+
+    const fresh = prompt([]);
+    assertIncludes(fresh, "weak-hash", "an unanswered thread is offered");
+    assertIncludes(
+      fresh,
+      replyMarker("weak-hash"),
+      "with the marker the reply must carry",
+    );
+
+    const answered = prompt([
+      { body: `still open after a second look ${replyMarker("weak-hash")}` },
+    ]);
+    assertIncludes(
+      answered,
+      "already carries this reviewer's answer",
+      "a thread this reviewer already answered is not offered again",
+    );
+    assert(
+      !answered.includes("marker for your reply"),
+      "and no reply marker is handed out for it",
+    );
+  });
+
+  await test("memory that cannot evict is a named degradation, not a silent one", () => {
+    // Raised by this change's own review: the summarizer ceiling lives inside the engine,
+    // "and Yama never names or detects a summarizer timeout as a named degradation — the
+    // failure is silent context growth until the run dies at the window". Yama cannot see
+    // the engine's internal timeout, but it does know whether anything will evict at all,
+    // and that is the state that grows unbounded while looking healthy.
+    const evicting = {
+      enabled: true,
+      ready: true,
+      evicting: true,
+      tokenThreshold: 16000,
+    };
+    const notEvicting = { ...evicting, evicting: false };
+    assertEqual(
+      mod.memoryDegradation(evicting),
+      undefined,
+      "a memory that summarizes needs no warning",
+    );
+    assertIncludes(
+      mod.memoryDegradation(notEvicting)?.reason ?? "",
+      "nothing will evict",
+      "one that cannot says so, in the run report a human reads",
+    );
+    assertIncludes(
+      mod.memoryDegradation(notEvicting)?.reason ?? "",
+      "16000",
+      "naming the threshold that will be crossed and not acted on",
+    );
+    assertIncludes(
+      mod.memoryDegradation({ enabled: false, ready: false })?.reason ?? "",
+      "starts from nothing",
+      "and memory switched off is still its own, different degradation",
+    );
+  });
+
+  await test("no prompt depends on a conversation being there", async () => {
+    // Memory is on (TASKS:Y2.5) and this rule survives it. Summarization evicts, so a
+    // prompt whose meaning lives in an earlier turn breaks under exactly the load that
+    // makes it necessary — and it broke completely for the whole of v5, when the engine
+    // was built with no memory config at all and every stage was a cold call. The gate's
+    // own closing ask used to say "using only what you have already gathered in this
+    // conversation" while switching every tool off, which on a cold call can only invent.
+    const banned = [
+      "in this conversation",
+      "your last turn",
+      "already gathered",
+    ];
+    const sources = [
+      "stages/warmup.ts",
+      "stages/taskInsertion.ts",
+      "stages/work.ts",
+      "stages/collate.ts",
+      "stages/delivery.ts",
+      "stages/target.ts",
+      "gates/schema.ts",
+      "gates/checklist.ts",
+      "gates/coverage.ts",
+      "core/instruction.ts",
+    ];
+    for (const source of sources) {
+      const text = await readFile(path.join(REPO_ROOT, "src", source), "utf8");
+      for (const phrase of banned) {
+        assert(
+          !text.includes(phrase),
+          `${source} must not say "${phrase}" — every prompt has to stand on its own`,
+        );
+      }
+    }
+  });
+
+  await test("what a run could not establish reaches the summary", () => {
+    // The work stage wrote "conversation memory retrieval is disabled in this
+    // environment" — the one line that explained curator PR #702 — into an artifact
+    // nobody opens. It belongs in the report a human actually reads.
+    const base = {
+      runId: "run-1",
+      mode: "pr" as const,
+      target: { mode: "pr" as const, pr: 702 },
+      startedAt: new Date().toISOString(),
+      stages: [],
+      tasks: [],
+      degradations: [],
+    };
+    const rendered = mod.renderRunSummary(
+      {
+        ...base,
+        unknowns: ["warmup: no rulebook was read", "work: memory off"],
+      },
+      "/tmp/store",
+    );
+    assertIncludes(
+      rendered,
+      "could not be established",
+      "the section is named plainly",
+    );
+    assertIncludes(
+      rendered,
+      "work: memory off",
+      "and carries the run's own words",
+    );
+    const many = mod.renderRunSummary(
+      {
+        ...base,
+        unknowns: Array.from({ length: 12 }, (_, index) => `work: q${index}`),
+      },
+      "/tmp/store",
+    );
+    assertIncludes(
+      many,
+      "and 4 more",
+      "a long list is truncated with the count, never silently cut",
+    );
+    assert(
+      !mod
+        .renderRunSummary(base, "/tmp/store")
+        .includes("could not be established"),
+      "and a run with nothing unknown says nothing",
+    );
+  });
+
+  await test("every stage is told the change, not just the last stage's prose", () => {
+    // Measured on curator PR #702: the stages after Task Insertion were handed only
+    // `plan.changeSummary` — which said the change could not be retrieved — while the
+    // diff sat in the run store under a stable id. A stage is one independent call, so
+    // whatever its prompt does not carry, it does not have.
+    const block = mod.renderTargetFacts({
+      target: { mode: "pr", pr: 702, base: "origin/main" },
+      diff: {
+        files: [
+          { path: "src/a.ts", status: "modified", additions: 4, deletions: 1 },
+          {
+            path: "src/b.ts",
+            previousPath: "src/old.ts",
+            status: "renamed",
+            additions: 0,
+            deletions: 0,
+          },
+        ],
+        additions: 4,
+        deletions: 1,
+        patch: "diff --git a/src/a.ts b/src/a.ts",
+        empty: false,
+      },
+      banked: {
+        id: "7a42d65d",
+        sizeBytes: 44943,
+        preview: "diff --git",
+        readBackHint: "retrieve_context({ artifactId: '7a42d65d' })",
+      },
+      excluded: ["pnpm-lock.yaml"],
+    });
+    assertIncludes(block, "pull request #702", "the target names itself");
+    assertIncludes(block, "into origin/main", "and the ref it is going into");
+    assertIncludes(block, "src/a.ts", "every changed file is listed");
+    assertIncludes(block, "was src/old.ts", "a rename says where it came from");
+    assertIncludes(block, "7a42d65d", "the banked patch is named by id");
+    assertIncludes(
+      block,
+      "retrieve_context({ artifactId: '7a42d65d' })",
+      "with the call that reads it back",
+    );
+    assertIncludes(
+      block,
+      "pnpm-lock.yaml",
+      "and what was excluded is named, so a stage knows what it is not seeing",
+    );
   });
 
   await test("a marker confirms whatever argument the platform carries it in", () => {

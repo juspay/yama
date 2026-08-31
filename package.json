@@ -99,6 +99,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.20.0",
     "@types/yargs": "^17.0.35",
+    "conventional-changelog-conventionalcommits": "^8.0.0",
     "eslint": "^10.0.2",
     "globals": "^16.0.0",
     "husky": "^9.0.0",
@@ -107,8 +108,7 @@
     "semantic-release": "^24.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.2",
-    "conventional-changelog-conventionalcommits": "^8.0.0"
+    "typescript-eslint": "^8.57.2"
   },
   "publishConfig": {
     "access": "public",
@@ -126,6 +126,9 @@
       "form-data": ">=4.0.6",
       "@grpc/grpc-js": ">=1.13.5",
       "adm-zip": ">=0.6.0"
+    },
+    "patchedDependencies": {
+      "@juspay/neurolink@12.7.2": "patches/@juspay__neurolink@12.7.2.patch"
     }
   },
   "lint-staged": {

@@ -122,6 +122,9 @@ await yargs(hideBin(process.argv))
           root,
           storeDir,
           dryRun: argv.dryRun,
+          // Live progress: a review is minutes of work, and a silent terminal is
+          // indistinguishable from a hung one while you are watching it.
+          onProgress: (line) => process.stderr.write(`${line}\n`),
         });
         say(renderRunSummary(result.report, storeDir));
         if (argv.json !== undefined) {

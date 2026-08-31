@@ -199,6 +199,30 @@ export const renderRunSummary = (
       : ["  (none ran)"]),
   ];
 
+  // What the run could not establish, in the run's own words. Loud, because this is
+  // the section that would have explained curator PR #702 in one line.
+  if (report.unknowns !== undefined && report.unknowns.length > 0) {
+    lines.push(
+      "",
+      "could not be established",
+      ...report.unknowns.slice(0, 8).map((note) => `  ${note}`),
+      ...(report.unknowns.length > 8
+        ? [`  … and ${report.unknowns.length - 8} more`]
+        : []),
+    );
+  }
+  // A plan with a hole in it still reviewed everything else — and the hole is named, so
+  // the verdict below cannot read as though it covered the whole change.
+  if (report.uncoveredFiles !== undefined && report.uncoveredFiles.length > 0) {
+    lines.push(
+      "",
+      `on no checklist item — reviewed by nothing (${report.uncoveredFiles.length})`,
+      ...report.uncoveredFiles.slice(0, 8).map((path) => `  ${path}`),
+      ...(report.uncoveredFiles.length > 8
+        ? [`  … and ${report.uncoveredFiles.length - 8} more`]
+        : []),
+    );
+  }
   if (report.excludedFiles !== undefined && report.excludedFiles.length > 0) {
     // Said out loud: a reader must be able to see what the review did not look at.
     lines.push(

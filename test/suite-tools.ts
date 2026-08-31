@@ -68,7 +68,10 @@ const load = async (): Promise<ToolsApi> => {
 };
 
 /** Registers the fs toolset into a plain map, the way the seam would. */
-const fsTools = async (root: string, config?: { maxEntries?: number }) => {
+const fsTools = async (
+  root: string,
+  config?: { maxEntries?: number; maxBytes?: number },
+) => {
   const tools = new Map<string, ToolRecord>();
   const api = await load();
   api.registerFsTools({
@@ -159,27 +162,103 @@ if (!isBuilt()) {
     });
   });
 
-  await test("read_file pages a long file instead of truncating it", async () => {
+  await test("read_file pages a long file in LINES, and says where to resume", async () => {
+    // The unit is the whole point. Addressed in characters — which is what this tool
+    // did, while its description said only "the next offset" — a real stage spent 29 of
+    // its 32 steps walking one 17 KB file in 300-to-800 character windows and never
+    // reached the work it was there to do. Every model reads offset/limit as lines.
     await withTempDir("fs", async (dir) => {
+      const lines = Array.from(
+        { length: 200 },
+        (_, index) => `line ${index + 1}`,
+      );
       await writeFile(
         path.join(dir, "long.txt"),
-        "abcdefghij".repeat(10),
+        `${lines.join("\n")}\n`,
         "utf8",
       );
       const tools = await fsTools(dir);
+
       const first = await tools.call("read_file", {
         path: "long.txt",
-        limit: 30,
+        limit: 50,
       });
-      assertEqual(first.totalSize, 100, "total size");
-      assertEqual(String(first.content).length, 30, "first page length");
-      assertEqual(first.hasMore, true, "hasMore on the first page");
-      const last = await tools.call("read_file", {
+      assertEqual(
+        first.totalLines,
+        200,
+        "totalLines counts lines, not characters",
+      );
+      assertEqual(first.startLine, 1, "a page with no offset starts at line 1");
+      assertEqual(first.endLine, 50, "limit 50 returns 50 lines");
+      assertEqual(
+        String(first.content).split("\n").length,
+        50,
+        "50 lines of content",
+      );
+      assertIncludes(String(first.content), "line 50", "up to the fiftieth");
+      assertEqual(first.hasMore, true, "there is more of the file");
+      assertEqual(first.nextOffset, 51, "and it says exactly where to resume");
+
+      const next = await tools.call("read_file", {
         path: "long.txt",
-        offset: 90,
+        offset: first.nextOffset,
       });
-      assertEqual(String(last.content).length, 10, "last page length");
-      assertEqual(last.hasMore, false, "hasMore on the last page");
+      assertEqual(
+        next.startLine,
+        51,
+        "resuming at nextOffset continues the file",
+      );
+      assertEqual(next.endLine, 200, "the rest of it arrives in one page");
+      assertEqual(next.hasMore, false, "and that is the end");
+      assertEqual(
+        next.nextOffset,
+        undefined,
+        "a finished file names no next page",
+      );
+
+      const whole = await tools.call("read_file", { path: "long.txt" });
+      assertEqual(
+        whole.endLine,
+        200,
+        "no offset and no limit reads the whole file",
+      );
+      assertEqual(whole.hasMore, false, "in ONE step, which is the point");
+
+      const past = await tools.call("read_file", {
+        path: "long.txt",
+        offset: 5000,
+      });
+      assertEqual(
+        past.hasMore,
+        false,
+        "an offset past the end is not an error",
+      );
+    });
+  });
+
+  await test("read_file stops on the byte ceiling without cutting a line in half", async () => {
+    await withTempDir("fs", async (dir) => {
+      const lines = Array.from({ length: 10 }, () => "x".repeat(100));
+      await writeFile(
+        path.join(dir, "wide.txt"),
+        `${lines.join("\n")}\n`,
+        "utf8",
+      );
+      const tools = await fsTools(dir, { maxBytes: 250 });
+      const page = await tools.call("read_file", { path: "wide.txt" });
+      assertEqual(page.endLine, 2, "only whole lines that fit come back");
+      assertEqual(
+        page.nextOffset,
+        3,
+        "and the next page starts at the first that did not",
+      );
+      assertEqual(
+        String(page.content)
+          .split("\n")
+          .every((line) => line.length === 100),
+        true,
+        "no line is returned half-read",
+      );
     });
   });
 

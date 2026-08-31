@@ -97,6 +97,62 @@ export const LearnConfigSchema = z
   })
   .prefault({});
 
+/**
+ * Conversation memory — the run's own short-term memory (TASKS:Y2.5).
+ *
+ * A stage is one `generate()` call, and without this block every one of them is a COLD
+ * call: a retry cannot see what the attempt before it read, and a nudge round has no idea
+ * what its own last turn was. That was true for the whole of v5 — the engine was built
+ * with no config and NeuroLink defaults `conversationMemory.enabled` to false — and it is
+ * what made curator PR #702 unrecoverable: three stages in a row wrote "the change details
+ * were not retrieved", each one starting from nothing.
+ *
+ * On by default now. Two settings matter and both have teeth:
+ *
+ *   - `tokenThreshold` and `summarizeTimeoutMs` together decide whether eviction can
+ *     finish at all, not just how much history is kept. A summarization that misses its
+ *     ceiling evicts NOTHING, so both are properties of the deployment, not of the model.
+ *   - summarization runs on the `summarizer` chain from `models:`, and the chain always
+ *     resolves (`summarizer` falls back to `worker`, then to the required `main`). Leaving
+ *     it unset would not be harmless: `generateSummary` refuses without an explicit
+ *     provider and model, which means no eviction at all rather than a slower summarizer.
+ *
+ * Memory is an accelerator, never a dependency: summarization evicts, so every stage
+ * prompt still has to stand on its own (see `renderTargetFacts`).
+ */
+export const MemoryConfigSchema = z
+  .strictObject({
+    enabled: z.boolean().default(true),
+    /** Summarize the history at the threshold instead of dropping the oldest turns. */
+    summarize: z.boolean().default(true),
+    /**
+     * Tokens of history kept before summarization folds the older half away.
+     *
+     * Sized against the SUMMARIZER's ceiling, not the model's: a summarization that is
+     * abandoned evicts NOTHING and returns, so the history stops being trimmed, every
+     * later call retries, and it grows until the context window ends the run.
+     *
+     * The payload scales with this number — `summarizeSession` keeps `threshold * 0.3`
+     * recent and summarizes the rest. Measured on this repository's own CI at 32k and
+     * again at 16k, the re-reviews timed out either way (6 and 5 times) while the first
+     * review of the same branch did not: the amount of history is only half of it, and
+     * `summarizeTimeoutMs` is the other half.
+     */
+    tokenThreshold: z.number().int().min(4_000).default(16_000),
+    /**
+     * How long one summarization may take before the engine abandons it, in ms.
+     *
+     * The engine's own default is 60s, which is a guess about somebody else's gateway.
+     * Measured here, a single model call routinely takes minutes, so 60s meant every
+     * summarization was abandoned — and an abandoned summary evicts NOTHING, so the
+     * history grew unbounded while the run looked managed. The ceiling has to be a
+     * property of the deployment, not of the library, which is why it is configurable
+     * per project (and by `NEUROLINK_SUMMARIZATION_TIMEOUT_MS` where config cannot reach).
+     */
+    summarizeTimeoutMs: z.number().int().min(10_000).default(120_000),
+  })
+  .prefault({});
+
 /* ------------------------------------------------------- delivery & verdict */
 
 /**
@@ -193,29 +249,31 @@ export const VerdictConfigSchema = z
  */
 export const ReviewConfigSchema = z
   .strictObject({
-    exclude: z
-      .array(NonEmptySchema)
-      .default([
-        "*.lock",
-        "pnpm-lock.yaml",
-        "package-lock.json",
-        "yarn.lock",
-        "*.min.js",
-        "*.map",
-        "*.svg",
-        "*.png",
-        "*.jpg",
-        "*.jpeg",
-        "*.webp",
-        "*.gif",
-        "*.pdf",
-        "*.ico",
-        "*.woff",
-        "*.woff2",
-        "dist/**",
-        "build/**",
-        "coverage/**",
-      ]),
+    exclude: z.array(NonEmptySchema).default([
+      "*.lock",
+      "pnpm-lock.yaml",
+      "package-lock.json",
+      "yarn.lock",
+      "*.min.js",
+      "*.map",
+      "*.svg",
+      "*.png",
+      "*.jpg",
+      "*.jpeg",
+      "*.webp",
+      "*.gif",
+      "*.pdf",
+      "*.ico",
+      "*.woff",
+      "*.woff2",
+      "dist/**",
+      "build/**",
+      "coverage/**",
+      // Yama's own run store. Not part of anyone's change — but a repository that has
+      // not gitignored it yet hands the working tree's `.yama/artifacts/run.json` to
+      // the local diff, and the review then owes a checklist item for its own report.
+      ".yama/artifacts/**",
+    ]),
   })
   .prefault({});
 
@@ -223,6 +281,7 @@ export const YamaConfigSchema = z.strictObject({
   version: VersionSchema,
   models: ModelChainsSpecSchema,
   pool: PoolConfigSchema,
+  memory: MemoryConfigSchema,
   learn: LearnConfigSchema,
   delivery: DeliveryConfigSchema,
   verdict: VerdictConfigSchema,

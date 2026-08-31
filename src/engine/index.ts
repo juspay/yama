@@ -30,6 +30,7 @@ import type {
   EngineDelegateRequest,
   EngineDelegationApi,
   EngineMcpServer,
+  EngineMemoryStatus,
   EngineTaskState,
   EngineTool,
   EngineToolOptions,
@@ -140,9 +141,54 @@ const fallbackSurfaces = (boot: Boot): Surfaces => {
   };
 };
 
+/**
+ * The engine's memory configuration, or nothing at all.
+ *
+ * NeuroLink defaults `conversationMemory.enabled` to FALSE, and Yama spent its whole v5
+ * life constructing `new NeuroLink()` with no argument — so the "one session, stages as
+ * checkpoints on it" model in PLAN.md §1 was never true at run time. Every stage, every
+ * schema retry and every nudge round was a cold call.
+ *
+ * The summarizer is pinned deliberately, and pinning it is not optional in the way it
+ * looks. `generateSummary` REFUSES to run without an explicit provider and model, and a
+ * refusal evicts nothing — so an unset summarizer is not "no summarizer, harmlessly", it
+ * is a memory that grows for ever. The chain it comes from always resolves (`summarizer`
+ * falls back to `worker`, then to the required `main`), which is what makes this safe.
+ */
+const memoryConfig = (
+  memory: EngineConfig["memory"],
+): { conversationMemory: Record<string, unknown> } | undefined => {
+  if (memory === undefined || !memory.enabled) {
+    return undefined;
+  }
+  // Summarization is switched OFF rather than left half-configured. `generateSummary`
+  // refuses without an explicit provider AND model, and a refusal evicts nothing — so
+  // "enabled with no summarizer" is not a degraded memory, it is one that grows for ever
+  // while claiming to be managed. Saying so up front is the honest shape.
+  const named =
+    memory.summarizer?.provider !== undefined &&
+    memory.summarizer.model !== undefined;
+  return {
+    conversationMemory: {
+      enabled: true,
+      enableSummarization: memory.summarize && named,
+      tokenThreshold: memory.tokenThreshold,
+      // The ceiling belongs to the deployment, not the library (see the config field).
+      summarizationTimeoutMs: memory.summarizeTimeoutMs,
+      ...(named
+        ? {
+            summarizationProvider: memory.summarizer?.provider,
+            summarizationModel: memory.summarizer?.model,
+          }
+        : {}),
+    },
+  };
+};
+
 /** Boots the main session. MCP servers are attached afterwards via `connectMcp`. */
 export const createEngine = (cfg: EngineConfig): Engine => {
-  const nl = new NeuroLink();
+  const memory = memoryConfig(cfg.memory);
+  const nl = memory === undefined ? new NeuroLink() : new NeuroLink(memory);
   const paths = storePathsForDir(cfg.storeDir);
 
   let activeSession = "yama";
@@ -177,6 +223,21 @@ export const createEngine = (cfg: EngineConfig): Engine => {
     // themselves rather than asking an agent to transcribe it (TASKS:Y4.3).
     callTool: (name: string, params?: unknown): Promise<unknown> =>
       nl.executeTool(name, params ?? {}),
+    // Read off the engine, never off our own config: "we asked for memory" and "this run
+    // has one" are different claims, and only the second is worth reporting.
+    memoryStatus: (): EngineMemoryStatus => ({
+      enabled: memory !== undefined,
+      ready: Boolean(nl.conversationMemory),
+      ...(cfg.memory !== undefined
+        ? {
+            tokenThreshold: cfg.memory.tokenThreshold,
+            summarizeTimeoutMs: cfg.memory.summarizeTimeoutMs,
+            evicting:
+              memory !== undefined &&
+              memory.conversationMemory["enableSummarization"] === true,
+          }
+        : {}),
+    }),
     tasksApi: async (sessionId: string): Promise<EngineTaskState> =>
       checklist.state(sessionId),
     delegate: (req: EngineDelegateRequest): Promise<EngineWorkerHandle> =>

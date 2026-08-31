@@ -19,6 +19,7 @@ import {
   DIST_ENTRY,
   FIXTURES,
   Skip,
+  WORKSPACE_YAMA_YAML,
   assert,
   assertEqual,
   assertExit,
@@ -783,6 +784,64 @@ if (!isBuilt()) {
         `${label}: the marker survived`,
       );
     }
+  });
+
+  await test("a reply is a comment, and it says who wrote it", async () => {
+    // Both halves were lost. Bitbucket hangs replies off the comment they answer, and the
+    // reader returned the parent alone — so `learn` never saw a maintainer's answer to a
+    // finding, and the dedup gate never saw a thread it had already been argued out of.
+    // The author went the same way, and `learn` is looking for what a HUMAN decided: a
+    // rule lifted from Yama's own comment is a memory of its own opinion.
+    const mod = await import(DIST_ENTRY);
+    const thread = {
+      values: [
+        {
+          id: 100,
+          content: { raw: "this logs a token" },
+          user: { display_name: "Yama" },
+          replies: [
+            {
+              id: 101,
+              content: { raw: "intentional, it is redacted downstream" },
+              user: { display_name: "a maintainer" },
+            },
+            {
+              id: 102,
+              content: { raw: "agreed, closing" },
+              user: { nickname: "another maintainer" },
+            },
+          ],
+        },
+      ],
+    };
+    const comments = mod.readComments(thread);
+    assertEqual(comments.length, 3, "the parent AND both replies are comments");
+    assertEqual(
+      comments.map((c: { id: string }) => c.id).join(","),
+      "100,101,102",
+      "the parent comes first, then what answered it",
+    );
+    assertEqual(
+      comments[1].author,
+      "a maintainer",
+      "and a reply carries the person who wrote it",
+    );
+    assertEqual(
+      comments[2].author,
+      "another maintainer",
+      "whichever field the forge spelled the name in",
+    );
+
+    const github = mod.readComments([
+      { id: 7, body: "nit", user: { login: "octocat" } },
+    ]);
+    assertEqual(github[0].author, "octocat", "GitHub spells it `login`");
+
+    assertIncludes(
+      mod.renderThread(101, comments),
+      "by a maintainer",
+      "and learn is shown the author, not just the text",
+    );
   });
 
   await test("a result with no id is not a comment we can bind a finding to", async () => {
@@ -1736,7 +1795,7 @@ if (!isBuilt()) {
       );
       assertIncludes(
         driver.seen[0].prompt,
-        "must NOT be posted again",
+        "Do not post any of them again",
         "and the agent is told which comments already hold them",
       );
     });
@@ -2035,6 +2094,64 @@ if (!isBuilt()) {
     });
   });
 
+  await test("doctor says whether this run would have a memory at all", async () => {
+    // It was off for the whole of v5 and nothing anywhere said so: the engine was built
+    // with `new NeuroLink()` and NeuroLink defaults conversation memory to false. With it
+    // off every stage answers having forgotten the one before it, which reads exactly
+    // like a stage that answered badly — so it gets a row of its own.
+    const mod = await import(DIST_ENTRY);
+    await withTempDir("doctor-memory", async (dir) => {
+      await gitWorkspace(dir);
+      const on = await mod.runDoctor({
+        root: dir,
+        target: { mode: "local" },
+        engine: { connectMcp: async () => [] },
+      });
+      const row = on.checks.find(
+        (check: { group: string; name: string }) =>
+          check.group === "models" && check.name === "memory",
+      );
+      assertEqual(row?.status, "ok", "memory is on by default");
+      assertIncludes(
+        String(row?.detail),
+        "tokens of history",
+        "and the row says how much it keeps",
+      );
+      assertIncludes(
+        String(row?.detail),
+        "summarized by",
+        "and who summarizes it — never the engine's own default provider",
+      );
+      assertIncludes(
+        String(row?.detail),
+        "within",
+        "and the ceiling it has to finish inside, which is a property of the gateway",
+      );
+
+      await writeFile(
+        path.join(dir, ".yama", "yama.yaml"),
+        [WORKSPACE_YAMA_YAML, "memory:", "  enabled: false", ""].join("\n"),
+        "utf8",
+      );
+      const off = await mod.runDoctor({
+        root: dir,
+        target: { mode: "local" },
+        engine: { connectMcp: async () => [] },
+      });
+      const offRow = off.checks.find(
+        (check: { group: string; name: string }) =>
+          check.group === "models" && check.name === "memory",
+      );
+      assertEqual(offRow?.status, "off", "turning it off is visible");
+      assertIncludes(
+        String(offRow?.detail),
+        "starts from nothing",
+        "and says what that costs",
+      );
+      assertIncludes(String(offRow?.fix), "memory.enabled", "with the fix");
+    });
+  });
+
   await test("a capability pointing at a tool nobody serves is BROKEN, with the fix", async () => {
     const mod = await import(DIST_ENTRY);
     await withTempDir("doctor", async (dir) => {
@@ -2248,7 +2365,8 @@ if (!isBuilt()) {
     const stageOf = (prompt: string): string =>
       prompt.includes("WARM UP.")
         ? "warmup"
-        : prompt.includes("TASK INSERTION.")
+        : prompt.includes("TASK INSERTION.") ||
+            prompt.includes("THE CHECKLIST IS NOT USABLE YET")
           ? "taskInsertion"
           : prompt.includes("COLLATE AND DECIDE")
             ? "collate"
@@ -2270,7 +2388,9 @@ if (!isBuilt()) {
           {
             title: "check the token endpoint",
             rationale: "the diff adds one",
-            scope: ["feature.ts"],
+            // Everything the head adds over the base — some cases put a config file
+            // there too, and every changed file has to be on an item.
+            scope: ["feature.ts", ".yama/**"],
             delegate: false,
           },
         ],
@@ -2339,6 +2459,11 @@ if (!isBuilt()) {
       },
       connectMcp: async () => [...serverTools],
       callTool: async () => [],
+      memoryStatus: () => ({
+        enabled: true,
+        ready: true,
+        tokenThreshold: 64000,
+      }),
       tasksApi: async (sessionId: string) => ({
         sessionId,
         tasks: [

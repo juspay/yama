@@ -5,12 +5,24 @@
  * through the types barrel. Nothing here calls a model: a gate that needed judgement to
  * decide whether the last judgement was sound would not be a gate.
  */
-export { buildSchemaRetryPrompt, checkpointWithSchemaGate } from "./schema.js";
+export {
+  buildClosingPrompt,
+  buildSchemaRetryPrompt,
+  checkpointWithSchemaGate,
+  describeAttempt,
+} from "./schema.js";
 export {
   buildChecklistNudge,
   checkChecklist,
+  distinctTasks,
   enforceChecklist,
 } from "./checklist.js";
+export {
+  buildPreparationNudge,
+  checkCoverage,
+  checklistProblems,
+  preparationFatal,
+} from "./coverage.js";
 export { groundFindings } from "./grounded.js";
 export { dedupePostedFindings } from "./markers.js";
 export {
@@ -27,5 +39,10 @@ export {
   mergeConfirmations,
   postingFailure,
 } from "./posting.js";
-export { decideVerdict, rankFindings } from "./verdict.js";
+export {
+  decideVerdict,
+  rankFindings,
+  reviewEstablishedNothing,
+  withRecoveryCaveat,
+} from "./verdict.js";
 export { exitCodeFor } from "./exit.js";

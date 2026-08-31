@@ -22,6 +22,22 @@ models:
 pool:
   tier: medium
 
+# The run's own short-term memory: what one stage said, still there for the next one.
+# On by default — a stage is one model call, so without it every stage and every retry
+# starts from nothing, and a stage that fails cannot be recovered.
+#
+# tokenThreshold is sized against the summarizer's own 60-second ceiling inside the engine,
+# not against the model's context window: a summary that times out evicts nothing, so too
+# high a threshold stops evicting entirely. Summarization runs on the `summarizer` chain
+# above rather than the engine's own default provider.
+memory:
+  enabled: true
+  summarize: true
+  tokenThreshold: 16000
+  # How long one summarization may take. Raise it on a slow gateway: a summary that is
+  # abandoned evicts nothing, so the history grows while the run looks managed.
+  summarizeTimeoutMs: 120000
+
 # Post-merge knowledge update (`yama learn --pr N`). Off by default: this is the only
 # command in Yama that ever changes your repository.
 #

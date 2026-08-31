@@ -5,8 +5,8 @@
  * the repository root, so a symlink pointing out of the tree is a refusal rather than a
  * read. There is deliberately no write tool — the review path never edits the repo.
  *
- * Files are paged, not truncated: `read_file` returns a window plus `hasMore`, and the
- * whole file is always reachable by asking for the next offset.
+ * Files are paged, not truncated: `read_file` returns a window of LINES plus `hasMore`,
+ * and the whole file is always reachable through the `nextOffset` it hands back.
  */
 import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -15,7 +15,7 @@ import type { EngineToolRegistrar, FsToolConfig } from "../types/index.js";
 import { readTextFile, resolveWithinRoot } from "../util/fs.js";
 import { jsonSchemaOf, refuse } from "../util/tool.js";
 
-/** Characters returned by one `read_file` call when the model does not say. */
+/** Ceiling on one `read_file` page, in characters. Lines are never cut in half. */
 const DEFAULT_READ_CHARS = 64 * 1024;
 /** Entries returned by one `list_files` call. */
 const DEFAULT_MAX_ENTRIES = 500;
@@ -24,7 +24,9 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", ".yama"]);
 
 const ReadSchema = z.object({
   path: z.string().min(1),
+  /** 1-based LINE to start at. Omit for the top of the file. */
   offset: z.number().int().min(0).optional(),
+  /** How many LINES to return. Omit for as much of the file as fits in one page. */
   limit: z.number().int().min(1).optional(),
 });
 
@@ -32,6 +34,73 @@ const ListSchema = z.object({
   path: z.string().optional(),
   depth: z.number().int().min(1).max(8).optional(),
 });
+
+/**
+ * One page of a file, addressed in LINES.
+ *
+ * It used to be addressed in characters, and nothing said so — the description spoke of
+ * "the next offset" and the result carried a `totalSize` that was a character count. Every
+ * model reads those as lines, and one measured run proves what that costs: a stage spent
+ * 29 of its 32 steps walking a 17 KB file in 300-to-800 character windows (`offset: 0`,
+ * `380`, `4800`, `5600`, …), never reached the work it was there to do, and the review
+ * failed. The model's own note in that transcript reads "the read tool is quirky with
+ * offsets". It was not quirky; it was lying.
+ *
+ * So: `offset` is a 1-based LINE number, `limit` is a COUNT OF LINES, and the result hands
+ * back `nextOffset` so paging never requires arithmetic against a unit you have to guess.
+ * The byte ceiling still applies — a page stops early rather than returning a megabyte —
+ * and when it does, `nextOffset` points at the first line that did not fit.
+ */
+const pageOf = (
+  content: string,
+  offset: number | undefined,
+  limit: number | undefined,
+  maxBytes: number,
+): {
+  content: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  hasMore: boolean;
+  nextOffset?: number;
+} => {
+  const lines = content.split("\n");
+  // A trailing newline yields one empty last element; it is not a line anyone can read.
+  const totalLines =
+    lines.length > 1 && lines[lines.length - 1] === ""
+      ? lines.length - 1
+      : lines.length;
+  // 0 and 1 both mean "the top of the file": a model that counts from zero is not wrong
+  // enough to deserve an empty page.
+  const startLine = Math.min(Math.max(offset ?? 1, 1), totalLines || 1);
+  const wanted = limit ?? totalLines;
+
+  const taken: string[] = [];
+  let bytes = 0;
+  let line = startLine;
+  while (line <= totalLines && taken.length < wanted) {
+    const text = lines[line - 1] ?? "";
+    // Always take the first line, however long: a page that comes back empty teaches the
+    // model nothing except to try the same call again.
+    if (taken.length > 0 && bytes + text.length + 1 > maxBytes) {
+      break;
+    }
+    taken.push(text);
+    bytes += text.length + 1;
+    line += 1;
+  }
+
+  const endLine = line - 1;
+  const hasMore = endLine < totalLines;
+  return {
+    content: taken.join("\n"),
+    startLine,
+    endLine,
+    totalLines,
+    hasMore,
+    ...(hasMore ? { nextOffset: line } : {}),
+  };
+};
 
 const escaped = (path: string): { isError: true; error: string } =>
   refuse(
@@ -82,13 +151,13 @@ export const registerFsTools = (options: {
 
   options.register("read_file", {
     description:
-      "Read a repository file. Paths are repository-relative and confined to the checkout. Long files come back a page at a time — when hasMore is true, ask again with the next offset rather than guessing at the rest.",
+      "Read a repository file. Paths are repository-relative and confined to the checkout. offset and limit are in LINES, not characters: offset is the 1-based first line to return and limit is how many lines to return. Omit both to read the whole file — that is one step, and it is usually the right call. When hasMore is true, ask again with the nextOffset the result gives you.",
     inputSchema: jsonSchemaOf(ReadSchema),
     execute: async (params) => {
       const parsed = ReadSchema.safeParse(params ?? {});
       if (!parsed.success) {
         return refuse(
-          "read_file needs { path, offset?, limit? } with a non-empty path.",
+          "read_file needs { path, offset?, limit? } with a non-empty path. offset is a 1-based line number and limit is a number of lines.",
         );
       }
       const resolved = await resolveWithinRoot(parsed.data.path, root);
@@ -109,17 +178,9 @@ export const registerFsTools = (options: {
           `no file at "${parsed.data.path}". Use list_files to see what is there.`,
         );
       }
-      const offset = parsed.data.offset ?? 0;
-      const page = content.slice(
-        offset,
-        offset + (parsed.data.limit ?? maxBytes),
-      );
       return {
         path: relative(root, resolved) || parsed.data.path,
-        content: page,
-        offset,
-        totalSize: content.length,
-        hasMore: offset + page.length < content.length,
+        ...pageOf(content, parsed.data.offset, parsed.data.limit, maxBytes),
       };
     },
   });

@@ -17,6 +17,7 @@
 import {
   checkChecklist,
   checkpointWithSchemaGate,
+  distinctTasks,
   enforceChecklist,
 } from "../gates/index.js";
 import { payloadPath, writeWorkerReport } from "../store/index.js";
@@ -26,6 +27,7 @@ import {
   READ_ONLY_TOOLS,
 } from "../tools/index.js";
 import type {
+  TargetFacts,
   Engine,
   EngineTask,
   EngineWorkerResult,
@@ -42,6 +44,7 @@ import type {
 } from "../types/index.js";
 import { SEVERITIES } from "../util/severity.js";
 import { WorkOutcomeSchema } from "./schema.js";
+import { renderTargetFacts } from "./target.js";
 
 /**
  * Room to read files, delegate, collect and write up — one round of work. Sized from
@@ -75,6 +78,8 @@ export const buildWorkPrompt = (input: {
   brief: OperatingBrief;
   plan: InsertionPlan;
   tasks: readonly EngineTask[];
+  /** The change itself, so this stage never depends on the last one's prose. */
+  facts?: TargetFacts;
   /** Check ids the base branch declares, if any (TASKS:Y5.2). */
   checks?: readonly string[];
 }): string => {
@@ -83,8 +88,11 @@ export const buildWorkPrompt = (input: {
   return [
     "WORK THE CHECKLIST. Every item on it is a review pointer you committed to. Finish them.",
     "",
+    ...(input.facts !== undefined ? [renderTargetFacts(input.facts), ""] : []),
+    "Read whatever the checklist needs — read_file takes a whole file in one call, and its offset and limit are LINES. Delegate anything large: workers run in parallel and have their own budget.",
+    "",
     `Review posture: ${brief.persona}`,
-    `What this change does: ${plan.changeSummary}`,
+    `What the previous stage said this change does: ${plan.changeSummary}`,
     plan.riskAreas.length > 0
       ? `Where you said the risk sits: ${plan.riskAreas.join("; ")}.`
       : "You named no specific risk areas — work from the diff itself.",
@@ -119,11 +127,18 @@ export const buildWorkPrompt = (input: {
   ].join("\n");
 };
 
-/** The prompt for a round that exists only because workers landed after the agent stopped. */
+/**
+ * The prompt for a round that exists only because workers landed after the agent stopped.
+ *
+ * Written to stand on its own. Memory is on (TASKS:Y2.5), but summarization evicts, and a
+ * prompt whose meaning depends on a turn that may have been folded away is a prompt that
+ * breaks under exactly the load that makes it necessary — the round after a long one.
+ * Everything it refers to travels with it: the worker results above, and the change itself.
+ */
 export const WORK_TRAILING_PROMPT = [
-  "These workers finished after your last turn, so their findings are not in your report yet.",
+  "The workers listed above have just finished, and their findings are in no report yet.",
   "Read each banked report with retrieve_context, then report the findings it produced and mark the checklist items they belong to.",
-  "Report only what is new — the findings you already reported are recorded.",
+  "Report only what is new — findings already reported by this run are recorded.",
 ].join("\n");
 
 /** Worker results as the agent sees them: bounded summary inline, full report one call away. */
@@ -210,6 +225,8 @@ export const runWork = async (options: {
   extraTools?: readonly string[];
   /** Check ids the base branch declares (TASKS:Y5.2). */
   checks?: readonly string[];
+  /** The change under review, restated so this stage stands on its own. */
+  facts?: TargetFacts;
 }): Promise<WorkStageResult> => {
   const { session, engine, paths } = options;
   const maxRounds = options.maxRounds ?? WORK_MAX_ROUNDS;
@@ -260,6 +277,13 @@ export const runWork = async (options: {
         tools: [...WORK_TOOLS, ...(options.extraTools ?? [])],
         maxSteps: WORK_MAX_STEPS,
       },
+      // A round cut off mid-review closes holding the CHECKLIST tools: what it finished
+      // has to be recorded before it reports, or the completeness gate reads work that
+      // was done as work that was abandoned.
+      recovery: {
+        tools: CHECKLIST_TOOLS,
+        ...(ground !== undefined ? { context: ground } : {}),
+      },
     });
     rounds += 1;
     findings.push(...output.data.findings);
@@ -271,12 +295,21 @@ export const runWork = async (options: {
     }
   };
 
+  // The change itself, restated on every turn that is not the opening one. A nudge that
+  // says only "these items are still open" is a nudge into the dark if the round it is
+  // correcting has been summarized away.
+  const ground =
+    options.facts !== undefined ? renderTargetFacts(options.facts) : undefined;
+  const grounded = (prompt: string): string =>
+    ground === undefined ? prompt : `${ground}\n\n${prompt}`;
+
   const tasks = await engine.tasksApi(session.sessionId);
   await turn(
     buildWorkPrompt({
       brief: options.brief,
       plan: options.plan,
-      tasks: tasks.tasks,
+      tasks: distinctTasks(tasks.tasks),
+      ...(options.facts !== undefined ? { facts: options.facts } : {}),
       ...(options.checks !== undefined ? { checks: options.checks } : {}),
     }),
     [],
@@ -287,7 +320,7 @@ export const runWork = async (options: {
     sessionId: session.sessionId,
     maxRounds,
     nudge: async (nudge: string): Promise<void> => {
-      await turn(nudge, await drain());
+      await turn(grounded(nudge), await drain());
     },
   });
 
@@ -297,7 +330,7 @@ export const runWork = async (options: {
     if (late.length === 0) {
       break;
     }
-    await turn(WORK_TRAILING_PROMPT, late);
+    await turn(grounded(WORK_TRAILING_PROMPT), late);
     checklist = checkChecklist(await engine.tasksApi(session.sessionId));
   }
 

@@ -1173,7 +1173,8 @@ if (!isBuilt()) {
     const stageOf = (prompt: string): string =>
       prompt.includes("WARM UP.")
         ? "warmup"
-        : prompt.includes("TASK INSERTION.")
+        : prompt.includes("TASK INSERTION.") ||
+            prompt.includes("THE CHECKLIST IS NOT USABLE YET")
           ? "taskInsertion"
           : prompt.includes("COLLATE AND DECIDE")
             ? "collate"
@@ -1195,7 +1196,9 @@ if (!isBuilt()) {
           {
             title: "check the token helper",
             rationale: "the diff adds one",
-            scope: ["token.ts"],
+            // The two files `feature` adds over `main`. The checklist has to answer for
+            // the change that is really there, not for one the fixture talks about.
+            scope: ["token.ts", "later.ts"],
             delegate: false,
           },
         ],
@@ -1249,6 +1252,11 @@ if (!isBuilt()) {
         registerTool: () => undefined,
         connectMcp: async () => ["list_comments"],
         callTool: async () => comments,
+        memoryStatus: () => ({
+          enabled: true,
+          ready: true,
+          tokenThreshold: 64000,
+        }),
         tasksApi: async (sessionId: string) => ({
           sessionId,
           tasks: [

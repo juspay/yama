@@ -116,6 +116,15 @@ export type StageOutput<TStage extends string, TPayload> = {
    * the stage and retries once (TASKS:Y4.1).
    */
   truncated?: boolean;
+  /**
+   * This answer came out of the gate's RECOVERY ask rather than the stage's own turn —
+   * the stage ran out of room, or could not produce usable JSON, and was asked to close
+   * with what it had. Never `trusted`, whatever the JSON looked like: an answer the run
+   * had to rescue is evidence about the run, not a clean result.
+   */
+  recovered?: boolean;
+  /** How many times the stage was asked before this answer, the recovery ask included. */
+  attempts?: number;
   /** ISO-8601 completion time. */
   completedAt: string;
 };
