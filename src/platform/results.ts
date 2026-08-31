@@ -50,8 +50,15 @@ const bodyOf = (
   value: string | { raw?: string } | undefined,
 ): string | undefined => (typeof value === "string" ? value : value?.raw);
 
-/** Keys a list of comments hides behind, across the forges and their MCP wrappers.
- * `review_threads` is GitHub's hosted MCP: each thread then hides its own `comments`. */
+/**
+ * Keys a list of comments hides behind, across the forges and their MCP wrappers.
+ * `review_threads` is GitHub's hosted MCP: each thread then hides its own `comments`.
+ * `active_comments` is Bitbucket's: a pull-request document carries its comments
+ * inline under that key, alongside its own `id` — which is why the record-is-a-comment
+ * test below also requires a non-empty body. Without this key the reader returned the
+ * pull request itself as one body-less comment and marker dedup saw an empty target,
+ * so every re-review posted everything again.
+ */
 const LIST_KEYS = [
   "values",
   "comments",
@@ -59,6 +66,7 @@ const LIST_KEYS = [
   "results",
   "data",
   "review_threads",
+  "active_comments",
 ] as const;
 
 /** MCP tool results arrive as `{ content: [{ type: "text", text: "<json>" }] }`. */
@@ -116,16 +124,16 @@ export const readComment = (
  * JSON-in-a-string and the usual pagination wrappers are all unwrapped; anything else is
  * itself, once.
  */
-export const unwrapRecords = (value: unknown, depth = 0): unknown[] => {
+const unwrap = (value: unknown, depth: number, descend: boolean): unknown[] => {
   if (value === null || value === undefined || depth > MAX_DEPTH) {
     return [];
   }
   if (typeof value === "string") {
     const parsed = parseJson(value);
-    return parsed === undefined ? [] : unwrapRecords(parsed, depth + 1);
+    return parsed === undefined ? [] : unwrap(parsed, depth + 1, descend);
   }
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => unwrapRecords(entry, depth + 1));
+    return value.flatMap((entry) => unwrap(entry, depth + 1, descend));
   }
   if (typeof value !== "object") {
     return [];
@@ -133,7 +141,7 @@ export const unwrapRecords = (value: unknown, depth = 0): unknown[] => {
   const mcp = McpEnvelopeSchema.safeParse(value);
   if (mcp.success) {
     return mcp.data.content.flatMap((part) =>
-      unwrapRecords(part.text, depth + 1),
+      unwrap(part.text, depth + 1, descend),
     );
   }
   // A record that is itself a comment is the answer, not an envelope around one: a
@@ -144,15 +152,37 @@ export const unwrapRecords = (value: unknown, depth = 0): unknown[] => {
   if (self?.id !== undefined && self.body !== "") {
     return [value];
   }
-  const record: Record<string, unknown> = { ...value };
-  for (const key of LIST_KEYS) {
-    const nested = record[key];
-    if (Array.isArray(nested)) {
-      return nested.flatMap((entry) => unwrapRecords(entry, depth + 1));
+  // Only a caller that wants the CONTENTS of a document descends into its lists. One
+  // that wants the document ITSELF must not: a Bitbucket pull request carries both its
+  // description and its comments, and descending returns the comments — which is how
+  // adding `active_comments` here silently stopped `readDescription` from ever seeing a
+  // Bitbucket description (caught in review, reproduced against the live response).
+  if (descend) {
+    const record: Record<string, unknown> = { ...value };
+    for (const key of LIST_KEYS) {
+      const nested = record[key];
+      if (Array.isArray(nested)) {
+        return nested.flatMap((entry) => unwrap(entry, depth + 1, descend));
+      }
     }
   }
   return [value];
 };
+
+/**
+ * Every record a tool result CARRIES: envelopes, JSON-in-a-string and pagination
+ * wrappers unwrapped, and lists descended into. This is what comment reading wants.
+ */
+export const unwrapRecords = (value: unknown, depth = 0): unknown[] =>
+  unwrap(value, depth, true);
+
+/**
+ * The DOCUMENTS a tool result carries, with the same envelope tolerance but no descent
+ * into their lists — what a caller wants when the answer is the document itself rather
+ * than the things inside it.
+ */
+export const unwrapDocuments = (value: unknown): unknown[] =>
+  unwrap(value, 0, false);
 
 /**
  * Every comment a tool result carries, in the order it carried them. A record with no id
@@ -195,7 +225,7 @@ const DescriptionSchema = z.object({
  * caller has to be able to tell the two apart.
  */
 export const readDescription = (value: unknown): string | undefined => {
-  for (const record of unwrapRecords(value)) {
+  for (const record of unwrapDocuments(value)) {
     const parsed = DescriptionSchema.safeParse(record);
     if (!parsed.success) {
       continue;

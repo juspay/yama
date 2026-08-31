@@ -18,5 +18,6 @@ export {
   readComment,
   readComments,
   readDescription,
+  unwrapDocuments,
   unwrapRecords,
 } from "./results.js";

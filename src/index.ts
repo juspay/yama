@@ -173,6 +173,7 @@ export {
   readDescription,
   readTargetComments,
   toEngineMcpServer,
+  unwrapDocuments,
   unwrapRecords,
   usesPlatform,
 } from "./platform/index.js";
