@@ -794,6 +794,83 @@ if (!isBuilt()) {
     );
   });
 
+  await test("Bitbucket's envelope: comments ride inside the pull request document", async () => {
+    const mod = await import(DIST_ENTRY);
+    // The live shape (captured from @nexus2520/bitbucket-mcp-server against a real
+    // pull request): `get_pull_request` with include_comments returns the pull
+    // request ITSELF, its comments nested under `active_comments`, each carrying
+    // `id` + `text`. The document also has its own `id`, so a reader that treats
+    // any id-bearing record as a comment returns the pull request as one body-less
+    // comment and sees an empty target — which silently disables marker dedup.
+    const envelope = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            id: 655,
+            title: "a pull request",
+            description: "the author's own description",
+            state: "OPEN",
+            reviewers: [{ name: "someone" }],
+            active_comment_count: 2,
+            active_comments: [
+              {
+                id: 1957131,
+                author: "Yama",
+                text: "first finding\n\n<!-- yama:finding:F1 -->",
+                is_inline: true,
+              },
+              {
+                id: 1955762,
+                author: "Yama",
+                text: "the summary\n\n`yama:run:run-1`",
+                is_inline: false,
+              },
+            ],
+            file_changes: [{ path: "src/a.ts" }],
+          }),
+        },
+      ],
+    };
+    const comments = mod.readComments(envelope);
+    assertEqual(comments.length, 2, "both comments are read");
+    assertEqual(
+      comments[0].id,
+      "1957131",
+      "the comment's own id, not the pull request's",
+    );
+    assertEqual(
+      mod.scanMarkers(comments[0].body).join(","),
+      "F1",
+      "the marker in `text` scans",
+    );
+    assertEqual(
+      mod.scanMarkers(comments[1].body, "run").join(","),
+      "run-1",
+      "and so does a run marker in the visible token form",
+    );
+    assert(
+      !comments.some((c: { id: string }) => c.id === "655"),
+      "the pull request document itself is never read as a comment",
+    );
+
+    // The OTHER reader of the same envelope, and the one that regressed when
+    // `active_comments` was first added: descending into the comment list meant
+    // readDescription never saw the document, so a Bitbucket description silently
+    // became unreadable — and an unreadable description is one Yama refuses to
+    // touch, so description enhancement would have gone quietly dead.
+    assertEqual(
+      mod.readDescription(envelope),
+      "the author's own description",
+      "the description comes from the document, not from its comments",
+    );
+    assertEqual(
+      mod.unwrapDocuments(envelope).length,
+      1,
+      "document unwrapping stops at the document",
+    );
+  });
+
   await test("GitHub's review-thread envelope: comments inside threads, ids from html_url", async () => {
     const mod = await import(DIST_ENTRY);
     // The live shape (captured from the hosted MCP): threads carry an id and NO body;
