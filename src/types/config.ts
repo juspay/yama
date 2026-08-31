@@ -20,6 +20,7 @@ import type {
   ModelRoleSchema,
   PoolConfigSchema,
   PoolTierSchema,
+  ReviewConfigSchema,
   VerdictConfigSchema,
   YamaConfigSchema,
 } from "../config/schema.js";
@@ -59,6 +60,12 @@ export type DeliveryConfig = z.infer<typeof DeliveryConfigSchema>;
 
 /** The `verdict:` block — the whole input to the verdict policy besides the findings. */
 export type VerdictConfig = z.infer<typeof VerdictConfigSchema>;
+
+/**
+ * What a review never looks at. Excluded paths are dropped from the diff before any stage
+ * sees them, so a generated file cannot crowd out the change or attract a finding.
+ */
+export type ReviewConfig = z.infer<typeof ReviewConfigSchema>;
 
 /** Validated `.yama/yama.yaml`. */
 export type YamaConfig = z.infer<typeof YamaConfigSchema>;

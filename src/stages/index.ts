@@ -17,6 +17,7 @@ export {
 export { buildWarmUpPrompt, runWarmUp } from "./warmup.js";
 export {
   acquireTargetDiff,
+  excludeFromDiff,
   buildTaskInsertionPrompt,
   runTaskInsertion,
 } from "./taskInsertion.js";

@@ -56,6 +56,8 @@ export type InsertionPlan = z.infer<typeof InsertionPlanSchema>;
 export type InsertionStageResult = {
   plan: StageOutput<Stage, InsertionPlan>;
   diff: GitDiff;
+  /** Paths `review.exclude` dropped from the diff — reported, never silently discarded. */
+  excluded?: string[];
   banked: EngineBankedRef;
   /** `lastReviewedSha..head`, banked separately. Absent for a fresh run. */
   incremental?: GitDiff;

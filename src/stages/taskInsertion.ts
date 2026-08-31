@@ -20,9 +20,11 @@ import {
   resolveDiffRange,
   summarizeDiff,
 } from "../tools/index.js";
+import { matchesAnyGlob } from "../util/glob.js";
 import type {
   Engine,
   EngineBankedRef,
+  GitChangedFile,
   GitDiff,
   InsertionStageResult,
   OperatingBrief,
@@ -65,11 +67,195 @@ export const acquireTargetDiff = async (
   return acquireDiff({ root: run.root, ...range }, signal);
 };
 
+/** What every section of a unified diff opens with. */
+const DIFF_HEADER = "diff --git ";
+
+/** The single-character escapes git writes inside a quoted path. */
+const GIT_ESCAPES: Readonly<Record<string, string>> = {
+  a: "\x07",
+  b: "\b",
+  t: "\t",
+  n: "\n",
+  v: "\v",
+  f: "\f",
+  r: "\r",
+  '"': '"',
+  "\\": "\\",
+};
+
+const isOctalTriple = (text: string): boolean =>
+  text.length === 3 && [...text].every((digit) => digit >= "0" && digit <= "7");
+
+/**
+ * Git's C-style quoting, undone.
+ *
+ * A quoted header escapes every byte it had to: `\t`, `\"`, `\\`, and — under the default
+ * `core.quotePath` — each non-ASCII BYTE as an octal triple, so `café.svg` travels as
+ * `caf\303\251.svg`. The file list does not: `git diff --name-status -z` emits paths raw.
+ * Leaving the escapes in place therefore gave the two exclusion predicates different
+ * strings for the same file, and `review.exclude: ["café.svg"]` dropped it from the file
+ * list while keeping its hunks in the banked patch (caught in review, reproduced against a
+ * real repository). Octal escapes are collected as bytes and decoded as UTF-8 together,
+ * because one character is several of them.
+ */
+const unquoteGitPath = (quoted: string): string => {
+  if (!quoted.includes("\\")) {
+    return quoted;
+  }
+  const encoder = new TextEncoder();
+  const bytes: number[] = [];
+  let index = 0;
+  while (index < quoted.length) {
+    const char = quoted[index] ?? "";
+    if (char !== "\\") {
+      bytes.push(...encoder.encode(char));
+      index += 1;
+      continue;
+    }
+    const octal = quoted.slice(index + 1, index + 4);
+    if (isOctalTriple(octal)) {
+      bytes.push(Number.parseInt(octal, 8));
+      index += 4;
+      continue;
+    }
+    const next = quoted[index + 1];
+    if (next === undefined) {
+      bytes.push(...encoder.encode("\\"));
+      break;
+    }
+    bytes.push(...encoder.encode(GIT_ESCAPES[next] ?? next));
+    index += 2;
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+};
+
+/**
+ * The path a `diff --git` section is about, read off its own header.
+ *
+ * Git writes `diff --git a/x b/x`, and QUOTES both sides when the path needs it
+ * (`diff --git "a/weird name.svg" "b/weird name.svg"`). Matching the header by substring
+ * missed the quoted form, so an excluded file kept its hunks in the banked patch while
+ * being absent from the file list — the two disagreeing about what was excluded.
+ *
+ * Parsed by scanning, never by an anchored `(.+)$` pattern: a diff is library input, and
+ * such a pattern backtracks polynomially on a header built of many ` b/` repeats (CodeQL
+ * js/polynomial-redos, raised on exactly this function). Every step below is linear.
+ */
+const sectionPath = (section: string): string | undefined => {
+  const end = section.indexOf("\n");
+  const header = end === -1 ? section : section.slice(0, end);
+  if (!header.startsWith(DIFF_HEADER)) {
+    return undefined;
+  }
+  const paths = header.slice(DIFF_HEADER.length);
+  if (paths.endsWith('"')) {
+    // `"a/<path>" "b/<path>"`: identical halves again, so the same arithmetic split
+    // settles a name that itself contains a quote — which no scan for the b-side can.
+    const quotedHalf = (paths.length - 9) / 2;
+    if (
+      Number.isInteger(quotedHalf) &&
+      quotedHalf > 0 &&
+      paths.startsWith('"a/') &&
+      paths.slice(3, 3 + quotedHalf) ===
+        paths.slice(paths.length - 1 - quotedHalf, -1)
+    ) {
+      return unquoteGitPath(paths.slice(paths.length - 1 - quotedHalf, -1));
+    }
+    const open = paths.lastIndexOf('"b/');
+    return open === -1 ? undefined : unquoteGitPath(paths.slice(open + 3, -1));
+  }
+  // `a/<path> b/<path>`. The halves are IDENTICAL for anything but a rename, so the
+  // split point is arithmetic — which also settles the one case no scan can, a path
+  // that itself contains " b/".
+  const half = (paths.length - 5) / 2;
+  if (
+    Number.isInteger(half) &&
+    half > 0 &&
+    paths.startsWith("a/") &&
+    paths.slice(2, 2 + half) === paths.slice(paths.length - half)
+  ) {
+    return paths.slice(paths.length - half);
+  }
+  // A rename: the two sides differ, and the b-side is the file this diff produces.
+  const b = paths.lastIndexOf(" b/");
+  return b === -1 ? undefined : paths.slice(b + 3);
+};
+
+/**
+ * Drops the sections of a unified diff whose file the caller excluded.
+ *
+ * Takes the PATTERNS, not the resolved paths, and runs the same `matchesAnyGlob` the file
+ * list was filtered with — one predicate, so the patch and `diff.files` cannot disagree
+ * about what was excluded. A section whose header cannot be parsed is KEPT: showing a hunk
+ * that should have been dropped is a smaller failure than silently discarding a real one.
+ */
+const stripPatchOf = (patch: string, patterns: readonly string[]): string => {
+  if (patch.length === 0) {
+    return patch;
+  }
+  return patch
+    .split(/^(?=diff --git )/m)
+    .filter((section) => {
+      const path = sectionPath(section);
+      return path === undefined || !matchesAnyGlob(path, patterns);
+    })
+    .join("");
+};
+
+/**
+ * Drops the paths a repository excluded, and says which (TASKS:Y5.6).
+ *
+ * Applied to the diff the whole run works from, so the checklist, the workers, the
+ * groundedness gate and delivery all see the same change set: an excluded file cannot be
+ * reviewed, cited, or commented on. Generated files are the reviewer's worst input — a
+ * lockfile's hundreds of changed lines carry no judgement to make and crowd out the change
+ * that does (measured: 940 of 953 changed lines on a real pull request).
+ *
+ * What was dropped is RETURNED, never merely discarded: a review that quietly narrows what
+ * it looked at is the failure this project exists to prevent, so the caller puts it in the
+ * run report.
+ */
+export const excludeFromDiff = (
+  diff: GitDiff,
+  patterns: readonly string[],
+): { diff: GitDiff; excluded: string[] } => {
+  if (patterns.length === 0 || diff.files.length === 0) {
+    return { diff, excluded: [] };
+  }
+  const kept: GitChangedFile[] = [];
+  const excluded: string[] = [];
+  for (const file of diff.files) {
+    if (matchesAnyGlob(file.path, patterns)) {
+      excluded.push(file.path);
+    } else {
+      kept.push(file);
+    }
+  }
+  if (excluded.length === 0) {
+    return { diff, excluded };
+  }
+  return {
+    diff: {
+      ...diff,
+      files: kept,
+      additions: kept.reduce((sum, file) => sum + file.additions, 0),
+      deletions: kept.reduce((sum, file) => sum + file.deletions, 0),
+      // The patch is banked and read back on demand; leaving the excluded hunks in it
+      // would hand back exactly what the exclusion removed.
+      patch: stripPatchOf(diff.patch, patterns),
+      empty: kept.length === 0,
+    },
+    excluded,
+  };
+};
+
 /** The prompt: what changed, what has already been reviewed, and what to produce. */
 export const buildTaskInsertionPrompt = (input: {
   brief: OperatingBrief;
   diff: GitDiff;
   banked: EngineBankedRef;
+  /** Paths `review.exclude` kept out, so an all-excluded change is not read as empty. */
+  excluded?: readonly string[];
   recurrence: RecurrenceState;
   /** `lastReviewedSha..head`, when a previous run left a sha to measure from. */
   incremental?: GitDiff;
@@ -85,7 +271,11 @@ export const buildTaskInsertionPrompt = (input: {
       : "This repository named no particular focus areas.",
     "",
     `The change: ${diff.files.length} file(s), +${diff.additions} -${diff.deletions}.`,
-    diff.files.length > 0 ? summarizeDiff(diff) : "  (no files changed)",
+    diff.files.length > 0
+      ? summarizeDiff(diff)
+      : input.excluded !== undefined && input.excluded.length > 0
+        ? `  (every changed file is excluded from review: ${input.excluded.join(", ")})`
+        : "  (no files changed)",
     "",
     `The full patch is banked as artifactId "${banked.id}" (${banked.sizeBytes} bytes).`,
     `Read it with: ${banked.readBackHint}`,
@@ -172,8 +362,12 @@ export const runTaskInsertion = async (options: {
   recurrence: RecurrenceState;
   /** Live review-phase capability tools (TASKS:Y5.1); never a posting tool. */
   extraTools?: readonly string[];
+  /** Paths this repository excludes from review — generated files, mostly. */
+  exclude?: readonly string[];
 }): Promise<InsertionStageResult> => {
-  const diff = await acquireTargetDiff(options.run, options.run.signal);
+  const whole = await acquireTargetDiff(options.run, options.run.signal);
+  // Before anything reads it: an excluded path is not part of the change under review.
+  const { diff, excluded } = excludeFromDiff(whole, options.exclude ?? []);
   const banked = await options.engine.bankReport({
     kind: "stage-output",
     label: `diff-${options.run.target.mode}`,
@@ -206,6 +400,7 @@ export const runTaskInsertion = async (options: {
         brief: options.brief,
         diff,
         banked,
+        ...(excluded.length > 0 ? { excluded } : {}),
         recurrence: options.recurrence,
         ...(incremental !== undefined ? { incremental } : {}),
         ...(incrementalBanked !== undefined ? { incrementalBanked } : {}),
@@ -223,6 +418,7 @@ export const runTaskInsertion = async (options: {
   return {
     plan,
     diff,
+    ...(excluded.length > 0 ? { excluded } : {}),
     banked,
     ...(incremental !== undefined ? { incremental } : {}),
     ...(incrementalBanked !== undefined ? { incrementalBanked } : {}),

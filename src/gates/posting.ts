@@ -140,11 +140,20 @@ export const confirmAcceptedWrites = (input: {
     ) {
       continue;
     }
-    const body = (result.params as { body?: unknown } | undefined)?.body;
-    if (typeof body !== "string") {
+    // The marker is looked for ANYWHERE in the call's arguments, never at a named
+    // field. Which argument carries a comment body is the platform's business, not
+    // ours: GitHub calls it `body`, Bitbucket calls it `comment_text`, and reading one
+    // spelling made every comment posted through the other unconfirmable — measured on
+    // Bitbucket, where delivery reported nothing posted for comments it had correctly
+    // sent. The marker is the finding's identity; the field it travels in is not ours
+    // to know.
+    let sent: string;
+    try {
+      sent = JSON.stringify(result.params ?? "");
+    } catch {
       continue;
     }
-    for (const id of scanMarkers(body, input.kind)) {
+    for (const id of scanMarkers(sent, input.kind)) {
       if (wanted.has(id) && !confirmed.has(id)) {
         confirmed.add(id);
         posted.push({ findingId: id, commentId: "(accepted write)" });

@@ -9,8 +9,12 @@
  * The classification is deliberately CONSERVATIVE, and that is the point. Retrying an
  * outage costs a little time; retrying a misconfiguration hides it — a wrong key, a model
  * the team may not use, a malformed request — behind three slow attempts and a late,
- * confusing failure. So: network, timeout, rate limit and 5xx are transient; everything
- * else, 4xx above all, fails on the first attempt.
+ * confusing failure.
+ *
+ * So the rule is: 5xx, plus the handful of 4xx that describe a CONDITION rather than a
+ * mistake (408 request timeout, 409 conflict, 425 too early, 429 rate limit), are
+ * transient. Every other 4xx is the caller's fault and fails on the first attempt. When
+ * the error carries no usable status at all, the text decides — but only then.
  */
 
 /** Substrings that mark a failure as worth another attempt. Lower-cased comparison. */
@@ -35,7 +39,10 @@ const TRANSIENT_MARKERS = [
   "origin_response_timeout",
 ] as const;
 
-/** Statuses that are the provider's problem rather than the request's. */
+/**
+ * Statuses that are the provider's problem rather than the request's: every 5xx, and the
+ * four 4xx that describe a condition to wait out rather than a request to fix.
+ */
 const TRANSIENT_STATUS = new Set([
   408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524,
 ]);
@@ -61,7 +68,10 @@ const statusOf = (error: unknown): number | undefined => {
     return undefined;
   }
   const record = error as Record<string, unknown>;
-  for (const key of ["status", "statusCode", "code"]) {
+  // `status` and `statusCode` only. A numeric `code` is not reliably an HTTP status
+  // (Node puts strings there, other SDKs put their own numbering), and this value now
+  // DECIDES rather than merely hints — a wrong guess would silence a real retry.
+  for (const key of ["status", "statusCode"]) {
     const value = record[key];
     if (typeof value === "number") {
       return value;
@@ -77,9 +87,15 @@ const statusOf = (error: unknown): number | undefined => {
  */
 export const isTransientProviderError = (error: unknown): boolean => {
   const status = statusOf(error);
-  if (status !== undefined && TRANSIENT_STATUS.has(status)) {
-    return true;
+  if (status !== undefined) {
+    // A status the provider set is the ANSWER, and the message does not get to overrule
+    // it. Falling through to the text meant a 401 whose body happened to say "timeout",
+    // or a 400 quoting the number 500, was retried three times with backoff — inverting
+    // the fast-fail this classifier exists to guarantee (caught in review, reproduced).
+    return TRANSIENT_STATUS.has(status);
   }
+  // No usable status: the text is all there is. This is the shape that started it — an
+  // SDK that reports a gateway failure as `Error: 524 {...}` and nothing else.
   const text = textOf(error).toLowerCase();
   // A status can also arrive only inside the message, which is how an SDK that wraps a
   // gateway's JSON body reports it ("524 {...}").

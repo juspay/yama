@@ -1501,6 +1501,134 @@ if (!isBuilt()) {
     });
   });
 
+  await test("the verdict is proven by the platform taking the call, not by its wording", async () => {
+    const mod = await import(DIST_ENTRY);
+    await withTempDir("delivery", async (dir) => {
+      const config = await deliveryConfig(dir);
+      const reg = await deliveryRegistry();
+      const inline = mod.renderFindingComment(
+        finding("auth-token-logged", "CRITICAL"),
+      );
+      const second = mod.renderFindingComment(finding("weak-hash", "MAJOR"));
+      // Bitbucket spells a block NEEDS_WORK and takes it as `status`. Nothing here is
+      // GitHub's REQUEST_CHANGES, and it is still a set verdict.
+      const driver = deliverySession({
+        report: CLAIMED_ALL,
+        toolResults: [
+          { name: "create_inline", result: { id: 101, body: inline } },
+          { name: "create_inline", result: { id: 103, body: second } },
+          {
+            name: "create_summary",
+            result: { id: 102, body: "summary <!-- yama:run:run-1 -->" },
+          },
+          {
+            name: "set_state",
+            params: { status: "NEEDS_WORK" },
+            result: { content: [{ type: "text", text: "review status set" }] },
+          },
+        ],
+      });
+      const result = await mod.runDelivery({
+        session: driver.session,
+        engine: { callTool: async () => [] },
+        config,
+        registry: reg,
+        actions: ["inlineComments", "summaryComment", "verdict"],
+        runId: "run-1",
+        ranked: RANKED,
+        verdict: VERDICT,
+        summary: "one real problem",
+        checklistComplete: true,
+        dryRun: false,
+      });
+      assertEqual(
+        result.verdictSet,
+        true,
+        "another platform's vocabulary still counts as set",
+      );
+      assertEqual(result.failure, undefined, "and nothing is reported wrong");
+    });
+  });
+
+  await test("a platform with no state for the decision is an outcome, not a failure", async () => {
+    const mod = await import(DIST_ENTRY);
+    await withTempDir("delivery", async (dir) => {
+      const config = await deliveryConfig(dir);
+      const reg = await deliveryRegistry();
+      const inline = mod.renderFindingComment(
+        finding("auth-token-logged", "CRITICAL"),
+      );
+      const second = mod.renderFindingComment(finding("weak-hash", "MAJOR"));
+      const results = [
+        { name: "create_inline", result: { id: 101, body: inline } },
+        { name: "create_inline", result: { id: 103, body: second } },
+        {
+          name: "create_summary",
+          result: { id: 102, body: "summary <!-- yama:run:run-1 -->" },
+        },
+      ];
+      const run = async (report: Record<string, unknown>) =>
+        mod.runDelivery({
+          session: deliverySession({ report, toolResults: results }).session,
+          engine: { callTool: async () => [] },
+          config,
+          registry: reg,
+          actions: ["inlineComments", "summaryComment", "verdict"],
+          runId: "run-1",
+          ranked: RANKED,
+          verdict: VERDICT,
+          summary: "one real problem",
+          checklistComplete: true,
+          dryRun: false,
+        });
+      const declared = await run({
+        ...CLAIMED_ALL,
+        verdictSet: false,
+        verdictStateless: true,
+      });
+      assertEqual(
+        declared.failure,
+        undefined,
+        "a state the platform does not have is not a missed one",
+      );
+      const silent = await run({ ...CLAIMED_ALL, verdictSet: false });
+      assertIncludes(
+        silent.failure ?? "",
+        "review state",
+        "but leaving it unset without saying so still fails",
+      );
+
+      // The claim is the agent's, so it is only accepted against evidence the agent
+      // cannot fake: the posted summary carries the verdict. With no summary either,
+      // the decision reached the pull request nowhere, and saying "stateless" must not
+      // paper over that (raised in review on this very pull request).
+      const unevidenced = await mod.runDelivery({
+        session: deliverySession({
+          report: { ...CLAIMED_ALL, verdictSet: false, verdictStateless: true },
+          toolResults: [
+            { name: "create_inline", result: { id: 101, body: inline } },
+            { name: "create_inline", result: { id: 103, body: second } },
+          ],
+        }).session,
+        engine: { callTool: async () => [] },
+        config,
+        registry: reg,
+        actions: ["inlineComments", "summaryComment", "verdict"],
+        runId: "run-1",
+        ranked: RANKED,
+        verdict: VERDICT,
+        summary: "one real problem",
+        checklistComplete: true,
+        dryRun: false,
+      });
+      assertIncludes(
+        unevidenced.failure ?? "",
+        "nowhere on the pull request",
+        "a stateless claim with no summary to carry the verdict is still a failure",
+      );
+    });
+  });
+
   await test("an agent that says it posted, with no comment id, has proved nothing", async () => {
     const mod = await import(DIST_ENTRY);
     await withTempDir("delivery", async (dir) => {

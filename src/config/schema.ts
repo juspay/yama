@@ -180,6 +180,45 @@ export const VerdictConfigSchema = z
   })
   .prefault({});
 
+/**
+ * Paths a review never looks at. Generated files are the reviewer's worst input: a
+ * lockfile's few hundred changed lines carry no judgement to make, and they crowd out the
+ * change that does — measured on a real pull request where 940 of 953 changed lines were
+ * `pnpm-lock.yaml`. Prose in a rulebook only ASKS the model to skip them; this drops them
+ * from the diff before any stage sees it, so the request cannot be ignored and a finding
+ * cannot be written about them.
+ *
+ * The default is the set every repository would write for itself. A project that needs
+ * different ones replaces the list; a project that wants everything reviewed sets `[]`.
+ */
+export const ReviewConfigSchema = z
+  .strictObject({
+    exclude: z
+      .array(NonEmptySchema)
+      .default([
+        "*.lock",
+        "pnpm-lock.yaml",
+        "package-lock.json",
+        "yarn.lock",
+        "*.min.js",
+        "*.map",
+        "*.svg",
+        "*.png",
+        "*.jpg",
+        "*.jpeg",
+        "*.webp",
+        "*.gif",
+        "*.pdf",
+        "*.ico",
+        "*.woff",
+        "*.woff2",
+        "dist/**",
+        "build/**",
+        "coverage/**",
+      ]),
+  })
+  .prefault({});
+
 export const YamaConfigSchema = z.strictObject({
   version: VersionSchema,
   models: ModelChainsSpecSchema,
@@ -187,6 +226,7 @@ export const YamaConfigSchema = z.strictObject({
   learn: LearnConfigSchema,
   delivery: DeliveryConfigSchema,
   verdict: VerdictConfigSchema,
+  review: ReviewConfigSchema,
 });
 
 /* ------------------------------------------------------------------- mcp.yaml */
