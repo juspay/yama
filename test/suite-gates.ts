@@ -834,6 +834,110 @@ if (!isBuilt()) {
     );
   });
 
+  await test("a transient provider failure is retried; a misconfiguration is not", async () => {
+    // The regression this exists for: a Cloudflare 524 in front of a provider proxy
+    // ended an entire review twice, having told us in the body that it was retryable.
+    assertEqual(
+      mod.isTransientProviderError(
+        new Error('524 {"error_name":"origin_response_timeout"}'),
+      ),
+      true,
+      "a gateway timeout is transient",
+    );
+    assertEqual(
+      mod.isTransientProviderError(
+        new Error("Connection error: socket hang up"),
+      ),
+      true,
+      "so is a dropped connection",
+    );
+    assertEqual(
+      mod.isTransientProviderError({ status: 429, message: "rate limit" }),
+      true,
+      "and a rate limit",
+    );
+    assertEqual(
+      mod.isTransientProviderError({
+        status: 401,
+        message: "invalid x-api-key",
+      }),
+      false,
+      "a bad credential is NOT retried — three slow attempts would only hide it",
+    );
+    assertEqual(
+      mod.isTransientProviderError(
+        new Error("model not allowed for this team"),
+      ),
+      false,
+      "nor is a model the key may not use",
+    );
+
+    // The override path: a status the provider set decides, and the message does not
+    // get to overrule it. Each of these was retried three times before the fix.
+    assertEqual(
+      mod.isTransientProviderError({
+        status: 401,
+        message: "invalid x-api-key; upstream gateway timeout",
+      }),
+      false,
+      "a 401 whose body mentions a timeout still fails fast",
+    );
+    assertEqual(
+      mod.isTransientProviderError({
+        status: 400,
+        message: "invalid request: expected 500 tokens",
+      }),
+      false,
+      "and a 400 quoting a 5xx-looking number is not a 5xx",
+    );
+    assertEqual(
+      mod.isTransientProviderError({ status: 429, message: "slow down" }),
+      true,
+      "while a status that IS transient still retries",
+    );
+    // No usable status at all: the text is the only signal, which is the shape the
+    // gateway failure that started this arrives in.
+    assertEqual(
+      mod.isTransientProviderError({ code: "ECONNRESET" }),
+      true,
+      "a Node error code is read from the text, not mistaken for an HTTP status",
+    );
+    assertEqual(
+      mod.isTransientProviderError(undefined),
+      false,
+      "and nothing at all is not a reason to retry",
+    );
+
+    // And the runner acts on the classification: a transient throw is re-attempted,
+    // and the checkpoint succeeds without the stage ever seeing the failure.
+    await withTempDir("gate-retry", async (dir) => {
+      const paths = mod.storePathsForDir(dir);
+      await mod.ensureStore(paths);
+      let calls = 0;
+      const session = mod.createSessionRunner({
+        engine: {
+          generateStructured: async () => {
+            calls += 1;
+            if (calls === 1) {
+              throw new Error('524 {"error_name":"origin_response_timeout"}');
+            }
+            return reply({ ok: true });
+          },
+          registerTool: () => undefined,
+        },
+        paths,
+        sessionId: "run-retry",
+      });
+      const out = await session.checkpoint({
+        stage: "warmup",
+        prompt: "the task",
+        schema: Payload,
+      });
+      assertEqual(calls, 2, "the transient failure was retried once");
+      assertEqual(out.data.ok, true, "and the stage got its answer");
+    });
+  });
+
   await test("an accepted write confirms race-free: the sent body carries the marker", async () => {
     const call = (over: Record<string, unknown> = {}) => ({
       name: "create_inline",
