@@ -19,6 +19,7 @@ import type {
 } from "../types/index.js";
 import { writePayload, writeStage } from "../store/index.js";
 import { StageError } from "./errors.js";
+import { isTransientProviderError } from "../util/transient.js";
 
 /** The whole engine reply, as a readable artifact. Nothing here is elided. */
 const renderRaw = <T>(
@@ -46,6 +47,40 @@ const renderRaw = <T>(
   ].join("\n");
 
 /** Builds the session for one run. Every stage of the run shares its `sessionId`. */
+/**
+ * How many times a checkpoint's provider call is attempted, and how long it waits between
+ * attempts. The schema gate above this retries a bad ANSWER; this retries a failed CALL,
+ * which nothing did — one Cloudflare 524 in front of a proxy ended an entire review, and
+ * the error itself said it was retryable.
+ *
+ * Bounded and short on purpose: enough to ride out a hiccup, not enough to sit on a real
+ * outage. A non-transient error is not retried at all, so a wrong key still fails on the
+ * first attempt instead of three slow ones later.
+ */
+const PROVIDER_ATTEMPTS = 3;
+const PROVIDER_BACKOFF_MS = [2_000, 8_000] as const;
+
+const callWithTransientRetry = async <T>(
+  call: () => Promise<T>,
+): Promise<T> => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < PROVIDER_ATTEMPTS; attempt += 1) {
+    try {
+      return await call();
+    } catch (error) {
+      lastError = error;
+      const more = attempt < PROVIDER_ATTEMPTS - 1;
+      if (!more || !isTransientProviderError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, PROVIDER_BACKOFF_MS[attempt] ?? 8_000),
+      );
+    }
+  }
+  throw lastError;
+};
+
 export const createSessionRunner = (options: {
   engine: Engine;
   paths: RunStorePaths;
@@ -66,13 +101,15 @@ export const createSessionRunner = (options: {
   ): Promise<StageOutput<Stage, T>> => {
     const startedAt = new Date().toISOString();
     const began = Date.now();
-    const result = await options.engine.generateStructured({
-      sessionId: options.sessionId,
-      prompt: req.prompt,
-      schema: req.schema,
-      ...(req.tools !== undefined ? { tools: req.tools } : {}),
-      ...(req.maxSteps !== undefined ? { maxSteps: req.maxSteps } : {}),
-    });
+    const result = await callWithTransientRetry(() =>
+      options.engine.generateStructured({
+        sessionId: options.sessionId,
+        prompt: req.prompt,
+        schema: req.schema,
+        ...(req.tools !== undefined ? { tools: req.tools } : {}),
+        ...(req.maxSteps !== undefined ? { maxSteps: req.maxSteps } : {}),
+      }),
+    );
 
     lastToolResults = result.raw.toolResults ?? [];
     const attempt = (attempts.get(req.stage) ?? 0) + 1;

@@ -834,6 +834,74 @@ if (!isBuilt()) {
     );
   });
 
+  await test("a transient provider failure is retried; a misconfiguration is not", async () => {
+    // The regression this exists for: a Cloudflare 524 in front of a provider proxy
+    // ended an entire review twice, having told us in the body that it was retryable.
+    assertEqual(
+      mod.isTransientProviderError(
+        new Error('524 {"error_name":"origin_response_timeout"}'),
+      ),
+      true,
+      "a gateway timeout is transient",
+    );
+    assertEqual(
+      mod.isTransientProviderError(
+        new Error("Connection error: socket hang up"),
+      ),
+      true,
+      "so is a dropped connection",
+    );
+    assertEqual(
+      mod.isTransientProviderError({ status: 429, message: "rate limit" }),
+      true,
+      "and a rate limit",
+    );
+    assertEqual(
+      mod.isTransientProviderError({
+        status: 401,
+        message: "invalid x-api-key",
+      }),
+      false,
+      "a bad credential is NOT retried — three slow attempts would only hide it",
+    );
+    assertEqual(
+      mod.isTransientProviderError(
+        new Error("model not allowed for this team"),
+      ),
+      false,
+      "nor is a model the key may not use",
+    );
+
+    // And the runner acts on the classification: a transient throw is re-attempted,
+    // and the checkpoint succeeds without the stage ever seeing the failure.
+    await withTempDir("gate-retry", async (dir) => {
+      const paths = mod.storePathsForDir(dir);
+      await mod.ensureStore(paths);
+      let calls = 0;
+      const session = mod.createSessionRunner({
+        engine: {
+          generateStructured: async () => {
+            calls += 1;
+            if (calls === 1) {
+              throw new Error('524 {"error_name":"origin_response_timeout"}');
+            }
+            return reply({ ok: true });
+          },
+          registerTool: () => undefined,
+        },
+        paths,
+        sessionId: "run-retry",
+      });
+      const out = await session.checkpoint({
+        stage: "warmup",
+        prompt: "the task",
+        schema: Payload,
+      });
+      assertEqual(calls, 2, "the transient failure was retried once");
+      assertEqual(out.data.ok, true, "and the stage got its answer");
+    });
+  });
+
   await test("an accepted write confirms race-free: the sent body carries the marker", async () => {
     const call = (over: Record<string, unknown> = {}) => ({
       name: "create_inline",
