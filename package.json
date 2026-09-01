@@ -1,6 +1,6 @@
 {
   "name": "@juspay/yama",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "description": "Prompts-driven pull-request review agent on NeuroLink: config-driven skills, MCP tools, memory and fallback chains",
   "keywords": [
     "pr",

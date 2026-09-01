@@ -1,3 +1,9 @@
+## [6.1.0](https://github.com/juspay/yama/compare/v6.0.0...v6.1.0) (2026-09-01)
+
+### Features
+
+* **reviewer:** committed hippocampus memory and a prompts-driven yama learn ([f4feda3](https://github.com/juspay/yama/commit/f4feda352b026116440b704b3bf07d08b867f55b))
+
 ## [6.0.0](https://github.com/juspay/yama/compare/v5.2.0...v6.0.0) (2026-09-01)
 
 ### ⚠ BREAKING CHANGES
