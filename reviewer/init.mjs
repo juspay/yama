@@ -13,6 +13,15 @@ const CONFIG_JSON = `{
   "maxSteps": 25,
   "userId": "<project-id e.g. repo name>",
   "systemPrompt": "You are an agent working in this repository. Use your tools, skills and memory to complete the task. Be concise.",
+  "learnPrompt": "Pull request \${pr} of this repository has been merged. This is a read-only retrospective: do NOT post, edit, resolve or react to anything on the PR. Read the PR's title, description, review comments, and every author reply. Work out what the review got right and wrong: findings the author refuted or that proved false positives, findings the author accepted and fixed, and replies that settled a project convention. End with a section titled 'Learnings' stating each durable lesson as a standalone, imperative sentence a future review can apply directly. If the discussion teaches nothing durable, end with 'Learnings: none.'",
+  "learn": {
+    "commit": false,
+    "push": false,
+    "remote": "origin",
+    "branch": "main",
+    "commitPrefix": "chore(yama): ",
+    "skipCiToken": "[skip ci]"
+  },
   "timeouts": {
     "requestTimeoutMs": 120000,
     "turnTimeoutMs": 300000,
@@ -99,7 +108,9 @@ const FILES = {
   "MCP.json": MCP_JSON,
   "prompts.json": PROMPTS_JSON,
   "skills/guidelines/SKILL.md": GUIDELINES_SKILL,
-  "memory/.gitkeep": "",
+  // An empty file IS a valid empty SQLite database — commit it, so memory is
+  // present from the first checkout and grows via `yama learn`.
+  "memory/hippocampus.sqlite": "",
   ".env.example": ENV_EXAMPLE,
 };
 
@@ -122,6 +133,7 @@ Next steps:
   3. Edit skills/guidelines/SKILL.md with your project's rules.
   4. Adjust prompts.json, then run:
        yama run pr=123 branch=main     (batch — one prompt after another)
+       yama learn pr=123               (post-merge: distill the PR into memory)
        yama                            (interactive REPL)
 `);
 }

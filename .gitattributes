@@ -1,0 +1,2 @@
+# The committed Hippocampus memory database is binary; keep diffs and merges quiet.
+reviewer/memory/*.sqlite binary -diff

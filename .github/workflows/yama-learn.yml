@@ -5,40 +5,26 @@ name: Yama learn
 # number and a `push` trigger would attribute feedback to the wrong pull
 # request — or to none.
 #
-# There is deliberately no paths-ignore here. The loop guard for this workflow is
-# the actor condition below plus `[skip ci]` on the commit learn makes; a learn
-# commit goes straight to the default branch and never opens a pull request, so it
-# cannot re-trigger this event at all. The paths-ignore that matters lives on CI's
-# push trigger, where a learn commit DOES land.
+# There is deliberately no paths-ignore here. The loop guards for this workflow
+# are the bot-author refusal below, `[skip ci]` on the commit learn makes, and
+# the workflow GITHUB_TOKEN it pushes with (pushes made with that token do not
+# trigger workflows). The paths-ignore that matters lives on CI's push trigger,
+# where a learn commit DOES land.
 on:
-  # Chained AFTER the release workflow on the default branch — the same place in
-  # the pipeline semantic-release occupies, one stage later.
-  #
-  # Why not `pull_request: closed` (what this used to be): that fires the INSTANT
-  # the merge lands, at the same moment the release workflow starts. Learn spends
-  # minutes distilling the discussion, then pushes into a branch the release bot
-  # has meanwhile moved — the push is rejected ("fetch first"), and learn refuses
-  # to force. Chaining removes the race by construction: the release run has
-  # finished (its version commit pushed and all) before learn is even queued.
-  #
-  # Why not a plain `push`: that is the same race in different clothes.
-  # `workflow_run` is the only trigger that starts after another workflow's push
-  # has landed.
-  #
-  # The pull request is resolved from the pushed commit through the API, so this
-  # works under squash, merge-commit and rebase merges alike. A push with no
-  # associated pull request (a direct commit) has no discussion to learn from and
-  # exits cleanly. GitHub skips runs for `[skip ci]` commits, so neither the
-  # release bot's version commit nor learn's own memory commit re-enters here.
+  # Chained AFTER the release workflow on the default branch: the release run
+  # has finished (its version commit pushed and all) before learn is even
+  # queued, so learn's push cannot race the release bot's. `pull_request:
+  # closed` or a plain `push` would both re-open that race — learn spends
+  # minutes on the retrospective and refuses to force-push into a branch that
+  # moved underneath it.
   workflow_run:
     workflows: ["Release and Publish"]
     types: [completed]
 
-  # Recovery lever: a learn that failed for an environmental reason can be re-run
-  # for the same pull request. The merged-and-human guard is re-checked below from
-  # GitHub's own record, so a dispatch cannot aim the write job at an unmerged or
-  # bot-authored pull request; learn refuses to run off its own commit, so a re-run
-  # cannot feed itself back in.
+  # Recovery lever: a learn that failed for an environmental reason can be
+  # re-run for the same pull request. The merged-and-human guard is re-checked
+  # below from GitHub's own record, so a dispatch cannot aim the write job at
+  # an unmerged or bot-authored pull request.
   workflow_dispatch:
     inputs:
       pr:
@@ -47,7 +33,7 @@ on:
         type: string
 
 # Serialised: two learn runs would race each other pushing to main, and the
-# loser would be rebased onto a knowledge base it never read.
+# loser would be rebased onto a memory it never read.
 concurrency:
   group: yama-learn
   cancel-in-progress: false
@@ -55,8 +41,6 @@ concurrency:
 permissions:
   contents: write
   pull-requests: read
-  # The review run's artifact is located through the artifacts API.
-  actions: read
 
 jobs:
   learn:
@@ -81,8 +65,9 @@ jobs:
           if [ -n "${DISPATCH_PR:-}" ]; then
             PR="$DISPATCH_PR"
           else
-            # Which pull request produced this commit. Works for squash, merge and
-            # rebase merges alike: GitHub associates the resulting commit with it.
+            # Which pull request produced this commit. Works for squash, merge
+            # and rebase merges alike: GitHub associates the resulting commit
+            # with the pull request it came from.
             PR=$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/pulls" \
                    --jq '[.[] | select(.merged_at != null)] | sort_by(.merged_at) | reverse | .[0].number // empty')
           fi
@@ -105,12 +90,9 @@ jobs:
         if: steps.target.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Named, not detached: learn refuses to commit on a detached HEAD, and a
-          # pull_request checkout is detached by default.
+          # Named, not detached: learn refuses to commit on a detached HEAD,
+          # and a pull_request checkout is detached by default.
           ref: ${{ github.event.repository.default_branch }}
-          # Correction linking walks history to connect a fix back to what it
-          # fixed, which is the signal that makes the impact ledger useful.
-          fetch-depth: 0
           # The WORKFLOW token is the push credential: this job declares
           # `contents: write`, and the learn commit's [skip ci] plus CI's
           # paths-ignore break the loop. YAMA_GITHUB_TOKEN is the API/MCP read
@@ -121,7 +103,8 @@ jobs:
       - name: Setup PNPM
         if: steps.target.outputs.run == 'true'
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        # Version comes from `packageManager` in package.json.
+        # Version comes from `packageManager` in package.json; passing one here
+        # only creates a second place for it to disagree.
 
       - name: Setup Node.js
         if: steps.target.outputs.run == 'true'
@@ -129,119 +112,48 @@ jobs:
         with:
           node-version: "22"
           cache: "pnpm"
+          cache-dependency-path: reviewer/pnpm-lock.yaml
 
-      - name: Install
+      - name: Install the reviewer
         if: steps.target.outputs.run == 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        if: steps.target.outputs.run == 'true'
-        run: pnpm run build
-
-      - name: Restore the pull request's run store
-        if: steps.target.outputs.run == 'true'
-        # What the reviews on this pull request established. Learning promotes
-        # from it into the repository knowledge base — the impact ledger entry
-        # comes from here — and then discards the rest.
-        #
-        # Located through the API, not `actions/download-artifact` by name: that
-        # action only sees artifacts from the CURRENT workflow run, and the
-        # artifact this needs was written by the REVIEW run on the pull request.
-        # Using it here downloaded nothing, silently, on every merge — so the
-        # impact log was never written and nobody could tell.
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ steps.target.outputs.pr }}
-        run: |
-          set -euo pipefail
-          name="yama-pr-${PR_NUMBER}"
-          id=$(gh api "repos/${REPOSITORY}/actions/artifacts?per_page=100" \
-                 --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)]
-                       | sort_by(.created_at) | reverse | .[0].id // empty")
-          if [ -z "$id" ]; then
-            echo "No review store for this pull request — learning from its comments alone."
-            exit 0
-          fi
-          mkdir -p .yama/artifacts
-          gh api "repos/${REPOSITORY}/actions/artifacts/$id/zip" > "$RUNNER_TEMP/yama-store.zip"
-          unzip -o -q "$RUNNER_TEMP/yama-store.zip" -d .yama/artifacts
-          echo "Restored the review store from artifact $id."
+        run: pnpm install --frozen-lockfile --dir reviewer
 
       - name: Set the commit identity
         if: steps.target.outputs.run == 'true'
-        # Yama shells out to plain `git commit`; it never passes an author of its
-        # own, on purpose — the identity a repository's agent commits under is the
-        # repository's decision, not the tool's. A runner has no git identity
-        # configured, so without this the commit fails at the very end, after the
-        # whole triage has been paid for.
-        #
-        # This identity is also what the actor guards above and on the review
-        # workflow match, which is what stops a learn commit feeding itself back in.
+        # learn.mjs shells out to plain `git commit`; it never passes an author
+        # of its own, on purpose — the identity a repository's agent commits
+        # under is the repository's decision, not the tool's. A runner has no
+        # git identity configured, so without this the commit fails at the very
+        # end, after the whole retrospective has been paid for.
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Setup uv (code-review-graph server)
-        if: steps.target.outputs.run == 'true'
-        # .yama/mcp.yaml declares the graph server; doctor proves every declared
-        # server and exits 2 on one it cannot spawn. The review job carries these
-        # same two steps — learn needs them for the same reason.
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-
-      - name: Warm the code-review-graph package
-        if: steps.target.outputs.run == 'true'
-        run: uvx --from code-review-graph==2.3.7 code-review-graph --help >/dev/null 2>&1 || echo "warm failed — doctor will say what that means"
-
-      - name: Verify the write path
-        if: steps.target.outputs.run == 'true'
-        # Proves the config, the connections and the credentials BEFORE computing
-        # anything. Discovering at push time that the bot cannot write loses the
-        # feedback from this pull request permanently.
-        env:
-          YAMA_GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
-          # The GitHub MCP server reads its credential from GITHUB_TOKEN (see the
-          # server block in .yama/mcp.yaml).
-          GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
-          GITHUB_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPO: ${{ github.event.repository.name }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
-          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
-          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
-          LANGFUSE_ENABLED: "true"
-          PR_NUMBER: ${{ steps.target.outputs.pr }}
-          # On dispatch the event has no PR payload; the base comes from the PR record
-          # itself, so a PR merged into a non-default base still learns against it.
-          BASE_REF: ""
-        run: |
-          if [ -z "$BASE_REF" ]; then
-            BASE_REF=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.base.ref')
-          fi
-          node dist/cli/index.js doctor \
-            --pr "$PR_NUMBER" \
-            --base "origin/$BASE_REF"
-
       - name: Learn
         if: steps.target.outputs.run == 'true'
-        # A refused or failed write exits non-zero, so a silent no-op cannot pass
-        # for a successful learn.
+        # One agent turn reads the merged pull request through the github MCP
+        # server (config.learnPrompt) and distills its learnings into
+        # memory/hippocampus.sqlite; then learn.mjs checkpoints the WAL, stages
+        # exactly that file, reads the staged set back out of git, and commits
+        # and pushes with [skip ci] — never a force push. A refused or failed
+        # write exits non-zero, so a silent no-op cannot pass for a successful
+        # learn.
         env:
           YAMA_GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.YAMA_GITHUB_TOKEN }}
-          GITHUB_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPO: ${{ github.event.repository.name }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
-          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
-          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
-          LANGFUSE_ENABLED: "true"
           PR_NUMBER: ${{ steps.target.outputs.pr }}
+        working-directory: reviewer
         run: |
-          node dist/cli/index.js learn \
-            --pr "$PR_NUMBER"
+          node index.mjs learn "pr=$PR_NUMBER" 2>&1 | tee learn-run.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Archive the run log
+        # A run that failed still logged what it did, and that is what you read.
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: yama-learn-${{ steps.target.outputs.pr || 'none' }}-${{ github.run_id }}
+          path: reviewer/learn-run.log
+          retention-days: 14

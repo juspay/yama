@@ -32,11 +32,13 @@ Fill in `config.json` (provider + model), put credentials in `.env`
 
 ```bash
 npx yama run pr=123 branch=main    # batch: run prompts.json top to bottom
+npx yama learn pr=123              # post-merge: distill the PR into memory
 npx yama                           # interactive REPL (same tools and config)
 ```
 
 Each start is a **new session**; long-term memory persists across sessions in
-`memory/hippocampus.sqlite`.
+`memory/hippocampus.sqlite` — a committed file, so every later run (on any
+machine) starts from what earlier ones learned.
 
 ## prompts.json — the review flow
 
@@ -65,9 +67,21 @@ Each start is a **new session**; long-term memory persists across sessions in
   "provider": ["litellm", "litellm"],
   "model": ["open-fast", "deepseek"],
 
-  "maxSteps": 60, // tool-execution steps per prompt
+  "maxSteps": 120, // tool-execution steps per prompt
   "userId": "my-repo", // long-term memory owner key
   "systemPrompt": "...",
+
+  // `yama learn pr=N` runs this single prompt (same ${key} substitution as
+  // prompts.json), then commits the memory database — see Memory below.
+  "learnPrompt": "PR ${pr} merged. Read its discussion… end with 'Learnings'.",
+  "learn": {
+    "commit": false, // stage + commit memory.path after the learn turn
+    "push": false, // push that commit; the subject carries [skip ci]
+    "remote": "origin",
+    "branch": "main",
+    "commitPrefix": "chore(yama): ",
+    "skipCiToken": "[skip ci]",
+  },
 
   "timeouts": {
     "requestTimeoutMs": 300000, // one model call
@@ -165,12 +179,25 @@ Or hand-rolled — this repository reviews itself with
 checkout (full history), Node 22 + pnpm, uv, `code-review-graph build`, then
 `yama run pr=… branch=…` with the log archived as an artifact.
 
+Post-merge, [.github/workflows/yama-learn.yml](./.github/workflows/yama-learn.yml)
+resolves the merged pull request, runs `yama learn pr=…`, and pushes the
+updated memory database back to `main` with `[skip ci]`.
+
 ## Memory
 
 Long-term memory works out of the box with `@juspay/hippocampus@^0.1.8`
 (pulled automatically). The SQLite backend needs `better-sqlite3`, shipped as
 an optional dependency — on machines without native build tooling it is
 skipped and memory disables itself with a warning; everything else works.
+
+The database at `memory.path` is meant to be **committed**: `yama init`
+scaffolds it as an empty file (a valid empty SQLite database), review runs
+read it, and `yama learn pr=N` is its one writer. After the learn turn the
+WAL is checkpointed and exactly that file is committed — the staged set is
+read back out of git, the subject carries `[skip ci]`, there is never a force
+push, and a remote URL embedding a credential is refused. Keep
+`memory/*.sqlite-*` (WAL/SHM) gitignored; delete the database to reset
+memory.
 
 ## Repository layout
 

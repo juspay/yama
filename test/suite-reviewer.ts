@@ -12,7 +12,7 @@
  * suites observe the shipped surface through a subprocess, nothing else.
  */
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -37,7 +37,7 @@ const SCAFFOLD_FILES = [
   "MCP.json",
   "prompts.json",
   "skills/guidelines/SKILL.md",
-  "memory/.gitkeep",
+  "memory/hippocampus.sqlite",
   ".env.example",
 ] as const;
 
@@ -69,10 +69,24 @@ await test("init creates the whole structure in an empty directory", async () =>
     // the operator is told to fill — not silently runnable defaults.
     const config = JSON.parse(
       await readFile(path.join(dir, "config.json"), "utf8"),
-    ) as { provider?: string; model?: string };
+    ) as {
+      provider?: string;
+      learnPrompt?: string;
+      learn?: { commit?: boolean };
+    };
     assert(
       typeof config.provider === "string" && config.provider.startsWith("<"),
       "config.json provider is not a fill-me placeholder",
+    );
+    assert(
+      typeof config.learnPrompt === "string" &&
+        config.learnPrompt.includes("${pr}"),
+      "config.json learnPrompt placeholder is missing",
+    );
+    assertEqual(
+      config.learn?.commit,
+      false,
+      "scaffolded learn.commit (no surprise commits by default)",
     );
     const prompts = JSON.parse(
       await readFile(path.join(dir, "prompts.json"), "utf8"),
@@ -110,6 +124,61 @@ await test("run without a config points at init and exits non-zero", async () =>
   });
 });
 
+section("learn guards");
+
+await test("learn without pr= prints usage and exits non-zero", async () => {
+  await withTempDir("learn-usage", async (dir) => {
+    const r = await runReviewer(["learn"], dir);
+    assertExit(r, 1, "yama learn without pr=");
+    assertIncludes(
+      `${r.stdout}\n${r.stderr}`,
+      "pr=<number>",
+      "learn usage line",
+    );
+  });
+});
+
+await test("learn with a non-numeric pr is rejected", async () => {
+  await withTempDir("learn-badpr", async (dir) => {
+    const r = await runReviewer(["learn", "pr=abc"], dir);
+    assertExit(r, 1, "yama learn pr=abc");
+    assertIncludes(
+      `${r.stdout}\n${r.stderr}`,
+      "pr=<number>",
+      "learn usage line",
+    );
+  });
+});
+
+await test("learn without a config points at init and exits non-zero", async () => {
+  await withTempDir("learn-bare", async (dir) => {
+    const r = await runReviewer(["learn", "pr=1"], dir);
+    assertExit(r, 1, "yama learn in an empty directory");
+    assertIncludes(
+      `${r.stdout}\n${r.stderr}`,
+      "yama init",
+      "missing-config guidance",
+    );
+  });
+});
+
+await test("learn without a learnPrompt names the missing key", async () => {
+  await withTempDir("learn-noprompt", async (dir) => {
+    await writeFile(
+      path.join(dir, "config.json"),
+      JSON.stringify({ provider: "litellm", model: "open-fast" }),
+      "utf8",
+    );
+    const r = await runReviewer(["learn", "pr=1"], dir);
+    assertExit(r, 1, "yama learn without learnPrompt");
+    assertIncludes(
+      `${r.stdout}\n${r.stderr}`,
+      "learnPrompt",
+      "missing-learnPrompt guidance",
+    );
+  });
+});
+
 section("package wiring");
 
 await test("the bin points at the reviewer entry that exists and is ESM-executable", async () => {
@@ -136,6 +205,10 @@ await test("the files allowlist ships the reviewer and nothing stale", async () 
     "files misses reviewer/index.mjs",
   );
   assert(files.includes("reviewer/init.mjs"), "files misses reviewer/init.mjs");
+  assert(
+    files.includes("reviewer/learn.mjs"),
+    "files misses reviewer/learn.mjs",
+  );
   assert(files.includes("action.yml"), "files misses action.yml");
   assert(!files.includes("dist"), "files still ships the v5 dist");
   assert(!files.includes("templates"), "files still ships the v5 templates");
