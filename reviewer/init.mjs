@@ -23,9 +23,9 @@ const CONFIG_JSON = `{
     "skipCiToken": "[skip ci]"
   },
   "timeouts": {
-    "requestTimeoutMs": 120000,
-    "turnTimeoutMs": 300000,
-    "stallTimeoutMs": 90000
+    "requestTimeoutMs": 300000,
+    "turnTimeoutMs": 2400000,
+    "stallTimeoutMs": 180000
   },
   "compaction": {
     "enabled": true,
@@ -33,7 +33,8 @@ const CONFIG_JSON = `{
   },
   "summarization": {
     "provider": "<your-provider>",
-    "model": "<your-model>"
+    "model": "<your-model>",
+    "timeoutMs": 120000
   },
   "memory": {
     "path": "memory/hippocampus.sqlite",

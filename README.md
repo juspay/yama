@@ -83,6 +83,10 @@ machine) starts from what earlier ones learned.
     "skipCiToken": "[skip ci]",
   },
 
+  // Hang detectors, not budgets. All three are always sent (these are the
+  // defaults when a key is missing), so `requestTimeoutMs` keeps its
+  // per-call meaning — sent alone, NeuroLink bounds the WHOLE prompt with it.
+  // Keep turnTimeoutMs above requestTimeoutMs.
   "timeouts": {
     "requestTimeoutMs": 300000, // one model call
     "turnTimeoutMs": 2400000, // one whole prompt (wall clock)
@@ -90,7 +94,13 @@ machine) starts from what earlier ones learned.
   },
 
   "compaction": { "enabled": true, "threshold": 0.8 },
-  "summarization": { "provider": "litellm", "model": "open-fast" },
+  // timeoutMs caps one compaction summary call; an overrun drops that summary
+  // (non-fatal) rather than failing the prompt.
+  "summarization": {
+    "provider": "litellm",
+    "model": "open-fast",
+    "timeoutMs": 120000,
+  },
   "memory": {
     "path": "memory/hippocampus.sqlite",
     "maxWords": 500,

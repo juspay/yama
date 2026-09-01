@@ -77,7 +77,7 @@
     "check:all": "pnpm run lint && pnpm run format:check && pnpm run validate && pnpm run validate:commit"
   },
   "dependencies": {
-    "@juspay/neurolink": "^12.7.4",
+    "@juspay/neurolink": "^12.7.8",
     "@juspay/hippocampus": "^0.1.8",
     "dotenv": "^17.3.1"
   },

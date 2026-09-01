@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@juspay/hippocampus": "^0.1.8",
-    "@juspay/neurolink": "^12.7.4",
+    "@juspay/neurolink": "^12.7.8",
     "better-sqlite3": "^12.4.1",
     "dotenv": "^17.3.1"
   },

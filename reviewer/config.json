@@ -24,7 +24,8 @@
   },
   "summarization": {
     "provider": "litellm",
-    "model": "open-fast"
+    "model": "open-fast",
+    "timeoutMs": 120000
   },
   "memory": {
     "path": "memory/hippocampus.sqlite",
