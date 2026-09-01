@@ -1,3 +1,17 @@
+## [6.0.0](https://github.com/juspay/yama/compare/v5.2.0...v6.0.0) (2026-09-01)
+
+### ⚠ BREAKING CHANGES
+
+* **reviewer:** the npm package now ships reviewer/ (bin yama -> reviewer/index.mjs) instead of the v5 engine. dist/ and templates/ are no longer published, the library entry is gone, and the composite action drives yama run. The v5 engine remains in-repo (unpublished); see MIGRATION.md for the v5 -> v6 mapping.
+
+### Features
+
+* **reviewer:** ship the prompts-driven reviewer as the package ([57914c4](https://github.com/juspay/yama/commit/57914c482fb76f96f237be5a534054c4cefdfcc6))
+
+### Bug Fixes
+
+* **ci:** force @semantic-release/npm to the OIDC-capable v13 ([ea05143](https://github.com/juspay/yama/commit/ea0514338e767fd10d1c12b9bf9c2d2cb4e30b5c))
+
 ## [5.2.0](https://github.com/juspay/yama/compare/v5.1.1...v5.2.0) (2026-09-01)
 
 ### Features
