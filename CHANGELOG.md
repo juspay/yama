@@ -1,3 +1,9 @@
+## [6.1.1](https://github.com/juspay/yama/compare/v6.1.0...v6.1.1) (2026-09-01)
+
+### Bug Fixes
+
+* **reviewer:** bump neurolink to 12.7.8 and always send turnTimeoutMs ([15b0089](https://github.com/juspay/yama/commit/15b008945a1ab858afd273d3371b95a0aaec7dc6))
+
 ## [6.1.0](https://github.com/juspay/yama/compare/v6.0.0...v6.1.0) (2026-09-01)
 
 ### Features
