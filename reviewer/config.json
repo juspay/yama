@@ -1,0 +1,34 @@
+{
+  "provider": ["litellm", "litellm"],
+  "model": ["open-fast", "deepseek"],
+  "maxSteps": 60,
+  "userId": "yama-repo",
+  "systemPrompt": "You are Yama, the pull-request review agent for this repository. You run inside reviewer/; the repository root is the parent directory (../). Use your tools, skills and memory; be concrete and cite files and lines.",
+  "timeouts": {
+    "requestTimeoutMs": 300000,
+    "turnTimeoutMs": 2400000,
+    "stallTimeoutMs": 180000
+  },
+  "compaction": {
+    "enabled": true,
+    "threshold": 0.8
+  },
+  "summarization": {
+    "provider": "litellm",
+    "model": "open-fast"
+  },
+  "memory": {
+    "path": "memory/hippocampus.sqlite",
+    "maxWords": 500,
+    "flushWaitMs": 5000
+  },
+  "skills": {
+    "path": "skills",
+    "discovery": "tool"
+  },
+  "delegation": {
+    "enabled": true,
+    "maxConcurrent": 3
+  },
+  "generateOptions": {}
+}

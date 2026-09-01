@@ -1,0 +1,23 @@
+diff --git a/package.json b/package.json
+index a3d7fe0cd4e3e24baac6ae9c5018bbbdc836e15b..793972446952a448883d0fb9d893f462e95acafd 100644
+--- a/package.json
++++ b/package.json
+@@ -1,14 +1,16 @@
+ {
+   "name": "@juspay/hippocampus",
+   "version": "0.1.7",
+-  "description": "Embedded memory SDK — condensed key-value memory",
++  "description": "Embedded memory SDK \u2014 condensed key-value memory",
+   "type": "module",
+   "main": "dist/index.js",
+   "types": "dist/index.d.ts",
+   "exports": {
+     ".": {
+       "types": "./dist/index.d.ts",
+-      "import": "./dist/index.js"
++      "import": "./dist/index.js",
++      "require": "./dist/index.js",
++      "default": "./dist/index.js"
+     }
+   },
+   "scripts": {

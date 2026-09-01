@@ -144,6 +144,9 @@ export default tseslint.config(
       // hooks run them; this config has never parsed them, and they are checked
       // by being run, not by being linted.
       "scripts/**",
+      // The prompts-driven reviewer runtime (reviewer/) is plain JS that CI
+      // runs directly; like scripts/, it is checked by being run.
+      "reviewer/**",
       "**/*.d.ts",
       "*.tsbuildinfo",
     ],
