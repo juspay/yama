@@ -1,3 +1,9 @@
+## [5.1.1](https://github.com/juspay/yama/compare/v5.1.0...v5.1.1) (2026-09-01)
+
+### Bug Fixes
+
+* **stages:** give the run a memory, and a checklist it can work ([227e8b3](https://github.com/juspay/yama/commit/227e8b3e8811614439e15ff4ed88ce137e4550a1)), closes [#702](https://github.com/juspay/yama/issues/702) [#101](https://github.com/juspay/yama/issues/101) [#discussion_r](https://github.com/juspay/yama/issues/discussion_r)
+
 ## [5.1.0](https://github.com/juspay/yama/compare/v5.0.4...v5.1.0) (2026-08-31)
 
 ### Features
