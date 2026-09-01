@@ -1,3 +1,9 @@
+## [5.2.0](https://github.com/juspay/yama/compare/v5.1.1...v5.2.0) (2026-09-01)
+
+### Features
+
+* **reviewer:** prompts-driven review engine on NeuroLink ([b9a0e88](https://github.com/juspay/yama/commit/b9a0e886cfee20c19eb4be98687c2836ebbe28fc))
+
 ## [5.1.1](https://github.com/juspay/yama/compare/v5.1.0...v5.1.1) (2026-09-01)
 
 ### Bug Fixes
