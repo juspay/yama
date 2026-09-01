@@ -377,6 +377,7 @@ export function defineSuite(suiteName: string): {
  * Keeping evaluation synchronous lets the suite resolve its import immediately.
  */
 const SUITES: readonly string[] = [
+  "./suite-reviewer.js",
   "./suite-cli.js",
   "./suite-store.js",
   "./suite-tools.js",

@@ -1,7 +1,7 @@
 {
   "name": "@juspay/yama",
   "version": "5.2.0",
-  "description": "Autonomous, checklist-driven pull-request review agent powered by NeuroLink",
+  "description": "Prompts-driven pull-request review agent on NeuroLink: config-driven skills, MCP tools, memory and fallback chains",
   "keywords": [
     "pr",
     "pull-request",
@@ -25,22 +25,15 @@
   "license": "MIT",
   "author": "Juspay Technologies <support@juspay.in> (https://juspay.io)",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
     "./package.json": "./package.json"
   },
   "bin": {
-    "yama": "./dist/cli/index.js"
+    "yama": "./reviewer/index.mjs"
   },
   "files": [
-    "dist",
-    "!dist/**/*.map",
-    "templates",
+    "reviewer/index.mjs",
+    "reviewer/init.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -83,10 +76,9 @@
     "check:all": "pnpm run lint && pnpm run format:check && pnpm run validate && pnpm run validate:commit"
   },
   "dependencies": {
-    "@juspay/neurolink": "^12.7.2",
-    "js-yaml": "^4.3.1",
-    "yargs": "^18.0.0",
-    "zod": "4.3.6"
+    "@juspay/neurolink": "^12.7.4",
+    "@juspay/hippocampus": "^0.1.8",
+    "dotenv": "^17.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -108,7 +100,10 @@
     "semantic-release": "^24.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.2"
+    "typescript-eslint": "^8.57.2",
+    "js-yaml": "^4.3.1",
+    "yargs": "^18.0.0",
+    "zod": "4.3.6"
   },
   "publishConfig": {
     "access": "public",
@@ -116,20 +111,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
-    ],
-    "overrides": {
-      "zod": "4.3.6",
-      "@semantic-release/npm": "^13.1.2",
-      "protobufjs": ">=7.5.5",
-      "jws": ">=4.0.1",
-      "form-data": ">=4.0.6",
-      "@grpc/grpc-js": ">=1.13.5",
-      "adm-zip": ">=0.6.0"
-    },
-    "patchedDependencies": {
-      "@juspay/neurolink@12.7.2": "patches/@juspay__neurolink@12.7.2.patch"
-    }
+      "better-sqlite3"
+    ]
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
@@ -139,5 +122,8 @@
     "*.{json,md,yml,yaml}": [
       "prettier --write"
     ]
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.4.1"
   }
 }
