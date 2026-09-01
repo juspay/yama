@@ -1,0 +1,27 @@
+{
+  "name": "yama-reviewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Prompts-driven PR review agent on NeuroLink; CI runs: node index.mjs run pr=N",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@juspay/hippocampus": "^0.1.7",
+    "@juspay/neurolink": "^12.7.4",
+    "better-sqlite3": "^12.4.1",
+    "dotenv": "^17.3.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ],
+    "patchedDependencies": {
+      "@juspay/hippocampus": "patches/@juspay__hippocampus.patch"
+    }
+  }
+}
