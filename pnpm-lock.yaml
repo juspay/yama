@@ -88,8 +88,8 @@ importers:
         specifier: ^18.0.0
         version: 18.1.0
       zod:
-        specifier: 4.3.6
-        version: 4.3.6
+        specifier: 4.5.4
+        version: 4.5.4
     optionalDependencies:
       better-sqlite3:
         specifier: ^12.4.1
@@ -5336,8 +5336,8 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@4.3.6:
-    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+  zod@4.5.4:
+    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
 snapshots:
 
@@ -5357,53 +5357,53 @@ snapshots:
 
   '@actions/io@3.0.2': {}
 
-  '@ai-sdk/anthropic@3.0.114(zod@4.3.6)':
+  '@ai-sdk/anthropic@3.0.114(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
-      '@ai-sdk/provider-utils': 4.0.49(zod@4.3.6)
-      zod: 4.3.6
+      '@ai-sdk/provider-utils': 4.0.49(zod@4.5.4)
+      zod: 4.5.4
 
-  '@ai-sdk/gateway@3.0.184(zod@4.3.6)':
+  '@ai-sdk/gateway@3.0.184(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
-      '@ai-sdk/provider-utils': 4.0.49(zod@4.3.6)
+      '@ai-sdk/provider-utils': 4.0.49(zod@4.5.4)
       '@vercel/oidc': 3.2.0
-      zod: 4.3.6
+      zod: 4.5.4
 
-  '@ai-sdk/mistral@3.0.62(zod@4.3.6)':
+  '@ai-sdk/mistral@3.0.62(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
-      '@ai-sdk/provider-utils': 4.0.49(zod@4.3.6)
-      zod: 4.3.6
+      '@ai-sdk/provider-utils': 4.0.49(zod@4.5.4)
+      zod: 4.5.4
 
-  '@ai-sdk/openai@3.0.104(zod@4.3.6)':
+  '@ai-sdk/openai@3.0.104(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
-      '@ai-sdk/provider-utils': 4.0.49(zod@4.3.6)
-      zod: 4.3.6
+      '@ai-sdk/provider-utils': 4.0.49(zod@4.5.4)
+      zod: 4.5.4
 
-  '@ai-sdk/provider-utils@4.0.49(zod@4.3.6)':
+  '@ai-sdk/provider-utils@4.0.49(zod@4.5.4)':
     dependencies:
       '@ai-sdk/provider': 3.0.15
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.1
       undici: 6.28.0
-      zod: 4.3.6
+      zod: 4.5.4
 
   '@ai-sdk/provider@3.0.15':
     dependencies:
       json-schema: 0.4.0
 
-  '@anthropic-ai/sdk@0.102.0(zod@4.3.6)':
+  '@anthropic-ai/sdk@0.102.0(zod@4.5.4)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
     optionalDependencies:
-      zod: 4.3.6
+      zod: 4.5.4
 
-  '@anthropic-ai/vertex-sdk@0.16.1(zod@4.3.6)':
+  '@anthropic-ai/vertex-sdk@0.16.1(zod@4.5.4)':
     dependencies:
-      '@anthropic-ai/sdk': 0.102.0(zod@4.3.6)
+      '@anthropic-ai/sdk': 0.102.0(zod@4.5.4)
       google-auth-library: 9.15.1
     transitivePeerDependencies:
       - encoding
@@ -5884,27 +5884,27 @@ snapshots:
       - supports-color
     optional: true
 
-  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))':
+  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))':
     dependencies:
       google-auth-library: 10.9.1
       p-retry: 4.6.2
       protobufjs: 7.6.5
       ws: 8.21.3
     optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
+      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
       - utf-8-validate
 
-  '@google/genai@2.19.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))':
+  '@google/genai@2.19.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))':
     dependencies:
       google-auth-library: 10.9.1
       p-retry: 4.6.2
       protobufjs: 7.6.5
       ws: 8.21.3
     optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
+      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -6433,16 +6433,16 @@ snapshots:
 
   '@juspay/neurolink@12.7.8(@juspay/hippocampus@0.1.8)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.10.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)':
     dependencies:
-      '@ai-sdk/anthropic': 3.0.114(zod@4.3.6)
-      '@ai-sdk/mistral': 3.0.62(zod@4.3.6)
-      '@ai-sdk/openai': 3.0.104(zod@4.3.6)
+      '@ai-sdk/anthropic': 3.0.114(zod@4.5.4)
+      '@ai-sdk/mistral': 3.0.62(zod@4.5.4)
+      '@ai-sdk/openai': 3.0.104(zod@4.5.4)
       '@ai-sdk/provider': 3.0.15
-      '@anthropic-ai/sdk': 0.102.0(zod@4.3.6)
-      '@anthropic-ai/vertex-sdk': 0.16.1(zod@4.3.6)
+      '@anthropic-ai/sdk': 0.102.0(zod@4.5.4)
+      '@anthropic-ai/vertex-sdk': 0.16.1(zod@4.5.4)
       '@aws-sdk/types': 3.974.5
       '@cfworker/json-schema': 4.1.1
-      '@google/genai': 1.52.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))
-      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
+      '@google/genai': 1.52.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))
+      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/api-logs': 0.214.0
       '@opentelemetry/context-async-hooks': 2.10.0(@opentelemetry/api@1.9.1)
@@ -6457,7 +6457,7 @@ snapshots:
       '@opentelemetry/sdk-trace-node': 2.10.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/semantic-conventions': 1.43.0
       adm-zip: 0.6.0
-      ai: 6.0.270(zod@4.3.6)
+      ai: 6.0.270(zod@4.5.4)
       chalk: 5.6.2
       chardet: 2.1.1
       croner: 9.1.0
@@ -6483,8 +6483,8 @@ snapshots:
       undici: 7.29.0
       ws: 8.21.3
       yargs: 18.1.0
-      zod: 4.3.6
-      zod-to-json-schema: 3.25.2(zod@4.3.6)
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
     optionalDependencies:
       '@aws-sdk/client-bedrock': 3.1119.0
       '@aws-sdk/client-bedrock-runtime': 3.1119.0
@@ -6499,14 +6499,14 @@ snapshots:
       '@koa/cors': 5.0.0
       '@koa/router': 15.7.0(koa@3.2.1)
       '@langfuse/otel': 5.10.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
-      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)
-      '@livekit/agents-plugin-cartesia': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)(zod@4.3.6)
-      '@livekit/agents-plugin-deepgram': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)
-      '@livekit/agents-plugin-elevenlabs': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)
-      '@livekit/agents-plugin-google': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.3.6)
-      '@livekit/agents-plugin-livekit': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))
-      '@livekit/agents-plugin-silero': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)
-      '@livekit/agents-plugin-soniox': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)
+      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)
+      '@livekit/agents-plugin-cartesia': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)(zod@4.5.4)
+      '@livekit/agents-plugin-deepgram': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)
+      '@livekit/agents-plugin-elevenlabs': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)
+      '@livekit/agents-plugin-google': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)
+      '@livekit/agents-plugin-livekit': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))
+      '@livekit/agents-plugin-silero': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)
+      '@livekit/agents-plugin-soniox': 1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)
       '@livekit/rtc-node': 0.13.34
       '@picovoice/cobra-node': 3.0.3
       bullmq: 5.81.3(redis@5.12.1(@opentelemetry/api@1.9.1))
@@ -6571,20 +6571,20 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.10.0(@opentelemetry/api@1.9.1)
     optional: true
 
-  '@livekit/agents-plugin-cartesia@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)(zod@4.3.6)':
+  '@livekit/agents-plugin-cartesia@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)(zod@4.5.4)':
     dependencies:
-      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)
+      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)
       '@livekit/rtc-node': 0.13.34
       ws: 8.21.3
-      zod: 4.3.6
+      zod: 4.5.4
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
     optional: true
 
-  '@livekit/agents-plugin-deepgram@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)':
+  '@livekit/agents-plugin-deepgram@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)':
     dependencies:
-      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)
+      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)
       '@livekit/rtc-node': 0.13.34
       ws: 8.21.3
     transitivePeerDependencies:
@@ -6592,9 +6592,9 @@ snapshots:
       - utf-8-validate
     optional: true
 
-  '@livekit/agents-plugin-elevenlabs@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)':
+  '@livekit/agents-plugin-elevenlabs@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)':
     dependencies:
-      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)
+      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)
       '@livekit/mutex': 1.1.1
       '@livekit/rtc-node': 0.13.34
       ws: 8.21.3
@@ -6603,16 +6603,16 @@ snapshots:
       - utf-8-validate
     optional: true
 
-  '@livekit/agents-plugin-google@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.3.6)':
+  '@livekit/agents-plugin-google@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)':
     dependencies:
-      '@google/genai': 2.19.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))
-      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)
+      '@google/genai': 2.19.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))
+      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)
       '@livekit/mutex': 1.1.1
       '@livekit/rtc-node': 0.13.34
       '@types/json-schema': 7.0.15
       google-auth-library: 10.9.1
       json-schema: 0.4.0
-      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.3.6)
+      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
       - '@modelcontextprotocol/sdk'
@@ -6625,17 +6625,17 @@ snapshots:
       - zod
     optional: true
 
-  '@livekit/agents-plugin-livekit@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))':
+  '@livekit/agents-plugin-livekit@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))':
     dependencies:
       '@huggingface/hub': 2.4.1
       '@huggingface/transformers': 4.2.0
-      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)
+      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)
       onnxruntime-node: 1.24.3
     optional: true
 
-  '@livekit/agents-plugin-silero@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)':
+  '@livekit/agents-plugin-silero@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)':
     dependencies:
-      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)
+      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)
       '@livekit/rtc-node': 0.13.34
       onnxruntime-node: 1.24.3
       ws: 8.21.3
@@ -6644,9 +6644,9 @@ snapshots:
       - utf-8-validate
     optional: true
 
-  '@livekit/agents-plugin-soniox@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6))(@livekit/rtc-node@0.13.34)':
+  '@livekit/agents-plugin-soniox@1.7.1(@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4))(@livekit/rtc-node@0.13.34)':
     dependencies:
-      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)
+      '@livekit/agents': 1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)
       '@livekit/rtc-node': 0.13.34
       ws: 8.21.3
     transitivePeerDependencies:
@@ -6654,7 +6654,7 @@ snapshots:
       - utf-8-validate
     optional: true
 
-  '@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.3.6)':
+  '@livekit/agents@1.7.1(@aws-sdk/credential-provider-node@3.972.82)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.3)(@types/node@22.20.1)(typescript@5.9.3)(zod@4.5.4)':
     dependencies:
       '@bufbuild/protobuf': 1.10.1
       '@livekit/av': 10.0.0
@@ -6685,14 +6685,14 @@ snapshots:
       jsonrepair: 3.15.0
       livekit-server-sdk: 2.18.0
       ofetch: 1.5.1
-      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.3.6)
+      openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)
       pidusage: 4.0.1
       pino: 8.21.0
       pino-pretty: 11.3.0
       sharp: 0.35.3(@types/node@22.20.1)
       ws: 8.21.3
-      zod: 4.3.6
-      zod-to-json-schema: 3.25.2(zod@4.3.6)
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
       - '@smithy/hash-node'
@@ -6815,7 +6815,7 @@ snapshots:
   '@lukeed/ms@2.0.2':
     optional: true
 
-  '@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)':
+  '@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)':
     dependencies:
       '@hono/node-server': 1.19.17(hono@4.13.5)
       ajv: 8.20.0
@@ -6832,8 +6832,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 4.3.6
-      zod-to-json-schema: 3.25.2(zod@4.3.6)
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
     optionalDependencies:
       '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
@@ -7667,13 +7667,13 @@ snapshots:
       clean-stack: 5.3.0
       indent-string: 5.0.0
 
-  ai@6.0.270(zod@4.3.6):
+  ai@6.0.270(zod@4.5.4):
     dependencies:
-      '@ai-sdk/gateway': 3.0.184(zod@4.3.6)
+      '@ai-sdk/gateway': 3.0.184(zod@4.5.4)
       '@ai-sdk/provider': 3.0.15
-      '@ai-sdk/provider-utils': 4.0.49(zod@4.3.6)
+      '@ai-sdk/provider-utils': 4.0.49(zod@4.5.4)
       '@opentelemetry/api': 1.9.1
-      zod: 4.3.6
+      zod: 4.5.4
 
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
@@ -9935,12 +9935,12 @@ snapshots:
       protobufjs: 7.6.5
     optional: true
 
-  openai@6.49.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.3.6):
+  openai@6.49.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4):
     optionalDependencies:
       '@aws-sdk/credential-provider-node': 3.972.82
       '@smithy/signature-v4': 5.7.3
       ws: 8.21.3
-      zod: 4.3.6
+      zod: 4.5.4
     optional: true
 
   option@0.2.4:
@@ -11343,8 +11343,8 @@ snapshots:
       readable-stream: 3.6.2
     optional: true
 
-  zod-to-json-schema@3.25.2(zod@4.3.6):
+  zod-to-json-schema@3.25.2(zod@4.5.4):
     dependencies:
-      zod: 4.3.6
+      zod: 4.5.4
 
-  zod@4.3.6: {}
+  zod@4.5.4: {}
