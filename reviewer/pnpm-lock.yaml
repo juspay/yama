@@ -4,21 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  '@juspay/hippocampus':
-    hash: 3de705c0653ac541fb908490086c8ab948e57690788c9e47f8bc5695393400a6
-    path: patches/@juspay__hippocampus.patch
-
 importers:
 
   .:
     dependencies:
       '@juspay/hippocampus':
-        specifier: ^0.1.7
-        version: 0.1.7(patch_hash=3de705c0653ac541fb908490086c8ab948e57690788c9e47f8bc5695393400a6)(@juspay/neurolink@12.7.4)(better-sqlite3@12.11.1)
+        specifier: ^0.1.8
+        version: 0.1.8(@juspay/neurolink@12.7.4)(better-sqlite3@12.11.1)
       '@juspay/neurolink':
         specifier: ^12.7.4
-        version: 12.7.4(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.11.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@26.4.0)(typescript@7.0.2)
+        version: 12.7.4(@juspay/hippocampus@0.1.8)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.11.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@26.4.0)(typescript@7.0.2)
       better-sqlite3:
         specifier: ^12.4.1
         version: 12.11.1
@@ -863,8 +858,8 @@ packages:
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
 
-  '@juspay/hippocampus@0.1.7':
-    resolution: {integrity: sha512-Xua/pNvLst0TUanMHOb30+ZxsvJ2wDg2IH6rqz4dsszEQrTPi9hObTLpPCQOH28u/mgthYVx6XxAxzcHyaxXpA==}
+  '@juspay/hippocampus@0.1.8':
+    resolution: {integrity: sha512-vQIYGhMxZJQC+kLA419gUfXgd55UNrovKjoYQ+bySUB/SbOLxgosKHSpa0UU6v9iTFG9qnTEfHU9/2JtymdNKw==}
     engines: {node: '>=18'}
     peerDependencies:
       '@juspay/neurolink': '>=9.70.0'
@@ -4770,15 +4765,15 @@ snapshots:
   '@js-sdsl/ordered-map@4.4.2':
     optional: true
 
-  '@juspay/hippocampus@0.1.7(patch_hash=3de705c0653ac541fb908490086c8ab948e57690788c9e47f8bc5695393400a6)(@juspay/neurolink@12.7.4)(better-sqlite3@12.11.1)':
+  '@juspay/hippocampus@0.1.8(@juspay/neurolink@12.7.4)(better-sqlite3@12.11.1)':
     dependencies:
       '@aws-sdk/client-s3': 3.1123.0
-      '@juspay/neurolink': 12.7.4(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.11.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@26.4.0)(typescript@7.0.2)
+      '@juspay/neurolink': 12.7.4(@juspay/hippocampus@0.1.8)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.11.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@26.4.0)(typescript@7.0.2)
       redis: 4.7.1
     optionalDependencies:
       better-sqlite3: 12.11.1
 
-  '@juspay/neurolink@12.7.4(@juspay/hippocampus@0.1.7)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.11.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@26.4.0)(typescript@7.0.2)':
+  '@juspay/neurolink@12.7.4(@juspay/hippocampus@0.1.8)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-node@2.11.0(@opentelemetry/api@1.9.1))(@smithy/signature-v4@5.7.3)(@types/node@26.4.0)(typescript@7.0.2)':
     dependencies:
       '@ai-sdk/anthropic': 3.0.115(zod@4.5.4)
       '@ai-sdk/mistral': 3.0.63(zod@4.5.4)
@@ -4842,7 +4837,7 @@ snapshots:
       '@fastify/rate-limit': 10.3.0
       '@google-cloud/text-to-speech': 6.4.1
       '@hono/node-server': 1.19.17(hono@4.13.5)
-      '@juspay/hippocampus': 0.1.7(patch_hash=3de705c0653ac541fb908490086c8ab948e57690788c9e47f8bc5695393400a6)(@juspay/neurolink@12.7.4)(better-sqlite3@12.11.1)
+      '@juspay/hippocampus': 0.1.8(@juspay/neurolink@12.7.4)(better-sqlite3@12.11.1)
       '@koa/cors': 5.0.0
       '@koa/router': 15.7.0(koa@3.2.1)
       '@langfuse/otel': 5.11.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))

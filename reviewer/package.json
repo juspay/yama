@@ -11,7 +11,7 @@
     "start": "node index.mjs"
   },
   "dependencies": {
-    "@juspay/hippocampus": "^0.1.7",
+    "@juspay/hippocampus": "^0.1.8",
     "@juspay/neurolink": "^12.7.4",
     "better-sqlite3": "^12.4.1",
     "dotenv": "^17.3.1"
@@ -19,9 +19,6 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3"
-    ],
-    "patchedDependencies": {
-      "@juspay/hippocampus": "patches/@juspay__hippocampus.patch"
-    }
+    ]
   }
 }
