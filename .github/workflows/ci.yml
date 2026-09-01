@@ -3,12 +3,13 @@ name: CI
 on:
   push:
     branches: [main]
-    # Yama's learn commits touch only its own knowledge files and carry
-    # [skip ci]. This is the second guard: [skip ci] is honoured inconsistently
-    # across CI systems, and a knowledge update has nothing to build or test.
+    # Yama's learn commits touch only the committed memory database, carry
+    # [skip ci], and are pushed with the workflow token (which does not trigger
+    # workflows). This paths-ignore is the extra guard: [skip ci] is honoured
+    # inconsistently across CI systems, and a memory update has nothing to
+    # build or test.
     paths-ignore:
-      - ".yama/memory/**"
-      - ".yama/artifacts/**"
+      - "reviewer/memory/**"
   pull_request:
     branches: [main]
 

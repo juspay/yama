@@ -22,7 +22,7 @@
 import { createInterface } from "node:readline/promises";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import "dotenv/config";
@@ -39,6 +39,19 @@ if (command === "init") {
   const { runInit } = await import("./init.mjs");
   runInit(argv[1] ? path.resolve(CWD, argv[1]) : CWD);
   process.exit(0);
+}
+
+// key=value parameters for `run` and `learn` (e.g. pr=123 branch=main).
+const params = {};
+for (const arg of argv.slice(1)) {
+  const eq = arg.indexOf("=");
+  if (eq > 0) {
+    params[arg.slice(0, eq)] = arg.slice(eq + 1);
+  }
+}
+if (command === "learn" && !/^\d+$/.test(params.pr ?? "")) {
+  console.error("✗ usage: yama learn pr=<number> [key=value ...]");
+  process.exit(1);
 }
 
 const { NeuroLink } = await import("@juspay/neurolink");
@@ -63,6 +76,16 @@ async function loadJson(file, fallback) {
 
 const config = await loadJson("config.json");
 const mcpFile = await loadJson("MCP.json", { servers: {} });
+
+if (
+  command === "learn" &&
+  !(typeof config.learnPrompt === "string" && config.learnPrompt.trim())
+) {
+  console.error(
+    '✗ config.json has no "learnPrompt" — add one before running yama learn',
+  );
+  process.exit(1);
+}
 
 const sessionId = randomUUID(); // each start = a brand-new session
 const userId = config.userId ?? "local-user";
@@ -378,11 +401,8 @@ async function runTurn(text, overrides = {}) {
 let rl;
 let shuttingDown = false;
 
-async function shutdown(code) {
-  if (shuttingDown) {
-    return;
-  }
-  shuttingDown = true;
+/** Flush-wait for background memory writes, then dispose NeuroLink — no exit. */
+async function settle() {
   rl?.close();
   // Long-term memory is written in the background (LLM condensation +
   // SQLite write) after each turn; give a recent turn's write time to land
@@ -400,6 +420,14 @@ async function shutdown(code) {
   } catch {
     // best-effort cleanup
   }
+}
+
+async function shutdown(code) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  await settle();
   process.exit(code);
 }
 
@@ -426,14 +454,6 @@ function substituteParams(text, params) {
 }
 
 if (command === "run") {
-  const params = {};
-  for (const arg of argv.slice(1)) {
-    const eq = arg.indexOf("=");
-    if (eq > 0) {
-      params[arg.slice(0, eq)] = arg.slice(eq + 1);
-    }
-  }
-
   const promptsFile = await loadJson("prompts.json");
   const list = Array.isArray(promptsFile) ? promptsFile : promptsFile.prompts;
   if (!Array.isArray(list) || list.length === 0) {
@@ -458,6 +478,81 @@ if (command === "run") {
     }
   }
   await shutdown(0);
+}
+
+// ---------------------------------------------------------------------------
+// Learn mode — one agent turn distills a merged pull request's discussion
+// into long-term memory (config.learnPrompt), then a deterministic git step
+// (learn.mjs) commits the updated database. The agent never touches git.
+// ---------------------------------------------------------------------------
+
+/** Size+mtime fingerprint of the database and its WAL — a write lands in one of them. */
+async function memoryFingerprint(dbPath) {
+  const shape = async (p) => {
+    try {
+      const s = await stat(p);
+      return `${s.size}:${s.mtimeMs}`;
+    } catch {
+      return "absent";
+    }
+  };
+  return `${await shape(dbPath)}|${await shape(`${dbPath}-wal`)}`;
+}
+
+/**
+ * Wait for the condensation WRITE, not the wall clock: poll the fingerprint
+ * until it moves (then one extra beat for a mid-flight transaction) or the
+ * flushWaitMs deadline passes. The deadline is a ceiling here, never a sleep.
+ */
+async function waitForMemoryWrite(dbPath, before) {
+  const deadlineMs = config.memory?.flushWaitMs ?? 12_000;
+  const intervalMs = 1_000;
+  const startedAt = Date.now();
+  console.log(
+    `(waiting for the memory write, up to ${Math.ceil(deadlineMs / 1000)}s…)`,
+  );
+  while (Date.now() - startedAt < deadlineMs) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    if ((await memoryFingerprint(dbPath)) !== before) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      return true;
+    }
+  }
+  return (await memoryFingerprint(dbPath)) !== before;
+}
+
+if (command === "learn") {
+  const text = substituteParams(config.learnPrompt, params);
+  console.log(`\n━━ learn from PR #${params.pr} ━━`);
+  console.log(text);
+  const before = await memoryFingerprint(memoryDbPath);
+  const ok = await runTurn(text);
+  if (!ok) {
+    await shutdown(1);
+  }
+  // Hippocampus condenses the turn in the background: wait for the WRITE
+  // itself, then flush and dispose, so the WAL checkpoint in learn.mjs owns
+  // the database alone. The flag keeps a SIGINT during the git phase from
+  // re-entering dispose mid-commit. A learn whose memory never landed is a
+  // FAILED learn, said out loud — never a green run that committed nothing.
+  shuttingDown = true;
+  const landed = await waitForMemoryWrite(memoryDbPath, before);
+  await settle();
+  if (!landed) {
+    console.error(
+      `✗ no memory write landed within ${config.memory?.flushWaitMs ?? 12_000}ms of the learn turn — the learning was NOT persisted (condensation too slow, or memory is disabled). Nothing will be committed; re-run learn once the cause is fixed.`,
+    );
+    process.exit(1);
+  }
+  const { runLearn } = await import("./learn.mjs");
+  process.exit(
+    await runLearn({
+      cwd: CWD,
+      memoryDbPath,
+      pr: params.pr,
+      learn: config.learn ?? {},
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
