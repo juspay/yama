@@ -91,6 +91,50 @@ const sessionId = randomUUID(); // each start = a brand-new session
 const userId = config.userId ?? "local-user";
 
 // ---------------------------------------------------------------------------
+// Timeouts — three hang detectors with distinct scopes, ALWAYS all sent:
+//   requestTimeoutMs  one model call            (NeuroLink `timeout`)
+//   turnTimeoutMs     one whole prompt, wall clock (NeuroLink `turnTimeoutMs`)
+//   stallTimeoutMs    no-progress watchdog        (NeuroLink `stallTimeoutMs`)
+// On NeuroLink's AI-SDK loop path (anthropic, litellm, OpenAI-compatible) a
+// `timeout` sent WITHOUT `turnTimeoutMs` bounds the entire multi-step turn, so
+// a 40-minute review of 5-minute calls died at 5 minutes flat as
+// "Request was aborted." Only an explicit turnTimeoutMs (NeuroLink >= 12.7.7)
+// gives `timeout` its per-call meaning — hence a config that omits a key
+// still gets a coherent trio from these defaults instead of NeuroLink's.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_TIMEOUTS = {
+  requestTimeoutMs: 300_000,
+  turnTimeoutMs: 2_400_000,
+  stallTimeoutMs: 180_000,
+};
+
+function resolveTimeout(key) {
+  const value = config.timeouts?.[key];
+  if (value === undefined) {
+    return DEFAULT_TIMEOUTS[key];
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    console.warn(
+      `⚠ config.json timeouts.${key}=${JSON.stringify(value)} is not a positive number of milliseconds — using ${DEFAULT_TIMEOUTS[key]}`,
+    );
+    return DEFAULT_TIMEOUTS[key];
+  }
+  return value;
+}
+
+const timeouts = {
+  requestTimeoutMs: resolveTimeout("requestTimeoutMs"),
+  turnTimeoutMs: resolveTimeout("turnTimeoutMs"),
+  stallTimeoutMs: resolveTimeout("stallTimeoutMs"),
+};
+if (timeouts.turnTimeoutMs < timeouts.requestTimeoutMs) {
+  console.warn(
+    `⚠ config.json timeouts: turnTimeoutMs (${timeouts.turnTimeoutMs}) is below requestTimeoutMs (${timeouts.requestTimeoutMs}) — the whole-prompt cap fires before one model call may finish`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Provider/model chain — config.provider / config.model accept a string OR an
 // array. Arrays map 1:1 into fallback pairs: pair 0 is primary; on any
 // failure except a real user cancel, NeuroLink's native providerFallback
@@ -148,6 +192,11 @@ const nl = new NeuroLink({
     }),
     ...(config.summarization?.model && {
       summarizationModel: config.summarization.model,
+    }),
+    // One compaction summary call; an overrun drops that summary (non-fatal)
+    // rather than failing the turn, so size it for the slowest real summary.
+    ...(config.summarization?.timeoutMs !== undefined && {
+      summarizationTimeoutMs: config.summarization.timeoutMs,
     }),
     // Auto-compaction: BudgetChecker fires pre-call; at `threshold` of the
     // model window the 4-stage compactor runs (prune → dedupe → summarize → window).
@@ -291,6 +340,9 @@ console.log(
 );
 console.log(`  skills    ${skillsDir}`);
 console.log(`  memory    ${memoryDbPath}`);
+console.log(
+  `  timeouts  call ${timeouts.requestTimeoutMs / 1000}s · turn ${timeouts.turnTimeoutMs / 1000}s · stall ${timeouts.stallTimeoutMs / 1000}s`,
+);
 if (mcpStatus.length > 0) {
   console.log("  mcp");
   for (const line of mcpStatus) {
@@ -337,15 +389,9 @@ async function runTurn(text, overrides = {}) {
         temperature: config.temperature,
       }),
       ...(config.maxSteps !== undefined && { maxSteps: config.maxSteps }),
-      ...(config.timeouts?.requestTimeoutMs !== undefined && {
-        timeout: config.timeouts.requestTimeoutMs,
-      }),
-      ...(config.timeouts?.turnTimeoutMs !== undefined && {
-        turnTimeoutMs: config.timeouts.turnTimeoutMs,
-      }),
-      ...(config.timeouts?.stallTimeoutMs !== undefined && {
-        stallTimeoutMs: config.timeouts.stallTimeoutMs,
-      }),
+      timeout: timeouts.requestTimeoutMs,
+      turnTimeoutMs: timeouts.turnTimeoutMs,
+      stallTimeoutMs: timeouts.stallTimeoutMs,
       // Generic escape hatch: anything NeuroLink's generate() accepts can be
       // set in config.json under "generateOptions" — no code changes needed.
       ...(config.generateOptions ?? {}),
