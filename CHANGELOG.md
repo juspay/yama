@@ -1,3 +1,5 @@
+## [6.1.2](https://github.com/juspay/yama/compare/v6.1.1...v6.1.2) (2026-10-27)
+
 ## [6.1.1](https://github.com/juspay/yama/compare/v6.1.0...v6.1.1) (2026-09-01)
 
 ### Bug Fixes
