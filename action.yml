@@ -39,11 +39,10 @@ inputs:
       this manifest: the runner evaluates such expressions even inside
       description strings, the secrets context does not exist at manifest load,
       and the whole action then fails to load with "Unrecognized named-value:
-      secrets". scripts/build-validations.cjs fails the build if one appears
-      here.
+      secrets".
     required: false
   node-version:
-    description: "Node version. Yama requires 22 or newer."
+    description: "Node version line. Yama requires a patched release: 22.23.4+, 24.22.1+ or 26.12.1+ (the latest patch is always installed)."
     required: false
     default: "22"
 
@@ -64,11 +63,12 @@ runs:
           exit 1
         fi
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with:
         node-version: ${{ inputs.node-version }}
+        check-latest: true
 
-    - uses: astral-sh/setup-uv@v10
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
     - name: Build the code-review-graph index
       # Builds (or updates) the graph store at the checkout root, which also
@@ -105,7 +105,7 @@ runs:
       # A run that failed still logged what it did, and that is what you read.
       if: always()
       continue-on-error: true
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: yama-review-${{ inputs.pr || github.event.pull_request.number || github.run_id }}-${{ github.run_id }}
         path: ${{ runner.temp }}/yama-review.log

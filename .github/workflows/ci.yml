@@ -9,7 +9,7 @@ on:
     # inconsistently across CI systems, and a memory update has nothing to
     # build or test.
     paths-ignore:
-      - "reviewer/memory/**"
+      - ".yama/memory/**"
   pull_request:
     branches: [main]
 
@@ -18,7 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # `engines.node` is >=22, so 20 can no longer install this package.
+        # `engines.node` requires the patched 22/24/26 lines; setup-node installs the
+        # latest patch of each (check-latest).
         # The shape is unchanged: minimum supported, current LTS, latest.
         node-version: [22, 24, 26]
 
@@ -37,6 +38,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
+          check-latest: true
           cache: "pnpm"
 
       - name: Install dependencies
@@ -61,13 +63,7 @@ jobs:
       - name: Type checking
         run: pnpm run type-check
 
-      - name: Build package
-        run: pnpm run build
-
       - name: Run tests
-        # Must stay AFTER the build. The suites are end-to-end by rule: they drive
-        # dist/cli/index.js and dist/index.js, never src/. Without dist/ there is
-        # nothing to test.
         run: pnpm run test
 
   build-check:
@@ -83,18 +79,17 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
+          check-latest: true
           cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check package build
+      - name: Check package
         run: pnpm run prepack
 
       - name: Verify package contents
-        run: |
-          pnpm pack
-          ls -la dist/
+        run: npm pack --dry-run
 
   quality-gate:
     runs-on: ubuntu-latest
@@ -112,6 +107,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
+          check-latest: true
           cache: "pnpm"
 
       - name: Install dependencies
@@ -170,17 +166,6 @@ jobs:
         run: |
           echo "📈 Running TypeScript compiler strict checks on source files..."
           pnpm run type-check
-
-      - name: 🎯 End-to-End Suite (advisory)
-        # Was "Code Coverage Analysis". There is no coverage instrument to run:
-        # the suites are end-to-end and drive the built artifact, so what this gate
-        # can report is whether that artifact behaves — hence the build first.
-        # Advisory here; the `test` job is the one that gates.
-        run: |
-          echo "🎯 Building and running the end-to-end suite..."
-          pnpm run build
-          pnpm run test || echo "Tests completed with warnings"
-        continue-on-error: true
 
       - name: 📋 Quality Summary
         run: |

@@ -1,7 +1,7 @@
 /**
  * Suite: the v6 reviewer — the artifact the package actually ships.
  *
- * v6's bin points at `reviewer/index.mjs`, which needs no build step: driving
+ * v6's bin points at `src/index.mjs`, which needs no build step: driving
  * the file in the repository IS driving what ships, the same end-to-end
  * doctrine the other suites apply to `dist/`. Everything here is offline and
  * deterministic — scaffolding, argument guards, and package wiring. The
@@ -29,7 +29,7 @@ import {
 
 const { test, section } = defineSuite("reviewer");
 
-const REVIEWER_ENTRY = path.join(REPO_ROOT, "reviewer", "index.mjs");
+const REVIEWER_ENTRY = path.join(REPO_ROOT, "src", "index.mjs");
 
 /** Files `yama init` scaffolds; the CLI contract for onboarding. */
 const SCAFFOLD_FILES = [
@@ -41,7 +41,7 @@ const SCAFFOLD_FILES = [
   ".env.example",
 ] as const;
 
-/** Drive the shipped reviewer entry: `node reviewer/index.mjs <args>`. */
+/** Drive the shipped reviewer entry: `node src/index.mjs <args>`. */
 const runReviewer = (
   args: readonly string[],
   cwd: string,
@@ -185,12 +185,8 @@ await test("the bin points at the reviewer entry that exists and is ESM-executab
   const pkg = JSON.parse(
     await readFile(path.join(REPO_ROOT, "package.json"), "utf8"),
   ) as { bin?: Record<string, string>; files?: string[] };
-  assertEqual(
-    pkg.bin?.["yama"],
-    "./reviewer/index.mjs",
-    "package.json bin.yama",
-  );
-  assert(existsSync(REVIEWER_ENTRY), "reviewer/index.mjs is missing");
+  assertEqual(pkg.bin?.["yama"], "./src/index.mjs", "package.json bin.yama");
+  assert(existsSync(REVIEWER_ENTRY), "src/index.mjs is missing");
   const head = (await readFile(REVIEWER_ENTRY, "utf8")).slice(0, 30);
   assertIncludes(head, "#!/usr/bin/env node", "reviewer entry shebang");
 });
@@ -200,15 +196,9 @@ await test("the files allowlist ships the reviewer and nothing stale", async () 
     await readFile(path.join(REPO_ROOT, "package.json"), "utf8"),
   ) as { files?: string[] };
   const files = pkg.files ?? [];
-  assert(
-    files.includes("reviewer/index.mjs"),
-    "files misses reviewer/index.mjs",
-  );
-  assert(files.includes("reviewer/init.mjs"), "files misses reviewer/init.mjs");
-  assert(
-    files.includes("reviewer/learn.mjs"),
-    "files misses reviewer/learn.mjs",
-  );
+  assert(files.includes("src/index.mjs"), "files misses src/index.mjs");
+  assert(files.includes("src/init.mjs"), "files misses src/init.mjs");
+  assert(files.includes("src/learn.mjs"), "files misses src/learn.mjs");
   assert(files.includes("action.yml"), "files misses action.yml");
   assert(!files.includes("dist"), "files still ships the v5 dist");
   assert(!files.includes("templates"), "files still ships the v5 templates");

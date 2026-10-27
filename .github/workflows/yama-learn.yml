@@ -111,12 +111,12 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
+          check-latest: true
           cache: "pnpm"
-          cache-dependency-path: reviewer/pnpm-lock.yaml
 
       - name: Install the reviewer
         if: steps.target.outputs.run == 'true'
-        run: pnpm install --frozen-lockfile --dir reviewer
+        run: pnpm install --frozen-lockfile
 
       - name: Set the commit identity
         if: steps.target.outputs.run == 'true'
@@ -143,17 +143,17 @@ jobs:
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           PR_NUMBER: ${{ steps.target.outputs.pr }}
-        working-directory: reviewer
+        working-directory: .yama
         run: |
-          node index.mjs learn "pr=$PR_NUMBER" 2>&1 | tee learn-run.log
+          node ../src/index.mjs learn "pr=$PR_NUMBER" 2>&1 | tee learn-run.log
           exit "${PIPESTATUS[0]}"
 
       - name: Archive the run log
         # A run that failed still logged what it did, and that is what you read.
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yama-learn-${{ steps.target.outputs.pr || 'none' }}-${{ github.run_id }}
-          path: reviewer/learn-run.log
+          path: .yama/learn-run.log
           retention-days: 14

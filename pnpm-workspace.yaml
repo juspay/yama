@@ -1,0 +1,6 @@
+# Supply-chain guard: never resolve a package version published less than three
+# days ago. Most malicious releases are caught and unpublished within that window.
+minimumReleaseAge: 4320
+# Our own packages ship on our schedule and are pinned deliberately.
+minimumReleaseAgeExclude:
+  - "@juspay/*"

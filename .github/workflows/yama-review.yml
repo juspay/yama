@@ -23,7 +23,7 @@ jobs:
       github.event.pull_request.user.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
     # Comfortably above the reviewer's per-prompt turn budget
-    # (reviewer/config.json timeouts), so a slow model is cut off by the agent —
+    # (.yama/config.json timeouts), so a slow model is cut off by the agent —
     # which reports honestly — rather than by the runner, which kills the job
     # and reports nothing.
     timeout-minutes: 90
@@ -45,8 +45,8 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
+          check-latest: true
           cache: "pnpm"
-          cache-dependency-path: reviewer/pnpm-lock.yaml
 
       - name: Setup uv (code-review-graph server)
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -59,10 +59,10 @@ jobs:
         run: uvx --from code-review-graph==2.3.7 code-review-graph build || echo "graph build failed — the review runs without it"
 
       - name: Install the reviewer
-        run: pnpm install --frozen-lockfile --dir reviewer
+        run: pnpm install --frozen-lockfile
 
       - name: Review
-        # The prompts-driven reviewer (reviewer/): runs reviewer/prompts.json
+        # This repository's own reviewer setup (.yama/): runs .yama/prompts.json
         # top to bottom in one session — review and post comments, then
         # validate what landed. A failed prompt aborts the run and fails this
         # job.
@@ -74,17 +74,17 @@ jobs:
           # straight into the shell.
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        working-directory: reviewer
+        working-directory: .yama
         run: |
-          node index.mjs run "pr=$PR_NUMBER" "branch=$HEAD_REF" 2>&1 | tee review-run.log
+          node ../src/index.mjs run "pr=$PR_NUMBER" "branch=$HEAD_REF" 2>&1 | tee review-run.log
           exit "${PIPESTATUS[0]}"
 
       - name: Archive the run log
         # A run that failed still logged what it did, and that is what you read.
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yama-review-${{ github.event.pull_request.number }}-${{ github.run_id }}
-          path: reviewer/review-run.log
+          path: .yama/review-run.log
           retention-days: 14

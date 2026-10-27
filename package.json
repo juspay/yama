@@ -29,56 +29,50 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "yama": "./reviewer/index.mjs"
+    "yama": "./src/index.mjs"
   },
   "files": [
-    "reviewer/index.mjs",
-    "reviewer/init.mjs",
-    "reviewer/learn.mjs",
+    "src/index.mjs",
+    "src/init.mjs",
+    "src/learn.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
     "action.yml"
   ],
   "engines": {
-    "node": ">=22.0.0",
-    "pnpm": ">=10.0.0"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1",
+    "pnpm": ">=10.34.5"
   },
-  "packageManager": "pnpm@10.15.1",
+  "packageManager": "pnpm@10.34.9",
   "os": [
     "darwin",
     "linux",
     "win32"
   ],
   "scripts": {
-    "build": "tsc",
-    "check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "check": "tsc",
     "type-check": "pnpm run check",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "tsx test/run.ts",
-    "cli": "node dist/cli/index.js",
-    "dev": "tsx src/cli/index.ts",
     "prepare": "husky",
-    "prepack": "pnpm run build && pnpm run test",
+    "prepack": "pnpm run test",
     "validate": "pnpm run validate:env && pnpm run validate:security",
     "validate:all": "pnpm run lint && pnpm run type-check && pnpm run validate",
     "validate:env": "node scripts/validate-env.cjs",
     "validate:security": "node scripts/validate-security.cjs",
-    "validate:build": "node scripts/build-validations.cjs",
     "validate:commit": "node scripts/commit-validation.cjs",
     "pre-commit": "lint-staged",
-    "pre-push": "pnpm run validate && pnpm run check && pnpm run lint && pnpm run build && pnpm run test",
-    "quality:all": "pnpm run lint && pnpm run format && pnpm run test",
-    "quality:metrics": "node scripts/quality-metrics.cjs",
-    "quality:report": "pnpm run quality:metrics && echo 'Quality metrics saved to quality-metrics.json'",
+    "pre-push": "pnpm run validate && pnpm run check && pnpm run lint && pnpm run test",
+    "quality:all": "pnpm run lint && pnpm run format:check && pnpm run test",
     "check:all": "pnpm run lint && pnpm run format:check && pnpm run validate && pnpm run validate:commit"
   },
   "dependencies": {
-    "@juspay/neurolink": "^12.7.8",
-    "@juspay/hippocampus": "^0.1.8",
+    "@juspay/hippocampus": "^0.2.1",
+    "@juspay/neurolink": "13.8.21",
     "dotenv": "^17.3.1"
   },
   "devDependencies": {
@@ -89,9 +83,7 @@
     "@semantic-release/github": "^11.0.0",
     "@semantic-release/npm": "^13.1.2",
     "@semantic-release/release-notes-generator": "^14.0.1",
-    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.20.0",
-    "@types/yargs": "^17.0.35",
     "conventional-changelog-conventionalcommits": "^8.0.0",
     "eslint": "^10.0.2",
     "globals": "^16.0.0",
@@ -101,25 +93,27 @@
     "semantic-release": "^24.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.2",
-    "js-yaml": "^4.3.1",
-    "yargs": "^18.0.0",
-    "zod": "4.3.6"
+    "typescript-eslint": "^8.57.2"
   },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3"
-    ],
+    "onlyBuiltDependencies": [],
     "overrides": {
-      "@semantic-release/npm": "^13.1.5"
+      "@semantic-release/npm": "^13.1.5",
+      "@huggingface/transformers>sharp": "^0.35.5",
+      "onnxruntime-node>adm-zip": "^0.6.1",
+      "pptxgenjs>image-size": "^2.0.3",
+      "gaxios>uuid": "^11.1.1",
+      "exceljs>uuid": "^11.1.1",
+      "@opentelemetry/api": "~1.9.0",
+      "@opentelemetry/core": "^2.8.0"
     }
   },
   "lint-staged": {
-    "*.{ts,tsx,js,jsx}": [
+    "*.{ts,js,mjs}": [
       "eslint --fix",
       "prettier --write"
     ],
@@ -128,6 +122,6 @@
     ]
   },
   "optionalDependencies": {
-    "better-sqlite3": "^12.4.1"
+    "better-sqlite3": "^13.0.3"
   }
 }

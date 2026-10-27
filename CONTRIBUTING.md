@@ -19,7 +19,7 @@ Thank you for your interest in contributing to Yama! This guide will help you ge
 
 3. **Start Development**
    ```bash
-   pnpm run dev -- review --dry-run   # run the CLI from source (tsx src/cli/index.ts)
+   cd .yama && node ../src/index.mjs  # interactive REPL against this repo's own config
    ```
 
 ## 📋 Development Workflow
@@ -34,63 +34,42 @@ pnpm install
 pnpm run validate:env
 ```
 
-Yama needs Node >= 22 and pnpm >= 10. Credentials are referenced by environment variable
+Yama needs a patched Node (22.23.4+, 24.22.1+ or 26.12.1+ — the October 2026 security
+release) and pnpm >= 10.34.5. Credentials are referenced by environment variable
 NAME — see [.env.example](.env.example) for the ones that exist and what each is for.
 
 ### 2. Development Commands
 
 ```bash
-# Run the CLI from source
-pnpm run dev -- <command>   # tsx src/cli/index.ts
+# Run the reviewer straight from the repository — there is no build step
+node src/index.mjs init <dir>          # scaffold a config into <dir>
+cd .yama && node ../src/index.mjs run pr=N branch=x
 
 # Code quality
-pnpm run lint           # ESLint — the repo's code rulings
+pnpm run lint           # ESLint over src/ and test/
 pnpm run lint:fix       # Fix what is autofixable
 pnpm run format         # Prettier
-pnpm run check          # TypeScript over src/ and test/ (alias: type-check)
-
-# Build, then test
-pnpm run build          # tsc → dist/
-pnpm test               # e2e suites, driving the BUILT CLI
+pnpm run check          # TypeScript over test/ (alias: type-check)
+pnpm test               # e2e suite
 ```
-
-**Recommended workflow:** edit → `pnpm run check` → `pnpm run lint` →
-`pnpm run build` → `pnpm test`.
-
-`pnpm test` drives `dist/`, never `src/`. A stale `dist/` is a lying test run — build first.
 
 ### 3. Testing
 
-Tests live under `test/`: one suite per area (`suite-gates.ts`, `suite-platform.ts`, …),
-with `test/run.ts` as both the driver and the harness.
+`test/suite-reviewer.ts` drives `src/index.mjs` as a subprocess; `test/run.ts` is both
+the driver and the harness. The suite is offline and deterministic — scaffolding, argument
+guards and package wiring. The model-driven path is exercised live by `yama-review.yml` on
+every pull request.
 
-```bash
-# Run every suite
-pnpm run build && pnpm test
-```
-
-Yama's suites are **end-to-end only**. A suite exercises a surface Yama actually ships — the
-built CLI (`dist/cli/index.js`) or the built library entry (`dist/index.js`). Reaching into
-`src/` to assert on an internal is a unit test and does not belong here.
-
-- One module graph per suite: take everything from `dist/`.
+- Never import a `src/` module into a suite; observe it through the subprocess.
 - The only skip signal is `throw new Skip(reason)` — never a message prefix or error text.
-- Sanity-check a new suite by breaking one assertion on purpose: it must report `✗` and exit
+- Sanity-check a new test by breaking one assertion on purpose: it must report `✗` and exit
   non-zero, never `⊘`.
-- `test/fixtures/` holds deliberately bad code and config: it is the review INPUT the suites
-  need, and it is excluded from lint and prettier on purpose.
 
 ## 🔧 Code Standards
 
-### TypeScript
+### Rules
 
-- Use strict TypeScript configuration
-- All code must be properly typed (no `any` types)
-- Follow existing code patterns and conventions
-- Repo-specific coding rules (zero `interface`, every exported type in the `src/types/`
-  barrel, only `src/engine/` importing `@juspay/neurolink`, capabilities instead of tool
-  names) live in [CLAUDE.md](CLAUDE.md) — read it before writing code. They are enforced by
-  `pnpm run lint`, so a violation is a build failure, not a review comment.
+The repository's rulings live in [CLAUDE.md](CLAUDE.md) — read it before writing code.
 
 ### Code Style
 
@@ -107,10 +86,10 @@ We use [Conventional Commits](https://conventionalcommits.org/):
 type(scope): description
 
 Examples:
-feat(stages): carry unaccounted prior findings as open
-fix(cli): resolve argument parsing issue
+feat(reviewer): add a description-review prompt
+fix(reviewer): resolve argument parsing issue
 docs(readme): update installation instructions
-test(gates): cover the checklist completeness gate
+test(reviewer): cover the learn usage guard
 ```
 
 **Types:**
@@ -135,60 +114,15 @@ Pre-commit hooks automatically run on staged files (via lint-staged):
 - Code formatting (Prettier)
 - Linting (ESLint)
 
-The pre-push hook additionally runs validation, the type check, the build and the suites.
+The pre-push hook additionally runs validation, the type check, lint and the suite.
 
 ## 🏗️ Architecture Overview
 
-### Core Components
-
-```
-src/
-├── index.ts       # Public library entry (runtime exports only)
-├── cli/           # yargs CLI (init | doctor | review | learn) and the exit codes
-├── config/        # .yama/ loading, zod schema, capability ids, model chains
-├── core/          # session runner, review/learn/doctor/init, run report
-├── engine/        # THE SEAM — the only place @juspay/neurolink may be imported
-├── gates/         # deterministic checks between stages (schema, checklist,
-│                  # markers, posted-=-confirmed, recurrence, verdict, exit)
-├── platform/      # capability → tool resolution, connect, startup probe
-├── stages/        # WarmUp, Task Insertion, Work, Collate, Delivery (+ schemas)
-├── store/         # .yama/artifacts/ run store
-├── tools/         # git (read-only allowlist), fs, checks, markers, memory
-├── types/         # ALL type definitions — barrel at index.ts
-└── util/          # small leaf helpers
-```
-
-### Adding New Features
-
-1. **Core Logic**: add it to the module that owns that concern (`stages/`, `gates/`, …)
-2. **Types**: define them in `src/types/` (the barrel — see [CLAUDE.md](CLAUDE.md))
-3. **Engine primitives**: anything the model runtime provides goes behind `src/engine/`
-4. **Tests**: add or extend a suite in `test/`, driving the built CLI
-5. **CLI**: extend `src/cli/index.ts` if a new command or flag is needed
-
-### Platform and Tool Integrations
-
-VCS platforms are **config, not code**. Yama's code asks for a capability
-(`comment.inline.create`, `pr.read`, …); `.yama/mcp.yaml` maps that capability to the tool
-an MCP server actually exposes, plus the arguments every call of it needs. To support a new
-forge, write a capability map — see `templates/mcp.github.yaml` and
-`templates/mcp.bitbucket.yaml`. There is no provider interface to implement, and tool or
-server names must not appear in `src/`.
-
-## 🧪 Testing Guidelines
-
-### What a good suite looks like
-
-- Drives a real command end to end and asserts on what a user would see: stdout, the exit
-  code, the files written under `.yama/`
-- Uses a temporary directory, and cleans up whatever it does
-- Names the discrepancy in its assertion message, without pasting captured output into it
-
-### Fixtures (`test/fixtures/`)
-
-- `mini-repo/` — a small repository with real config to review
-- `bad-config/` — configs that must fail, each in its own way
-- `synthetic-pr/` — comments, prior findings and a prior run, for recurrence
+The shipped package is `src/`; this repository's own review setup is `.yama/` — see the
+layout in [CLAUDE.md](CLAUDE.md). Behaviour lives in configuration: `config.json` (provider/model chains, timeouts, memory, learn),
+`MCP.json` (tool servers), `prompts.json` (what a review does) and `skills/` (review
+standards loaded on demand). Supporting a new forge means a different MCP server and
+skills, not new code.
 
 ## 📝 Documentation
 
@@ -221,7 +155,7 @@ We use semantic versioning and automated releases:
 1. Ensure all tests pass
 2. Update documentation
 3. Run the full check locally:
-   `pnpm run check && pnpm run lint && pnpm run build && pnpm test`
+   `pnpm run check && pnpm run lint && pnpm test`
 4. Create PR to `main` branch
 5. Merge triggers automated release
 
@@ -258,8 +192,8 @@ What actually happens
 ## Environment
 
 - OS: [e.g. macOS 15.0]
-- Node.js: [e.g. 22.11.0 — Yama requires >=22]
-- Yama: [e.g. 5.0.0]
+- Node.js: [e.g. 22.23.4 — Yama requires 22.23.4+, 24.22.1+ or 26.12.1+]
+- Yama: [e.g. 6.1.1]
 - Platform: [e.g. GitHub, Bitbucket]
 ```
 

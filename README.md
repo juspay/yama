@@ -4,7 +4,7 @@
 [![license](https://img.shields.io/npm/l/@juspay/yama.svg)](./LICENSE)
 
 **Yama is a prompts-driven pull-request review agent**, built on
-[NeuroLink](https://www.npmjs.com/package/@juspay/neurolink). ESM, Node >= 22.
+[NeuroLink](https://www.npmjs.com/package/@juspay/neurolink). ESM, Node 22.23.4+ / 24.22.1+ / 26.12.1+.
 
 Everything is driven by config files in your repository — no code changes to
 adopt, tune, or switch providers:
@@ -211,14 +211,14 @@ memory.
 
 ## Repository layout
 
-The published package is `reviewer/` (`index.mjs` + `init.mjs`) — the bin,
-`yama`, points there. The v5 engine remains in `src/` for reference during the
-transition and is no longer published; its removal is tracked separately.
+The published package is `src/` (`index.mjs`, `init.mjs`, `learn.mjs`) — the
+bin, `yama`, points there. There is no build step. `.yama/` is this
+repository's own Yama setup (config, prompts, skills, committed memory); CI
+runs `yama` from inside it.
 
 ```bash
 pnpm install
-pnpm run lint         # eslint
-pnpm run check        # tsc over src/ and test/
-pnpm run build        # v5 engine → dist/ (still exercised by the test suites)
-pnpm test             # e2e suites, including suite-reviewer (drives reviewer/)
+pnpm run lint         # eslint over src/ and test/
+pnpm run check        # tsc over test/
+pnpm test             # e2e suite (drives src/index.mjs)
 ```
