@@ -29,19 +29,14 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
+          check-latest: true
           cache: "pnpm"
           registry-url: https://registry.npmjs.org/
 
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build package
-        run: pnpm run build
-
       - name: Run tests
-        # After the build, not before it: the suites are end-to-end and drive
-        # dist/cli/index.js and dist/index.js, so there is nothing to test until
-        # the package is built.
         run: pnpm run test
 
   release:
@@ -67,6 +62,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
+          check-latest: true
           registry-url: "https://registry.npmjs.org"
           cache: "pnpm"
 
@@ -75,9 +71,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
-
-      - name: Build package
-        run: pnpm run build
 
       - name: Release with semantic-release
         run: npx semantic-release
@@ -89,6 +82,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
+          check-latest: true
           registry-url: "https://npm.pkg.github.com"
           scope: "@juspay"
 

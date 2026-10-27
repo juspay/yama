@@ -52,11 +52,11 @@ git push origin feat/new-pr-automation
 git checkout -b feat/new-pr-automation
 
 # 2. Make multiple commits
-git add src/core/
-git commit -m "feat(core): add PR analysis engine"
+git add src/index.mjs
+git commit -m "feat(reviewer): add PR analysis prompt"
 
-git add src/ai/
-git commit -m "feat(ai): add description enhancement"
+git add .yama/skills/
+git commit -m "feat(reviewer): add description skill"
 
 git add tests/
 git commit -m "test(automation): add PR automation tests"

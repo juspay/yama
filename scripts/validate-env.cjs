@@ -10,14 +10,14 @@
  * a local diff needs no forge token, and CI must not be told it does. What it
  * enforces is that every name an operator has to set appears in .env.example,
  * because nothing else in the repository can tell them — Yama names credentials
- * by env var NAME inside .yama/mcp.yaml and never carries a value.
+ * by env var NAME inside MCP.json and never carries a value.
  */
 
 const fs = require("fs");
 const path = require("path");
 
 // Credentials a real run needs a value for. The model provider is read by the
-// engine; the forge token is interpolated into .yama/mcp.yaml as ${VAR}.
+// engine; the forge token is interpolated into MCP.json as ${VAR}.
 const REQUIRED_ENV_VARS = [
   "LITELLM_API_KEY",
   "LITELLM_BASE_URL",
@@ -30,7 +30,6 @@ const OPTIONAL_ENV_VARS = [
   "LANGFUSE_PUBLIC_KEY",
   "LANGFUSE_SECRET_KEY",
   "LANGFUSE_BASE_URL",
-  "YAMA_GIT_USER",
 ];
 
 function validateEnvironmentConfig() {

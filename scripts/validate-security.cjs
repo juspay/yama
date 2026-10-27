@@ -76,7 +76,6 @@ const SECURITY_PATTERNS = [
     severity: "low",
     description: "Console statement (should use logger in production)",
     excludeFiles: [
-      /src\/cli\//,
       /test-.*\.js$/,
       /\.test\./,
       /\.spec\./,
@@ -103,11 +102,6 @@ const EXCLUDED_PATHS = [
   // Test fixtures deliberately contain unsafe-looking code — a diff with an
   // eval() in it is the input a gate test needs. Tests are not published.
   "test/",
-  // Yama's own run store: banked stage output, worker reports, and diffs of
-  // whatever was under review. It is generated and gitignored, and its contents
-  // belong to the reviewed repository, not this one — scanning it reports
-  // findings about someone else's code and fails `pnpm run validate` for it.
-  ".yama/artifacts",
 ];
 
 function shouldExcludeFile(filePath) {

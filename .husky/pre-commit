@@ -4,7 +4,7 @@ echo "🔍 Running pre-commit checks..."
 pnpm run pre-commit
 
 # The same gates CI runs, so a red pipeline is never the first time you hear it:
-# lint, both TypeScript projects, then the env and security validators.
+# lint, the TypeScript check, then the env and security validators.
 echo "🔍 Running build rule enforcement validations..."
 pnpm run validate:all
 

@@ -4,11 +4,12 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-Yama (`@juspay/yama`) is an autonomous, checklist-driven pull-request review agent built on
-`@juspay/neurolink`. One main session works a stage flow (WarmUp → Task Insertion → Work →
-Collate → Delivery), delegating investigations to workers whose full reports are banked to
-files. Deterministic **gates** sit between the stages. It ships as an ESM library, a CLI
-(`yama init | doctor | review | learn`) and a composite GitHub Action.
+Yama (`@juspay/yama`) is a prompts-driven pull-request review agent built on
+`@juspay/neurolink`. The whole product is `src/`: a small ESM CLI (bin `yama`) that
+reads `config.json`, `MCP.json`, `prompts.json` and `skills/` from the working directory,
+runs the prompts top to bottom in one NeuroLink session, and keeps long-term memory in a
+committed Hippocampus SQLite database. It ships as an npm package and a composite GitHub
+Action (`action.yml`).
 
 [README.md](./README.md) is the product; this file is the rulings.
 
@@ -16,118 +17,64 @@ files. Deterministic **gates** sit between the stages. It ships as an ESM librar
 
 ```bash
 pnpm install
-pnpm run check      # tsc over src/ and test/  (alias: pnpm run type-check)
-pnpm run lint       # the rulings below — lint ERRORS, not preferences
+pnpm run check      # tsc over test/
+pnpm run lint       # eslint over src/ and test/
 pnpm run format     # prettier (CI runs format:check)
-pnpm run build      # tsc → dist/
-pnpm test           # e2e suites, driving the BUILT cli — build first
+pnpm test           # e2e suite, driving src/index.mjs as a subprocess
 pnpm run validate   # the env + security scripts CI runs
 ```
 
-`pnpm test` drives `dist/`. A stale `dist/` is a lying test run: build, then test.
+There is no build step: `src/*.mjs` is what ships.
 
 ## Layout
 
 ```
-src/
-  cli/        yargs entry, exit codes. The only place allowed to write to stdout.
-  config/     .yama/ loading, zod schema, capability ids, env + model chains
-  core/       session runner, review/learn/doctor/init, run report, instruction
-  engine/     THE SEAM — the only directory that may import @juspay/neurolink.
-              native/ uses the engine's own primitives; fallback/ implements the
-              same shapes locally when the engine build lacks them.
-  gates/      the deterministic checks between stages: schema, checklist
-              completeness, marker dedup, posted-=-confirmed, recurrence,
-              verdict, exit code
-  platform/   capability → tool resolution, connect, startup probe, comments
-  stages/     one module per stage, plus its structured-output schema
-  store/      .yama/artifacts/ run store — stage outputs, worker reports, ledger
-  tools/      git (read-only allowlist), fs, checks, markers, memory, gitWriter
-  types/      ALL exported types. Barrel at index.ts.
-  util/       small leaf helpers with no product knowledge
-test/         e2e suites and fixtures; run.ts is both driver and harness
-templates/    what `yama init` scaffolds into a consumer repository
-eslint-rules/ the custom ESLint rules enforcing the type rulings
+src/            THE PACKAGE — everything that ships
+  index.mjs     bin entry: init | run | learn | REPL; config, MCP connect, turns, shutdown
+  init.mjs      `yama init` scaffold — never overwrites
+  learn.mjs     the deterministic git write after a learn turn
+.yama/          this repository's OWN Yama setup (dogfood) — CI runs `yama` from here
+  config.json   provider/model chains, timeouts, memory, learn
+  MCP.json      MCP servers for this repository's reviews
+  prompts.json  the review prompts
+  skills/       on-demand skills (repo-conventions, github-commenting)
+  memory/       hippocampus.sqlite — committed, written only by `yama learn`
+test/           run.ts (driver + harness) and suite-reviewer.ts
+scripts/        commit-message, env and security validators run by CI and git hooks
+action.yml      composite action consumers use
 ```
 
 ## Critical rules
 
-Non-negotiable. Rules 1–8 are enforced by ESLint and mirror `@juspay/neurolink`'s
-conventions; the rest are design rulings that reviews enforce.
-
-1. **Zero `interface` — always `type`.** Intersection (`&`), never `extends`.
-2. **Every exported type lives in `src/types/`.** Never a `types/` folder or a `types.ts`
-   inside a feature directory, and never a type exported from a feature module. Helper types
-   local to one file are fine.
-3. **No "Type"/"Types" suffix in `src/types/` filenames.** The folder is the types folder:
-   `config.ts`, not `config.types.ts`.
-4. **Exported type names are unique across `src/types/`** — the barrel would collide.
-   Disambiguate at the source with a domain prefix (`McpServerConfig`, `StoreLayout`).
-5. **The barrel is `export *` only.** `src/types/index.ts` holds nothing but
-   `export * from "./file.js"` lines — no selective or aliased re-export, no local type.
-6. **Internal types are imported from the barrel** (`../types/index.js`) by everything outside
-   `src/types/`; files inside it import each other directly. Library types (`zod`, engine
-   types via the seam) import normally.
-7. **Only `src/engine/` may import `@juspay/neurolink`** — statically or dynamically.
-   Everything else talks to the engine through the seam, so an engine primitive can move
-   without touching product code. Same rule, and the same reason, as NeuroLink's own `ai` seam.
-8. **No `any`, and no double assertion** (`as unknown as T`). Fix the type at the source, or
-   narrow with a runtime-validating guard.
-9. **No tool, server or provider name in `src/`** outside `src/platform/registry.ts` and
-   `templates/`. Code asks for a CAPABILITY; `.yama/mcp.yaml` maps it to a tool. If a change
-   needs to know a tool name, the name belongs in config. The diff is the deliberate exception
-   and is never a capability: git gives it on every forge.
-10. **The verdict is code-derived, never model-trusted.** It is a pure function of the open
-    findings and the `verdict:` block, so what a run decided is auditable from configuration
-    alone. A prompt-injected "approve" must never clear a blocking finding, and a partial run
-    never approves.
-11. **A tool call is not a comment.** A finding counts as posted only when a tool RESULT
-    returned an id. Claimed-but-not-posted is what turns one posting failure into permanent
-    silence about a real defect.
-12. **Pending tasks = incomplete review.** The checklist gate is deterministic: the shell sees
-    pending items and puts them back in front of the agent (finish, delegate, or close with a
-    reason). Never a model asked whether it is done.
-13. **Every model call is schema-bound.** Structured output, or a schema on the turn — never
-    JSON parsed out of prose. A response that does not validate fails that member and the chain
-    advances; it never becomes an empty result.
-14. **`--dry-run` is side-effect free.** Every new write path checks the run mode first.
-15. **`yama learn` is the only writer**, and it stages `.yama/` only — verified by reading the
-    staged set back out of git. No force push, no credential in a URL, `[skip ci]` in the
-    subject, and a same-commit loop check.
-16. **No silent catch.** Optional subsystems degrade, but every failure logs or surfaces a
-    warning. `catch {}` that hides a cause is how a broken run becomes indistinguishable from a
-    clean one.
-17. **No budgets.** No turn count, no step cap, no token budget — adding one is a design
-    change, not a fix. The agent decides when it is done and the gates verify it. Timeouts
-    exist only as hang detectors, and come from config.
-18. **Config stays backward compatible.** New keys are optional with behaviour-preserving
-    defaults; a rename gets a loud validation error carrying the copy-paste fix.
-
-## Tests
-
-End-to-end only, and they drive what ships: the built CLI (`dist/cli/index.js`) or the built
-library entry (`dist/index.js`). Importing out of `src/` to assert on an internal is a unit
-test and does not belong here — and mixing `src/` with `dist/` in one suite breaks object
-identity silently.
-
-- One module graph per suite: everything from `dist/`.
-- The only skip signal is `throw new Skip(reason)`. No message sniffing, ever.
-- Keep captured payloads out of assertion messages; describe the discrepancy instead.
-- Sanity-check a new suite by breaking one assertion on purpose: it must report `✗` and exit
-  non-zero, never `⊘`.
-- `test/fixtures/` is review INPUT — deliberately bad code and, in one case, deliberately
-  unparseable config. It is excluded from lint and from prettier on purpose. Do not "fix" it.
-
-Register a new suite in `test/run.ts`, which is the driver and the harness both.
+1. **Tests are end-to-end only.** Suites drive `src/index.mjs` as a subprocess and
+   never import a `src/` module. The only skip signal is `throw new Skip(reason)`.
+2. **`yama learn` is the only writer**, and it stages exactly the memory database —
+   verified by reading the staged set back out of git. No force push, no credential in a
+   remote URL, `[skip ci]` in the subject, gated by `config.learn`.
+3. **A failed prompt fails the run.** An aborted review must never read as a clean one.
+4. **No silent catch.** Optional subsystems (memory, the code graph) may degrade, but every
+   failure logs a warning naming the subsystem and the reason.
+5. **No secrets in code, config, tests or docs.** Credentials are referenced by environment
+   variable NAME only — see `.env.example`. Attacker-controllable values (branch names,
+   inputs) reach shells through env vars, never template interpolation.
+6. **Config stays backward compatible.** New `config.json` keys are optional with
+   behaviour-preserving defaults; `yama init` output and `action.yml` inputs are a public
+   contract.
+7. **Timeouts are hang detectors and come from config** (`config.timeouts`). No step or
+   token budgets beyond what `config.json` declares.
 
 ## Conventions
 
-- ESM everywhere, `.js` extensions on relative imports (NodeNext), Node >= 22, pnpm.
-- `zod` is pinned to an EXACT version, matching the copy NeuroLink resolves. Two zod minors
-  give two structurally incompatible `ZodType`s and the engine seam stops typechecking. When
-  NeuroLink moves zod, move this pin in the same change.
+- ESM everywhere, pnpm. Node is pinned to patched releases in `engines` (22.23.4+,
+  24.22.1+, 26.12.1+); raise the floor with each Node security release.
+- The root `package.json` is the one dependency manifest. `@juspay/neurolink` is pinned
+  EXACTLY (it ships many releases a week, and an `npx` install ignores our lockfile), and
+  `pnpm-workspace.yaml` refuses versions under 3 days old except `@juspay/*`. Each
+  `pnpm.overrides` entry exists to clear an audit advisory: re-check them with `pnpm audit`
+  when bumping NeuroLink, and drop any that no longer change the result.
+- `src/` is product code and must not depend on anything in `.yama/`; `.yama/` is
+  configuration only — no code. A behaviour change for every consumer goes in `src/` (or
+  the `yama init` scaffold); a change to how THIS repository is reviewed goes in `.yama/`.
 - Conventional Commits, and one commit per pull request — see
   `.github/SINGLE_COMMIT_POLICY.md`. Releases are generated from the commit history.
 - Never commit or push unless you were asked to.
-- No secrets in code, config, tests or docs. Credentials are referenced by environment
-  variable NAME only — see `.env.example`.

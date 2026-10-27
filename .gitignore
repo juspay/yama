@@ -107,13 +107,6 @@ temp/
 *.sln
 *.sw?
 
-# Local configuration files
-yama.config.yaml
-yama.config.yml
-yama.config.json
-.yamarc
-.yamarc.json
-
 # Test files (temporary)
 test-*.js
 simple-test.js
@@ -128,11 +121,3 @@ simple-test.js
 *.old.js
 *.backup.js
 .claude/
-# Yama's own run store: stage outputs, worker reports, the findings ledger.
-# Carried between runs by CI artifacts, never committed.
-.yama/artifacts/
-
-# Written at the repo root by `pnpm run quality:metrics`. A snapshot of one
-# machine's lint/build/test/audit numbers — regenerated on demand, never a
-# source of truth worth committing.
-quality-metrics.json

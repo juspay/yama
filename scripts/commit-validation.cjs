@@ -34,22 +34,13 @@ const VALID_TYPES = [
   "revert", // Revert previous commit
 ];
 
-// Valid scopes (optional but recommended). One entry per top-level directory under
-// src/, plus the few things that live outside it. A scope outside this list is a
+// Valid scopes (optional but recommended). A scope outside this list is a
 // WARNING, never an error — the list is a nudge towards the layout, not a gate.
 const VALID_SCOPES = [
-  "cli",
-  "config",
-  "core",
-  "engine",
-  "gates",
-  "platform",
-  "stages",
-  "store",
-  "tools",
-  "types",
-  "util",
-  "templates",
+  "reviewer",
+  "src",
+  "yama",
+  "release",
   "action",
   "ci",
   "deps",

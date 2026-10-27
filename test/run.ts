@@ -1,15 +1,12 @@
 /**
- * Yama's e2e test driver and harness (TASKS:0.5). Run with `pnpm test` (tsx).
+ * Yama's e2e test driver and harness. Run with `pnpm test` (tsx).
  *
  * Doctrine, adopted from NeuroLink's CLAUDE.md:
  *
- * - **Rule 15 — end-to-end only.** A suite must exercise a surface Yama actually
- *   ships: the BUILT CLI (`dist/cli/index.js`) or the BUILT library entry
- *   (`dist/index.js`). Importing out of `src/` to assert on an internal is a unit
- *   test and does not belong here.
- * - **One module graph per suite.** `dist/` is the artifact callers load; `src/` is
- *   a second copy of the same code. Mixing them breaks object identity silently.
- *   Suites take everything from `dist/`.
+ * - **End-to-end only.** A suite exercises what Yama ships — `src/index.mjs`,
+ *   driven as a subprocess. Yama needs no build step, so the file in the
+ *   repository IS the artifact. Importing a `src/` module to assert on an
+ *   internal is a unit test and does not belong here.
  * - **Keep payloads out of assertion messages.** In NeuroLink this mattered because
  *   its skip classifier reads message text, so a message quoting a payload could
  *   downgrade a real failure to a skip. Yama removes that hazard at the root: the
@@ -22,8 +19,7 @@
  * `✗` and exit non-zero, never `⊘`.
  */
 import { spawn, type SpawnOptions } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -33,19 +29,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** Package root — the thing under test. */
 export const REPO_ROOT = path.resolve(HERE, "..");
-/** Built CLI entry. Suites drive this; `src/cli/index.ts` is never imported. */
-export const CLI_ENTRY = path.join(REPO_ROOT, "dist", "cli", "index.js");
-/** Built library entry. The only module graph a suite may import from. */
-export const DIST_ENTRY = path.join(REPO_ROOT, "dist", "index.js");
-/** Fixture repos driven by the suites. */
-export const FIXTURES = path.join(HERE, "fixtures");
-
-/**
- * A module of the BUILT package other than the library entry — the engine seam and its
- * fallbacks ship as their own modules, and a suite must drive the artifact, not `src/`.
- */
-export const distModule = (relative: string): string =>
-  path.join(REPO_ROOT, "dist", relative);
 
 /** Scratch directory for one test. Removed by `withTempDir`, whatever the test does. */
 export async function withTempDir<T>(
@@ -59,57 +42,6 @@ export async function withTempDir<T>(
     await rm(dir, { recursive: true, force: true });
   }
 }
-
-/** The `.yama/yama.yaml` a stage suite gets unless it asks for a different one. */
-export const WORKSPACE_YAMA_YAML = [
-  "models:",
-  "  main:",
-  "    provider: google-ai",
-  "    model: gemini-2.5-flash",
-  "pool:",
-  "  tier: low",
-  "",
-].join("\n");
-
-/**
- * A git repository with a minimal, schema-valid `.yama/` — the input every stage suite
- * needs. One commit, then an uncommitted edit, so the local diff is never empty.
- */
-export async function gitWorkspace(
-  dir: string,
-  options: { yamaYaml?: string } = {},
-): Promise<void> {
-  await mkdir(path.join(dir, ".yama", "rulebook"), { recursive: true });
-  await writeFile(
-    path.join(dir, ".yama", "yama.yaml"),
-    options.yamaYaml ?? WORKSPACE_YAMA_YAML,
-    "utf8",
-  );
-  await writeFile(
-    path.join(dir, ".yama", "mcp.yaml"),
-    "servers: {}\ncapabilities: {}\n",
-    "utf8",
-  );
-  await writeFile(
-    path.join(dir, ".yama", "rulebook", "index.md"),
-    "# Rules\n\n- Never log a token.\n",
-    "utf8",
-  );
-  const git = (args: string[]): Promise<ProcessResult> =>
-    runCommand("git", args, { cwd: dir });
-  await git(["init", "-q", "-b", "main"]);
-  await git(["config", "user.email", "test@example.com"]);
-  await git(["config", "user.name", "Yama Test"]);
-  await git(["config", "commit.gpgsign", "false"]);
-  await writeFile(path.join(dir, "app.ts"), "export const a = 1;\n", "utf8");
-  await git(["add", "-A"]);
-  await git(["commit", "-q", "-m", "initial"]);
-  await writeFile(path.join(dir, "app.ts"), "export const a = 2;\n", "utf8");
-}
-
-/** Whether `pnpm run build` has produced the surfaces suites drive. */
-export const isBuilt = (): boolean =>
-  existsSync(CLI_ENTRY) && existsSync(DIST_ENTRY);
 
 /**
  * The one skip signal. Classification is `instanceof` only — deliberately not
@@ -233,22 +165,6 @@ export function runCommand(
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
-  });
-}
-
-/** Run the BUILT CLI: `node dist/cli/index.js <args>`. */
-export function runCLI(
-  args: readonly string[],
-  options: {
-    cwd?: string;
-    env?: Record<string, string>;
-    timeoutMs?: number;
-  } = {},
-): Promise<ProcessResult> {
-  return runCommand("node", [CLI_ENTRY, ...args], {
-    cwd: options.cwd ?? REPO_ROOT,
-    env: { ...process.env, NO_COLOR: "1", ...(options.env ?? {}) },
-    timeoutMs: options.timeoutMs,
   });
 }
 
@@ -376,20 +292,7 @@ export function defineSuite(suiteName: string): {
  *
  * Keeping evaluation synchronous lets the suite resolve its import immediately.
  */
-const SUITES: readonly string[] = [
-  "./suite-reviewer.js",
-  "./suite-cli.js",
-  "./suite-store.js",
-  "./suite-tools.js",
-  "./suite-engine.js",
-  "./suite-native.js",
-  "./suite-session.js",
-  "./suite-gates.js",
-  "./suite-work.js",
-  "./suite-platform.js",
-  "./suite-recurrence.js",
-  "./suite-learn.js",
-];
+const SUITES: readonly string[] = ["./suite-reviewer.js"];
 
 const summarize = (): void => {
   const total = passed + failed + skipped;
@@ -408,11 +311,6 @@ const summarize = (): void => {
       console.log(`    ${colors.red}✗${colors.reset} ${f.suite} > ${f.test}`);
       console.log(`      ${f.reason.split("\n")[0]}`);
     }
-  }
-  if (passed === 0 && failed === 0) {
-    console.log(
-      `\n  ${colors.yellow}nothing executed — build first: pnpm run build${colors.reset}`,
-    );
   }
   console.log(`  RESULT: ${failed > 0 ? "FAIL" : "PASS"}`);
   console.log(`${"=".repeat(60)}\n`);

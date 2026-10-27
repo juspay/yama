@@ -5,52 +5,26 @@
 # Global owners
 * @juspay/yama-maintainers
 
-# Core library and engine
-/src/core/ @juspay/yama-core
-/src/features/ @juspay/yama-core
-/src/index.ts @juspay/yama-core
-
-# CLI components
-/src/cli/ @juspay/yama-cli
-/src/cli/commands/ @juspay/yama-cli
-
-# AI and review features
-/src/features/CodeReviewer.ts @juspay/yama-ai
-/src/features/PRDescriptionEnhancer.ts @juspay/yama-ai
-/src/ai/ @juspay/yama-ai
-
-# Platform integrations
-/src/platforms/ @juspay/yama-platforms
-/src/platforms/bitbucket/ @juspay/yama-platforms
-/src/platforms/github/ @juspay/yama-platforms
-/src/platforms/gitlab/ @juspay/yama-platforms
-
-# Security and validation
-/src/security/ @juspay/yama-security
-/src/validation/ @juspay/yama-security
+# The reviewer — the shipped package
+/src/ @juspay/yama-core
+/.yama/ @juspay/yama-core
+/action.yml @juspay/yama-core
 
 # Configuration and build
 /package.json @juspay/yama-maintainers
-/tsconfig*.json @juspay/yama-maintainers
-/yama.config.yaml @juspay/yama-maintainers
-/yama.config.example.yaml @juspay/yama-maintainers
+/tsconfig.json @juspay/yama-maintainers
 
 # GitHub workflows and settings
 /.github/ @juspay/yama-maintainers
 /.github/workflows/ @juspay/yama-devops
 
 # Documentation
-/docs/ @juspay/yama-docs
 /README.md @juspay/yama-docs
 /CHANGELOG.md @juspay/yama-docs
 /CONTRIBUTING.md @juspay/yama-docs
 
 # Tests
-/src/**/*.test.ts @juspay/yama-testing
-/tests/ @juspay/yama-testing
+/test/ @juspay/yama-testing
 
 # Scripts and tools
 /scripts/ @juspay/yama-devops
-
-# Memory bank and context
-/memory-bank/ @juspay/yama-docs
