@@ -1,3 +1,9 @@
+## [6.1.3](https://github.com/juspay/yama/compare/v6.1.2...v6.1.3) (2026-11-04)
+
+### Bug Fixes
+
+* **reviewer:** delegation warning says bump neurolink ([482ecdf](https://github.com/juspay/yama/commit/482ecdf0c971f29b33b6be24997e1a1b1953f0d1))
+
 ## [6.1.2](https://github.com/juspay/yama/compare/v6.1.1...v6.1.2) (2026-10-27)
 
 ## [6.1.1](https://github.com/juspay/yama/compare/v6.1.0...v6.1.1) (2026-09-01)
