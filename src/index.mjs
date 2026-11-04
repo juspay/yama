@@ -241,7 +241,7 @@ if (
   typeof nl.registerDelegationTools !== "function"
 ) {
   console.warn(
-    "⚠ delegation requested but this @juspay/neurolink build has no registerDelegationTools — rebuild neurolink (pnpm run build) and reinstall",
+    "⚠ delegation requested but this @juspay/neurolink build has no registerDelegationTools — bump @juspay/neurolink to a release that ships it and reinstall",
   );
 }
 if (
